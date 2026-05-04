@@ -2,7 +2,7 @@ services:
   haven-va:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file: /volume1/docker/haven-va/data/.env
     volumes:
       - /volume1/docker/haven-va/data:/data
     environment:
