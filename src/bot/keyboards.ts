@@ -5,12 +5,8 @@
 
 import { InlineKeyboard } from "grammy";
 
-export function priorityKeyboard(): InlineKeyboard {
-  return new InlineKeyboard()
-    .text("🔴 alta", "priority:alta")
-    .text("🟡 média", "priority:media")
-    .text("🟢 baixa", "priority:baixa")
-    .text("❌ ignorar", "priority:cancel");
+export function taskUndoKeyboard(pageId: string): InlineKeyboard {
+  return new InlineKeyboard().text("↩ Desfazer", `task:undo:${pageId}`);
 }
 
 export function editKeyboard(): InlineKeyboard {

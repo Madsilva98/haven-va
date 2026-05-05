@@ -6,6 +6,7 @@ const newTask = {
     owner: "Madalena",
     area: "Tech",
     why: "y",
+    priority: "Média",
 };
 const logIntent = { type: "LOG", text: "z", tags: [] };
 describe("batch", () => {

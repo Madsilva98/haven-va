@@ -17,11 +17,7 @@ import { confirmationMessages } from "../messages/errors.js";
 import * as notion from "../notion.js";
 import { record } from "../feedback.js";
 import { getPending, commitPending, cancelPending } from "../state/pending.js";
-const PRIORITY_MAP = {
-    alta: "Alta",
-    media: "Média",
-    baixa: "Baixa",
-};
+import { checkAndUnblockDependents } from "./dependencies.js";
 export async function handleCallback(ctx) {
     const query = ctx.callbackQuery;
     if (!query)
@@ -48,30 +44,16 @@ export async function handleCallback(ctx) {
         await ctx.answerCallbackQuery({ text: confirmationMessages.pendingExpired() });
         return;
     }
-    const [scope, action] = data.split(":");
+    const parts = data.split(":");
+    const scope = parts[0];
+    const action = parts[1];
     try {
-        if (scope === "priority" && proposal.type === "new_task") {
-            if (action === "cancel") {
-                await record("false_positive", proposal.originalMsg, senderName, proposal.extraction, "❌ ignorar");
-                await cancelPending(botMessageId);
-                await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-                await ctx.reply(confirmationMessages.newTaskIgnored(), {
-                    reply_parameters: { message_id: botMessageId },
-                });
-                await ctx.answerCallbackQuery();
-                return;
-            }
-            const priority = action ? PRIORITY_MAP[action] : undefined;
-            if (!priority) {
-                await ctx.answerCallbackQuery();
-                return;
-            }
-            const createdPageId = await notion.createTask(proposal.extraction, priority, proposal.originalMsg, proposal.originalSender);
+        if (scope === "task" && action === "undo") {
+            const pageId = parts.slice(2).join(":");
+            await notion.archivePage(pageId);
             notion.invalidateOpenTasksCache();
-            await record("confirmed", proposal.originalMsg, senderName, proposal.extraction, `priority:${priority}`);
-            await commitPending(botMessageId, createdPageId);
             await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-            await ctx.reply(confirmationMessages.newTaskAdded(priority), {
+            await ctx.reply("↩ task removida", {
                 reply_parameters: { message_id: botMessageId },
             });
             await ctx.answerCallbackQuery();
@@ -90,6 +72,10 @@ export async function handleCallback(ctx) {
             }
             if (action === "apply") {
                 await notion.updateTask(proposal.extraction.targetTaskId, proposal.extraction.field, proposal.extraction.newValue);
+                if (proposal.extraction.field === "status" &&
+                    proposal.extraction.newValue === "Feito") {
+                    await checkAndUnblockDependents(proposal.extraction.targetTaskId, proposal.extraction.targetTitle);
+                }
                 notion.invalidateOpenTasksCache();
                 await record("confirmed", proposal.originalMsg, senderName, proposal.extraction, "✅ atualiza");
                 await commitPending(botMessageId, proposal.extraction.targetTaskId);

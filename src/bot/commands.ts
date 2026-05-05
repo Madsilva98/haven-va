@@ -14,7 +14,9 @@ import { log } from "../lib/log.js";
 import { HELP_MESSAGE } from "../messages/help.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
 import { formatHoje, rankTasks } from "../messages/cycle.js";
+import { formatDashboard } from "../messages/dashboard.js";
 import * as notion from "../notion.js";
+import { currentWeekLabel } from "../lib/week.js";
 import type { FounderName } from "../types.js";
 import { buildFreeTimeDesc } from "../crons/daily-madalena.js";
 import { extractIntents } from "./multi-intent.js";
@@ -60,11 +62,14 @@ export async function handleTask(ctx: Context): Promise<void> {
   };
 
   const intents = await extractIntents(chatCtx);
-  const newTask = intents.find((i) => i.type === "NEW_TASK");
-  if (!newTask) {
-    await ctx.reply("não consegui extrair — escreve com mais detalhe");
-    return;
-  }
+  const newTask = intents.find((i) => i.type === "NEW_TASK") ?? {
+    type: "NEW_TASK" as const,
+    title: description.slice(0, 80),
+    owner: "Unassigned" as const,
+    area: "Outro" as const,
+    why: "levantado via /task",
+    priority: "Média" as const,
+  };
 
   await proposeNewTask(ctx, chatCtx, newTask);
 }
@@ -129,5 +134,19 @@ export async function handleStatus(ctx: Context): Promise<void> {
   } catch (err) {
     log.error("status.failed", { err: String(err) });
     await ctx.reply("erro a buscar status");
+  }
+}
+
+export async function handleDashboard(ctx: Context): Promise<void> {
+  try {
+    const [focus, toDiscuss] = await Promise.all([
+      notion.getFounderFocusForWeek(currentWeekLabel()),
+      notion.getToDiscussPending(),
+    ]);
+    const text = formatDashboard({ focus, toDiscuss });
+    await ctx.reply(text, { parse_mode: "MarkdownV2" });
+  } catch (err) {
+    log.error("commands.dashboard.failed", { err: String(err) });
+    await ctx.reply("erro a carregar dashboard — tenta outra vez");
   }
 }

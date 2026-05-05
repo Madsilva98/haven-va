@@ -19,8 +19,9 @@ import * as notion from "../notion.js";
 import { getRecentActions } from "../state/pending.js";
 // Phase 1
 import { handleCallback as handlePhase1Callback } from "./callbacks.js";
-import { handleHelp, handleHoje, handleStart, handleStatus, handleTask, } from "./commands.js";
+import { handleDashboard, handleHelp, handleHoje, handleStart, handleStatus, handleTask, } from "./commands.js";
 import { shouldProcess } from "./filter.js";
+import { isQuery, handleQuery } from "./query.js";
 // Phase 1 redesign — multi-intent
 import { extractIntents } from "./multi-intent.js";
 import { route, dispatch } from "./router.js";
@@ -148,6 +149,17 @@ export function buildBot() {
             }
         }
     });
+    // Register slash commands for Telegram dropdown (fire-and-forget).
+    bot.api.setMyCommands([
+        { command: "task", description: "Criar task manualmente" },
+        { command: "hoje", description: "Ver as minhas tasks de hoje" },
+        { command: "dashboard", description: "Dashboard semanal" },
+        { command: "todiscuss", description: "Adicionar à lista de discussão" },
+        { command: "remind", description: "Criar lembrete" },
+        { command: "week", description: "Definir foco semanal" },
+        { command: "status", description: "Ver métricas do bot" },
+        { command: "help", description: "Ajuda" },
+    ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
     // Slash commands (work in both group and DM).
     bot.command("start", handleStart);
     bot.command("help", handleHelp);
@@ -170,6 +182,7 @@ export function buildBot() {
     bot.command("remind", handleRemind);
     bot.command("todiscuss", handleToDiscussCommand);
     bot.command("hoje", handleHoje);
+    bot.command("dashboard", handleDashboard);
     // Google Calendar auth — Madalena's private DM only.
     bot.command("auth", async (ctx) => {
         if (ctx.chat.type !== "private")
@@ -275,6 +288,15 @@ export function buildBot() {
             ctx.message.sticker);
         pushRecent(chatId, senderName, text);
         if (!shouldProcess({ text, isReplyToBot: false, hasNonTextMedia })) {
+            return;
+        }
+        if (isQuery(text)) {
+            try {
+                await handleQuery(ctx, text, senderName);
+            }
+            catch (err) {
+                log.error("query.group_failed", { err: String(err) });
+            }
             return;
         }
         let recentBotActions = [];

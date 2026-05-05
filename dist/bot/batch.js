@@ -25,6 +25,9 @@ const TYPE_LABELS = {
     DECISION: "decisões",
     LAUNCH_INTENT: "planos de lançamento",
     EDIT_PENDING: "correções",
+    SET_DEPENDENCY: "dependências",
+    TO_DISCUSS: "tópicos para discutir",
+    CREATE_ENTITY: "entidades criadas",
 };
 export function summarize(intents) {
     const counts = new Map();

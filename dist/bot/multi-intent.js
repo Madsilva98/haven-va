@@ -25,6 +25,13 @@ const AREAS = [
 const LAUNCH_KINDS = [
     "programa-novo", "parceria", "evento", "influencer",
 ];
+const PRIORITIES = ["Alta", "Média", "Baixa"];
+const TO_DISCUSS_URGENCIES = [
+    "Pode esperar", "Precisa de decisão rápida", "Urgente",
+];
+const ENTITY_KINDS = [
+    "projeto", "evento", "parceria", "influencer",
+];
 const EDIT_PENDING_FIELDS = [
     "owner", "area", "priority", "when", "title", "tags", "cancel",
 ];
@@ -116,6 +123,9 @@ function validateIntent(input) {
                 owner: o.owner,
                 area: o.area,
                 why: o.why,
+                priority: PRIORITIES.includes(o.priority)
+                    ? o.priority
+                    : "Média",
             };
         case "EDIT_TASK":
             return { type: "EDIT_TASK" };
@@ -176,6 +186,41 @@ function validateIntent(input) {
                 value,
             };
         }
+        case "SET_DEPENDENCY":
+            if (!isString(o.blocked) ||
+                !isString(o.prerequisite) ||
+                !OWNERS.includes(o.blockedOwner) ||
+                !OWNERS.includes(o.prerequisiteOwner))
+                return null;
+            return {
+                type: "SET_DEPENDENCY",
+                blocked: o.blocked.trim(),
+                blockedOwner: o.blockedOwner,
+                prerequisite: o.prerequisite.trim(),
+                prerequisiteOwner: o.prerequisiteOwner,
+            };
+        case "TO_DISCUSS":
+            if (!isString(o.tema))
+                return null;
+            return {
+                type: "TO_DISCUSS",
+                tema: o.tema.trim(),
+                urgencia: TO_DISCUSS_URGENCIES.includes(o.urgencia)
+                    ? o.urgencia
+                    : "Pode esperar",
+                area: AREAS.includes(o.area) ? o.area : "Outro",
+            };
+        case "CREATE_ENTITY":
+            if (!isString(o.nome) || !ENTITY_KINDS.includes(o.kind))
+                return null;
+            return {
+                type: "CREATE_ENTITY",
+                kind: o.kind,
+                nome: o.nome.trim(),
+                owner: OWNERS.includes(o.owner)
+                    ? o.owner
+                    : "Unassigned",
+            };
         default:
             return null;
     }

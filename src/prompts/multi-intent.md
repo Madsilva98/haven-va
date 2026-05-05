@@ -27,9 +27,15 @@ Future intent / assignment / open commitment.
   "title": "string, pt-PT, imperative, < 80 chars",
   "owner": "Madalena | Mafalda | Beatriz | Unassigned",
   "area": "Marketing | Operações | Parcerias | Influencers | Tech | Cliente | Financeiro | Outro",
-  "why": "string, < 120 chars, business reason or 'levantado no grupo'"
+  "why": "string, < 120 chars, business reason or 'levantado no grupo'",
+  "priority": "Alta | Média | Baixa"
 }
 ```
+
+**Priority inference:**
+- **Alta**: "urgente", "crítico", "hoje preciso", "prioridade alta", "asap", "para hoje"
+- **Baixa**: "backlog", "quando houver tempo", "sem pressa", "mais tarde", "eventual", "um dia"
+- **Média**: default — use this when no priority signal is present
 
 **Owner inference (priority order):**
 1. Explicit @mention or first-name reference of a founder ("a bia trata", "@madalena", "Beatriz fica com isso") → that founder.
@@ -130,6 +136,71 @@ Use **only** when the message clearly references a recent bot action in the buff
 **Currently only NEW_TASK / EDIT_TASK actions appear in the buffer (with `t…` / `e…` prefixes).** Other types fire-and-forget; if the user says "muda o lembrete para sexta" and no recent action matches, treat it as a fresh `REMINDER` instead.
 
 If no `ref` clearly matches and the message looks like a fresh intent, treat it as fresh.
+
+### `TO_DISCUSS` — topic that needs a group discussion
+
+Use when someone flags a subject that needs to be discussed or decided together, but no immediate task is created.
+
+Signals: "precisamos de falar sobre", "temos de discutir", "agenda para a reunião", "adiciona à lista to discuss", "to discuss:", "mete na lista de discussão", "queria levantar", "queria falar sobre".
+
+```json
+{
+  "type": "TO_DISCUSS",
+  "tema": "string, pt-PT, what needs to be discussed, < 120 chars",
+  "urgencia": "Pode esperar | Precisa de decisão rápida | Urgente",
+  "area": "Marketing | Operações | Parcerias | Influencers | Tech | Cliente | Financeiro | Outro"
+}
+```
+
+**Urgência inference:**
+- **Urgente**: "urgente", "precisa de decisão rápida", "é para esta semana"
+- **Precisa de decisão rápida**: "precisa de decisão", "em breve", "para decidirmos"
+- **Pode esperar**: default
+
+---
+
+### `CREATE_ENTITY` — create a new project, event, partner, or influencer
+
+Use when someone wants to create or register a new entity. Does NOT create a task.
+
+Signals: "cria projeto X", "novo projeto X", "nova parceria com X", "cria evento X", "há um novo influencer X", "adiciona X como parceiro", "começa projeto X", "vamos criar evento X".
+
+```json
+{
+  "type": "CREATE_ENTITY",
+  "kind": "projeto | evento | parceria | influencer",
+  "nome": "string, pt-PT, name of the entity",
+  "owner": "Madalena | Mafalda | Beatriz | Unassigned"
+}
+```
+
+**Kind inference:**
+- **projeto**: "projeto", "project"
+- **evento**: "evento", "event", "workshop", "retiro", "open day"
+- **parceria**: "parceria", "parceiro", "partner", "colaboração", "brand deal"
+- **influencer**: "influencer", "creator", "collab com"
+
+**Owner inference:** same rules as NEW_TASK.
+
+---
+
+### `SET_DEPENDENCY` — task B can only start after task A is done
+
+Use when the message explicitly states that one action depends on another completing first. Signals: "só depois de", "quando X fizer Y", "só posso fazer X depois de Y", "depende de".
+
+```json
+{
+  "type": "SET_DEPENDENCY",
+  "blocked": "title of the task that waits, pt-PT imperative",
+  "blockedOwner": "Madalena | Mafalda | Beatriz | Unassigned",
+  "prerequisite": "title of the task that must complete first, pt-PT imperative",
+  "prerequisiteOwner": "Madalena | Mafalda | Beatriz | Unassigned"
+}
+```
+
+**Examples:**
+- "eu só posso fazer a encomenda das sweats quando a Mafalda confirmar o fornecedor" → `blocked="encomendar sweats", blockedOwner="Madalena", prerequisite="confirmar fornecedor de sweatshirts", prerequisiteOwner="Mafalda"`
+- "a Bia trata do relatório mas só depois da Mafalda fechar o contrato" → `blocked="preparar relatório", blockedOwner="Beatriz", prerequisite="fechar contrato", prerequisiteOwner="Mafalda"`
 
 ---
 

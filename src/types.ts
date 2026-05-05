@@ -192,7 +192,10 @@ export type IntentType =
   | "LOG"
   | "DECISION"
   | "LAUNCH_INTENT"
-  | "EDIT_PENDING";
+  | "EDIT_PENDING"
+  | "SET_DEPENDENCY"
+  | "TO_DISCUSS"
+  | "CREATE_ENTITY";
 
 export interface NewTaskIntent {
   type: "NEW_TASK";
@@ -200,6 +203,7 @@ export interface NewTaskIntent {
   owner: OwnerValue;
   area: Area;
   why: string;
+  priority: Priority;
 }
 
 export interface EditTaskIntent {
@@ -250,6 +254,30 @@ export interface EditPendingIntent {
   value: string | null;
 }
 
+export interface SetDependencyIntent {
+  type: "SET_DEPENDENCY";
+  blocked: string;
+  blockedOwner: OwnerValue;
+  prerequisite: string;
+  prerequisiteOwner: OwnerValue;
+}
+
+export interface ToDiscussIntent {
+  type: "TO_DISCUSS";
+  tema: string;
+  urgencia: ToDiscussUrgency;
+  area: Area;
+}
+
+export type EntityKind = "projeto" | "evento" | "parceria" | "influencer";
+
+export interface CreateEntityIntent {
+  type: "CREATE_ENTITY";
+  kind: EntityKind;
+  nome: string;
+  owner: OwnerValue;
+}
+
 export type Intent =
   | NewTaskIntent
   | EditTaskIntent
@@ -257,7 +285,10 @@ export type Intent =
   | LogIntent
   | DecisionIntent
   | LaunchIntentIntent
-  | EditPendingIntent;
+  | EditPendingIntent
+  | SetDependencyIntent
+  | ToDiscussIntent
+  | CreateEntityIntent;
 
 export interface RecentAction {
   id: string;

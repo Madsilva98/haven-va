@@ -23,8 +23,8 @@ import { getRecentActions } from "../state/pending.js";
 import type { ChatContext, OpenTask, RecentAction } from "../types.js";
 import { extractIntents } from "./multi-intent.js";
 import { route } from "./router.js";
-import { shouldProcess } from "./filter.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
+import { isQuery, handleQuery } from "./query.js";
 import {
   handleWeek,
   handleWeekCallback,
@@ -117,9 +117,20 @@ export async function handleDM(ctx: Context): Promise<boolean> {
       ctx.message?.sticker,
   );
 
-  if (!shouldProcess({ text, isReplyToBot: false, hasNonTextMedia })) {
+  if (hasNonTextMedia) return true;
+
+  // Query: answer directly without intent extraction.
+  if (isQuery(text)) {
+    try {
+      await handleQuery(ctx, text, senderName);
+    } catch (err) {
+      log.error("dm.query_failed", { err: String(err) });
+    }
     return true;
   }
+
+  // DM mode: skip keyword filter — any message ≥ 4 chars goes to the pipeline.
+  if (text.trim().length < 4) return true;
 
   const chatId = ctx.chat?.id;
   if (chatId === undefined) {

@@ -20,10 +20,14 @@ import type {
   Area,
   ChatContext,
   EditPendingField,
+  EntityKind,
   FounderName,
   Intent,
   LaunchKind,
   OwnerValue,
+  Priority,
+  SetDependencyIntent,
+  ToDiscussUrgency,
 } from "../types.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
@@ -36,6 +40,13 @@ const AREAS: Area[] = [
 ];
 const LAUNCH_KINDS: LaunchKind[] = [
   "programa-novo", "parceria", "evento", "influencer",
+];
+const PRIORITIES: Priority[] = ["Alta", "Média", "Baixa"];
+const TO_DISCUSS_URGENCIES: ToDiscussUrgency[] = [
+  "Pode esperar", "Precisa de decisão rápida", "Urgente",
+];
+const ENTITY_KINDS: EntityKind[] = [
+  "projeto", "evento", "parceria", "influencer",
 ];
 const EDIT_PENDING_FIELDS: EditPendingField[] = [
   "owner", "area", "priority", "when", "title", "tags", "cancel",
@@ -145,6 +156,9 @@ function validateIntent(input: unknown): Intent | null {
         owner: o.owner as OwnerValue,
         area: o.area as Area,
         why: o.why,
+        priority: PRIORITIES.includes(o.priority as Priority)
+          ? (o.priority as Priority)
+          : "Média",
       };
     case "EDIT_TASK":
       return { type: "EDIT_TASK" };
@@ -203,6 +217,40 @@ function validateIntent(input: unknown): Intent | null {
         value,
       };
     }
+    case "SET_DEPENDENCY":
+      if (
+        !isString(o.blocked) ||
+        !isString(o.prerequisite) ||
+        !OWNERS.includes(o.blockedOwner as OwnerValue) ||
+        !OWNERS.includes(o.prerequisiteOwner as OwnerValue)
+      ) return null;
+      return {
+        type: "SET_DEPENDENCY",
+        blocked: (o.blocked as string).trim(),
+        blockedOwner: o.blockedOwner as OwnerValue,
+        prerequisite: (o.prerequisite as string).trim(),
+        prerequisiteOwner: o.prerequisiteOwner as OwnerValue,
+      };
+    case "TO_DISCUSS":
+      if (!isString(o.tema)) return null;
+      return {
+        type: "TO_DISCUSS",
+        tema: (o.tema as string).trim(),
+        urgencia: TO_DISCUSS_URGENCIES.includes(o.urgencia as ToDiscussUrgency)
+          ? (o.urgencia as ToDiscussUrgency)
+          : "Pode esperar",
+        area: AREAS.includes(o.area as Area) ? (o.area as Area) : "Outro",
+      };
+    case "CREATE_ENTITY":
+      if (!isString(o.nome) || !ENTITY_KINDS.includes(o.kind as EntityKind)) return null;
+      return {
+        type: "CREATE_ENTITY",
+        kind: o.kind as EntityKind,
+        nome: (o.nome as string).trim(),
+        owner: OWNERS.includes(o.owner as OwnerValue)
+          ? (o.owner as OwnerValue)
+          : "Unassigned",
+      };
     default:
       return null;
   }

@@ -4,6 +4,10 @@
  * summary card with [aceitar todas / rever / cancelar] buttons.
  */
 import { log } from "../lib/log.js";
+import * as notion from "../notion.js";
+function esc(v) {
+    return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 import { isBatch, postBatchCard } from "./batch.js";
 import { proposeNewTask } from "./propose-task.js";
 import { proposeEditFromContext } from "./propose-edit.js";
@@ -12,6 +16,8 @@ import { proposeDecision } from "./decisions.js";
 import { proposeLaunch } from "./launch.js";
 import { createReminderFromIntent } from "./remind.js";
 import { handleEditPending } from "./edit-pending.js";
+import { handleSetDependency } from "./dependencies.js";
+import { handleCreateEntity } from "./create-entity.js";
 export async function route(tgCtx, chatCtx, intents) {
     if (intents.length === 0)
         return;
@@ -58,6 +64,31 @@ export async function dispatch(tgCtx, chatCtx, intent) {
         case "EDIT_PENDING":
             await handleEditPending(tgCtx, chatCtx, intent);
             return;
+        case "SET_DEPENDENCY":
+            await handleSetDependency(tgCtx, chatCtx, intent);
+            return;
+        case "TO_DISCUSS":
+            await handleToDiscussIntent(tgCtx, chatCtx, intent);
+            return;
+        case "CREATE_ENTITY":
+            await handleCreateEntity(tgCtx, chatCtx, intent);
+            return;
+    }
+}
+async function handleToDiscussIntent(tgCtx, chatCtx, intent) {
+    try {
+        await notion.createToDiscuss({
+            tema: intent.tema,
+            adicionadoPor: chatCtx.sender,
+            urgencia: intent.urgencia,
+            area: intent.area,
+            resolucao: "",
+        });
+        await tgCtx.reply(`📋 adicionado ao to-discuss\n\n<b>${esc(intent.tema)}</b>\n🕐 ${intent.urgencia}`, { parse_mode: "HTML" });
+    }
+    catch (err) {
+        log.error("router.to_discuss_failed", { err: String(err) });
+        await tgCtx.reply("erro a adicionar ao to-discuss — tenta outra vez");
     }
 }
 function adaptDecision(intent, sender) {

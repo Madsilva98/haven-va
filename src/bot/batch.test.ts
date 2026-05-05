@@ -8,6 +8,7 @@ const newTask: Intent = {
   owner: "Madalena",
   area: "Tech",
   why: "y",
+  priority: "Média",
 };
 const logIntent: Intent = { type: "LOG", text: "z", tags: [] };
 

@@ -7,12 +7,19 @@
 import type { Context } from "grammy";
 
 import { log } from "../lib/log.js";
+import * as notion from "../notion.js";
 import type {
   ChatContext,
+  CreateEntityIntent,
   DecisionIntent,
   Intent,
   LaunchIntentIntent,
+  ToDiscussIntent,
 } from "../types.js";
+
+function esc(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 import { isBatch, postBatchCard } from "./batch.js";
 import { proposeNewTask } from "./propose-task.js";
@@ -22,6 +29,8 @@ import { proposeDecision, type DecisionExtraction } from "./decisions.js";
 import { proposeLaunch, type LaunchExtraction } from "./launch.js";
 import { createReminderFromIntent } from "./remind.js";
 import { handleEditPending } from "./edit-pending.js";
+import { handleSetDependency } from "./dependencies.js";
+import { handleCreateEntity } from "./create-entity.js";
 
 export async function route(
   tgCtx: Context,
@@ -88,6 +97,38 @@ export async function dispatch(
     case "EDIT_PENDING":
       await handleEditPending(tgCtx, chatCtx, intent);
       return;
+    case "SET_DEPENDENCY":
+      await handleSetDependency(tgCtx, chatCtx, intent);
+      return;
+    case "TO_DISCUSS":
+      await handleToDiscussIntent(tgCtx, chatCtx, intent);
+      return;
+    case "CREATE_ENTITY":
+      await handleCreateEntity(tgCtx, chatCtx, intent);
+      return;
+  }
+}
+
+async function handleToDiscussIntent(
+  tgCtx: Context,
+  chatCtx: ChatContext,
+  intent: ToDiscussIntent,
+): Promise<void> {
+  try {
+    await notion.createToDiscuss({
+      tema: intent.tema,
+      adicionadoPor: chatCtx.sender,
+      urgencia: intent.urgencia,
+      area: intent.area,
+      resolucao: "",
+    });
+    await tgCtx.reply(
+      `📋 adicionado ao to-discuss\n\n<b>${esc(intent.tema)}</b>\n🕐 ${intent.urgencia}`,
+      { parse_mode: "HTML" },
+    );
+  } catch (err) {
+    log.error("router.to_discuss_failed", { err: String(err) });
+    await tgCtx.reply("erro a adicionar ao to-discuss — tenta outra vez");
   }
 }
 

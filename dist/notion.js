@@ -27,6 +27,8 @@ const NOTION_TO_DISCUSS_DB_ID = process.env.NOTION_TO_DISCUSS_DB_ID;
 const NOTION_DECISIONS_DB_ID = process.env.NOTION_DECISIONS_DB_ID;
 const NOTION_CONTENT_CALENDAR_DB_ID = process.env.NOTION_CONTENT_CALENDAR_DB_ID;
 const NOTION_STUDIO_LOG_DB_ID = process.env.NOTION_STUDIO_LOG_DB_ID;
+const NOTION_PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
+const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 if (!NOTION_API_KEY) {
     throw new Error("notion: NOTION_API_KEY is required");
 }
@@ -741,20 +743,20 @@ async function setFounderFocus(entry) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID) {
         throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set — Phase 2 founder focus features disabled");
     }
-    // Find existing row by Founder (title) + Semana (select)
+    // Find existing row by Founder (title) + Semana (rich_text)
     const res = await withRetry("setFounderFocus.find", () => client.databases.query({
         database_id: NOTION_FOUNDER_FOCUS_DB_ID,
         filter: {
             and: [
                 { property: "Founder", title: { equals: entry.founder } },
-                { property: "Semana", select: { equals: entry.semana } },
+                { property: "Semana", rich_text: { equals: entry.semana } },
             ],
         },
         page_size: 1,
     }));
     const properties = {
         Founder: { title: [{ text: { content: entry.founder } }] },
-        Semana: { select: { name: entry.semana } },
+        Semana: richText(entry.semana),
         "Foco operacional": richText(entry.focoOperacional),
     };
     const existing = res.results[0];
@@ -787,7 +789,7 @@ async function getFounderFocusForWeek(week) {
         database_id: NOTION_FOUNDER_FOCUS_DB_ID,
         filter: {
             property: "Semana",
-            select: { equals: week },
+            rich_text: { equals: week },
         },
     }));
     const entries = [];
@@ -803,7 +805,7 @@ async function getFounderFocusForWeek(week) {
         }
         entries.push({
             founder: founderName,
-            semana: readSelectName(props["Semana"]) ?? week,
+            semana: readPlainText(props["Semana"]) || week,
             focoOperacional: readPlainText(props["Foco operacional"]),
         });
     }
@@ -1247,8 +1249,151 @@ async function getRecentDecisions(n) {
     log.debug("notion.recent_decisions_fetched", { count: rows.length });
     return rows;
 }
+async function setTaskDependency(blockedId, prerequisiteId) {
+    await withRetry("setTaskDependency", () => client.pages.update({
+        page_id: blockedId,
+        properties: {
+            "Depende de": { relation: [{ id: prerequisiteId }] },
+        },
+    }));
+    log.info("notion.dependency_set", { blockedId, prerequisiteId });
+}
+async function getDependentTasks(prerequisiteId) {
+    if (!NOTION_BACKLOG_DB_ID)
+        return [];
+    const res = await withRetry("getDependentTasks", () => client.databases.query({
+        database_id: NOTION_BACKLOG_DB_ID,
+        filter: {
+            and: [
+                { property: "Depende de", relation: { contains: prerequisiteId } },
+                { property: "Status", select: { equals: "Bloqueado" } },
+            ],
+        },
+    }));
+    const tasks = [];
+    for (const row of res.results) {
+        if (!("properties" in row))
+            continue;
+        tasks.push(rowToOpenTask({
+            id: row.id,
+            properties: row.properties,
+        }));
+    }
+    log.debug("notion.dependents_fetched", {
+        prerequisiteId,
+        count: tasks.length,
+    });
+    return tasks;
+}
 // silence unused-helper warning for readDateTime (kept for callers)
 void readDateTime;
+// ============================================================
+// Feature D — Create entities (project / event / partner / influencer)
+// ============================================================
+function toggleHeading(title) {
+    return {
+        type: "heading_2",
+        heading_2: {
+            rich_text: [{ type: "text", text: { content: title } }],
+            is_toggleable: true,
+        },
+    };
+}
+async function createProject(nome, owner) {
+    if (!NOTION_PROJECTS_DB_ID) {
+        throw new Error("NOTION_PROJECTS_DB_ID not set");
+    }
+    const page = await withRetry("createProject", () => client.pages.create({
+        parent: { database_id: NOTION_PROJECTS_DB_ID },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            Owner: { select: { name: owner } },
+            Status: { select: { name: "Em curso" } },
+        },
+    }));
+    await withRetry("createProject.sections", () => client.blocks.children.append({
+        block_id: page.id,
+        children: [
+            toggleHeading("📋 Tarefas"),
+            toggleHeading("💬 To Discuss"),
+            toggleHeading("📖 Histórico"),
+            toggleHeading("📝 Notas"),
+        ],
+    }));
+    log.info("notion.project_created", { pageId: page.id, nome, owner });
+    return page.id;
+}
+async function createEvent(nome, owner) {
+    if (!NOTION_EVENT_DB_ID) {
+        throw new Error("NOTION_EVENT_DB_ID not set");
+    }
+    const page = await withRetry("createEvent", () => client.pages.create({
+        parent: { database_id: NOTION_EVENT_DB_ID },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            Owner: { select: { name: owner } },
+        },
+    }));
+    await withRetry("createEvent.sections", () => client.blocks.children.append({
+        block_id: page.id,
+        children: [
+            toggleHeading("📅 Detalhes"),
+            toggleHeading("🎯 Objetivos"),
+            toggleHeading("📋 Tarefas"),
+            toggleHeading("📝 Notas"),
+        ],
+    }));
+    log.info("notion.event_created", { pageId: page.id, nome, owner });
+    return page.id;
+}
+async function createPartner(nome, owner) {
+    if (!NOTION_PARTNER_DB_ID) {
+        throw new Error("NOTION_PARTNER_DB_ID not set");
+    }
+    const page = await withRetry("createPartner", () => client.pages.create({
+        parent: { database_id: NOTION_PARTNER_DB_ID },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            Owner: { select: { name: owner } },
+            Status: { select: { name: "A contactar" } },
+        },
+    }));
+    await withRetry("createPartner.sections", () => client.blocks.children.append({
+        block_id: page.id,
+        children: [
+            toggleHeading("🤝 Contactos"),
+            toggleHeading("📋 Tarefas"),
+            toggleHeading("📖 Histórico"),
+            toggleHeading("📝 Notas"),
+        ],
+    }));
+    log.info("notion.partner_created", { pageId: page.id, nome, owner });
+    return page.id;
+}
+async function createInfluencer(nome, owner) {
+    if (!NOTION_INFLUENCER_DB_ID) {
+        throw new Error("NOTION_INFLUENCER_DB_ID not set");
+    }
+    const page = await withRetry("createInfluencer", () => client.pages.create({
+        parent: { database_id: NOTION_INFLUENCER_DB_ID },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            Owner: { select: { name: owner } },
+            Status: { select: { name: "A identificar" } },
+        },
+    }));
+    await withRetry("createInfluencer.sections", () => client.blocks.children.append({
+        block_id: page.id,
+        children: [
+            toggleHeading("📱 Stats"),
+            toggleHeading("📋 Tarefas"),
+            toggleHeading("📖 Histórico"),
+            toggleHeading("📝 Notas"),
+        ],
+    }));
+    log.info("notion.influencer_created", { pageId: page.id, nome, owner });
+    return page.id;
+}
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, logFeedback, getRecentFeedback, createPending, getPending, deletePending, markCommitted, markCancelled, archivePage, getRecentActions, 
 // Phase 2
@@ -1258,7 +1403,11 @@ getPartnersStale, getInfluencersStale, getContentCalendarAlerts, createReminder,
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Phase 1 redesign — Studio Log
-createLogEntry, };
+createLogEntry, 
+// Dependencies
+setTaskDependency, getDependentTasks, 
+// Feature D — entities
+createProject, createEvent, createPartner, createInfluencer, };
 export const notion = {
     createTask,
     updateTask,
@@ -1296,4 +1445,12 @@ export const notion = {
     getRecentDecisions,
     // Phase 1 redesign — Studio Log
     createLogEntry,
+    // Dependencies
+    setTaskDependency,
+    getDependentTasks,
+    // Feature D — entities
+    createProject,
+    createEvent,
+    createPartner,
+    createInfluencer,
 };
