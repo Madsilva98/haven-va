@@ -858,7 +858,7 @@ async function getPartnersStale(category) {
             const status = readSelectName(props["Status"]);
             rows.push({
                 id: row.id,
-                nome: readPlainText(props["Nome"]),
+                nome: readPlainText(props["Name"]),
                 categoria: cat,
                 owner: (readSelectName(props["Owner"]) ?? "Unassigned"),
                 status,
@@ -906,7 +906,7 @@ async function getInfluencersStale(category) {
             const status = readSelectName(props["Status"]);
             rows.push({
                 id: row.id,
-                nome: readPlainText(props["Nome / Handle"]),
+                nome: readPlainText(props["Name"]),
                 instagram: readUrl(props["Instagram"]),
                 owner: (readSelectName(props["Owner"]) ?? "Unassigned"),
                 status,
@@ -1107,7 +1107,7 @@ async function createToDiscuss(item) {
         throw new Error("NOTION_TO_DISCUSS_DB_ID not set — Phase 5 to-discuss features disabled");
     }
     const properties = {
-        Tema: { title: [{ text: { content: item.tema } }] },
+        "Name": { title: [{ text: { content: item.tema } }] },
         "Adicionado por": { select: { name: item.adicionadoPor } },
         Urgência: { select: { name: item.urgencia } },
         Área: { select: { name: item.area } },
@@ -1165,7 +1165,7 @@ async function getToDiscussPending() {
                 : "Pendente";
             rows.push({
                 id: row.id,
-                tema: readPlainText(props["Tema"]),
+                tema: readPlainText(props["Name"]),
                 adicionadoPor,
                 urgencia,
                 area: (readSelectName(props["Área"]) ?? "Outro"),
@@ -1306,9 +1306,8 @@ async function createProject(nome, owner) {
     const page = await withRetry("createProject", () => client.pages.create({
         parent: { database_id: NOTION_PROJECTS_DB_ID },
         properties: {
-            Nome: { title: [{ text: { content: nome } }] },
+            "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { select: { name: "Em curso" } },
         },
     }));
     await withRetry("createProject.sections", () => client.blocks.children.append({
@@ -1330,8 +1329,9 @@ async function createEvent(nome, owner) {
     const page = await withRetry("createEvent", () => client.pages.create({
         parent: { database_id: NOTION_EVENT_DB_ID },
         properties: {
-            Nome: { title: [{ text: { content: nome } }] },
+            "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
+            Status: { select: { name: "A planear" } },
         },
     }));
     await withRetry("createEvent.sections", () => client.blocks.children.append({
@@ -1353,7 +1353,7 @@ async function createPartner(nome, owner) {
     const page = await withRetry("createPartner", () => client.pages.create({
         parent: { database_id: NOTION_PARTNER_DB_ID },
         properties: {
-            Nome: { title: [{ text: { content: nome } }] },
+            "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
             Status: { select: { name: "A contactar" } },
         },
@@ -1377,7 +1377,7 @@ async function createInfluencer(nome, owner) {
     const page = await withRetry("createInfluencer", () => client.pages.create({
         parent: { database_id: NOTION_INFLUENCER_DB_ID },
         properties: {
-            Nome: { title: [{ text: { content: nome } }] },
+            "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
             Status: { select: { name: "A identificar" } },
         },

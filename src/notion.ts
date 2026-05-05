@@ -1080,7 +1080,7 @@ async function getPartnersStale(
       const status = readSelectName(props["Status"]) as PartnerStatus | null;
       rows.push({
         id: row.id,
-        nome: readPlainText(props["Nome"]),
+        nome: readPlainText(props["Name"]),
         categoria: cat,
         owner: (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue,
         status,
@@ -1140,7 +1140,7 @@ async function getInfluencersStale(
       const status = readSelectName(props["Status"]) as InfluencerStatus | null;
       rows.push({
         id: row.id,
-        nome: readPlainText(props["Nome / Handle"]),
+        nome: readPlainText(props["Name"]),
         instagram: readUrl(props["Instagram"]),
         owner: (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue,
         status,
@@ -1386,7 +1386,7 @@ async function createToDiscuss(
     );
   }
   const properties: Record<string, unknown> = {
-    Tema: { title: [{ text: { content: item.tema } }] },
+    "Name": { title: [{ text: { content: item.tema } }] },
     "Adicionado por": { select: { name: item.adicionadoPor } },
     Urgência: { select: { name: item.urgencia } },
     Área: { select: { name: item.area } },
@@ -1454,7 +1454,7 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
           : "Pendente";
       rows.push({
         id: row.id,
-        tema: readPlainText(props["Tema"]),
+        tema: readPlainText(props["Name"]),
         adicionadoPor,
         urgencia,
         area: (readSelectName(props["Área"]) ?? "Outro") as Area,
@@ -1627,9 +1627,8 @@ async function createProject(nome: string, owner: OwnerValue): Promise<string> {
     client.pages.create({
       parent: { database_id: NOTION_PROJECTS_DB_ID! },
       properties: {
-        Nome: { title: [{ text: { content: nome } }] },
+        "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { select: { name: "Em curso" } },
       },
     }),
   );
@@ -1656,8 +1655,9 @@ async function createEvent(nome: string, owner: OwnerValue): Promise<string> {
     client.pages.create({
       parent: { database_id: NOTION_EVENT_DB_ID! },
       properties: {
-        Nome: { title: [{ text: { content: nome } }] },
+        "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
+        Status: { select: { name: "A planear" } },
       },
     }),
   );
@@ -1684,7 +1684,7 @@ async function createPartner(nome: string, owner: OwnerValue): Promise<string> {
     client.pages.create({
       parent: { database_id: NOTION_PARTNER_DB_ID! },
       properties: {
-        Nome: { title: [{ text: { content: nome } }] },
+        "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
         Status: { select: { name: "A contactar" satisfies PartnerStatus } },
       },
@@ -1713,7 +1713,7 @@ async function createInfluencer(nome: string, owner: OwnerValue): Promise<string
     client.pages.create({
       parent: { database_id: NOTION_INFLUENCER_DB_ID! },
       properties: {
-        Nome: { title: [{ text: { content: nome } }] },
+        "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
         Status: { select: { name: "A identificar" satisfies InfluencerStatus } },
       },
