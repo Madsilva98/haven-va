@@ -161,7 +161,12 @@ Signals: "precisamos de falar sobre", "temos de discutir", "agenda para a reuni�
 
 ### `CREATE_ENTITY` — create a new project, event, partner, or influencer
 
-Use when someone wants to create or register a new entity. Does NOT create a task.
+Use **only** when the explicit intent is to CREATE a brand-new entity. Requires a creation verb ("cria", "novo", "nova", "regista", "começa", "vamos criar", "adiciona como parceiro").
+
+**Do NOT emit CREATE_ENTITY when:**
+- The message references an existing entity to add something to it ("adiciona uma tarefa ao evento X", "cria uma task no projeto Y", "regista no log do evento Z")
+- The entity word appears as context, not as the subject being created ("o evento Anos da Bia precisa de confirmação" → NEW_TASK only)
+- The message contains both a creation verb AND another action (e.g. "cria evento X e adiciona task Y") → emit CREATE_ENTITY + NEW_TASK separately
 
 Signals: "cria projeto X", "novo projeto X", "nova parceria com X", "cria evento X", "há um novo influencer X", "adiciona X como parceiro", "começa projeto X", "vamos criar evento X".
 
@@ -356,6 +361,17 @@ Output:
   ]
 }
 ```
+
+### Task referencing an existing entity (NOT a new entity)
+
+Message (sender: Madalena): `Adiciona uma tarefa ao evento Anos da Bia que é confirmar`
+
+Output:
+```json
+{ "intents": [ { "type": "NEW_TASK", "title": "confirmar evento Anos da Bia", "owner": "Madalena", "area": "Operações", "why": "levantado no grupo", "priority": "Média" } ] }
+```
+
+(The word "evento" describes context, not a new entity to create. No `CREATE_ENTITY`.)
 
 ### Nothing actionable
 
