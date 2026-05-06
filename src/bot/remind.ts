@@ -79,41 +79,66 @@ function isoLocal(date: Date): string {
   return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
 }
 
+function lisbonOffsetMs(d: Date): number {
+  // Returns Europe/Lisbon offset relative to UTC in ms (positive = ahead of UTC).
+  const lisbonStr = d.toLocaleString("en-US", { timeZone: "Europe/Lisbon" });
+  const utcStr = d.toLocaleString("en-US", { timeZone: "UTC" });
+  return new Date(lisbonStr).getTime() - new Date(utcStr).getTime();
+}
+
+function at9amLisbon(approxDate: Date): Date {
+  // Returns the real UTC Date representing 09:00:00 Europe/Lisbon on the same
+  // Lisbon calendar day as approxDate. approxDate should be near UTC midnight.
+  const lisbonFake = new Date(
+    approxDate.toLocaleString("en-US", { timeZone: "Europe/Lisbon" }),
+  );
+  lisbonFake.setHours(9, 0, 0, 0);
+  const offsetMs = lisbonOffsetMs(approxDate);
+  return new Date(lisbonFake.getTime() - offsetMs);
+}
+
 function describeWhen(target: Date): string {
-  // Short pt-PT label, e.g. "amanhã às 09:00" or "30/04 às 14:30".
+  // Short pt-PT label showing Lisbon wall-clock time, e.g. "amanhã às 09:00" or "30/04 às 14:30".
   const now = new Date();
+  // Compare calendar days using Lisbon wall-clock components via the toLocaleString fake-date trick.
+  const tFake = new Date(target.toLocaleString("en-US", { timeZone: "Europe/Lisbon" }));
+  const nFake = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Lisbon" }));
+  const tomFake = new Date(nFake);
+  tomFake.setDate(nFake.getDate() + 1);
   const sameDay =
-    target.getFullYear() === now.getFullYear() &&
-    target.getMonth() === now.getMonth() &&
-    target.getDate() === now.getDate();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
+    tFake.getFullYear() === nFake.getFullYear() &&
+    tFake.getMonth() === nFake.getMonth() &&
+    tFake.getDate() === nFake.getDate();
   const isTomorrow =
-    target.getFullYear() === tomorrow.getFullYear() &&
-    target.getMonth() === tomorrow.getMonth() &&
-    target.getDate() === tomorrow.getDate();
-  const time = `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
+    tFake.getFullYear() === tomFake.getFullYear() &&
+    tFake.getMonth() === tomFake.getMonth() &&
+    tFake.getDate() === tomFake.getDate();
+  const time = target.toLocaleString("pt-PT", {
+    timeZone: "Europe/Lisbon",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   if (sameDay) return `hoje às ${time}`;
   if (isTomorrow) return `amanhã às ${time}`;
-  return `${pad2(target.getDate())}/${pad2(target.getMonth() + 1)} às ${time}`;
+  return `${pad2(tFake.getDate())}/${pad2(tFake.getMonth() + 1)} às ${time}`;
 }
 
 function nextDayOfWeek(now: Date, targetDow: number): Date {
-  // Returns next occurrence of targetDow at 09:00, strictly in the future.
+  // Returns next occurrence of targetDow at 09:00 Europe/Lisbon, strictly in the future.
   const result = new Date(now);
-  result.setHours(9, 0, 0, 0);
+  result.setHours(0, 0, 0, 0); // UTC midnight — used as approx anchor for at9amLisbon
   const currentDow = now.getDay();
   let delta = (targetDow - currentDow + 7) % 7;
   if (delta === 0) delta = 7; // strictly future
   result.setDate(result.getDate() + delta);
-  return result;
+  return at9amLisbon(result);
 }
 
 function tomorrow9am(now: Date): Date {
   const t = new Date(now);
   t.setDate(now.getDate() + 1);
-  t.setHours(9, 0, 0, 0);
-  return t;
+  t.setHours(0, 0, 0, 0);
+  return at9amLisbon(t);
 }
 
 /**
@@ -131,7 +156,7 @@ export function parseRemindCommand(
   const match = body.match(/^(\S+)\s+(.+)$/s);
   if (!match) return { parsed: false };
   const [, headRaw, rest] = match as [string, string, string];
-  const head = headRaw.toLowerCase();
+  const head = headRaw.normalize("NFC").toLowerCase();
   const message = rest.trim();
   if (message.length === 0) return { parsed: false };
 
@@ -217,21 +242,25 @@ export async function createReminderFromIntent(
   sender: FounderName,
   intent: { when: string; text: string; for: FounderName | "all" },
 ): Promise<void> {
-  const target: FounderName = intent.for === "all" ? sender : intent.for;
+  const targets: FounderName[] =
+    intent.for === "all" ? ["Madalena", "Mafalda", "Beatriz"] : [intent.for];
+  const origem = tgCtx.message?.text ?? "";
   try {
-    await notion.createReminder({
-      texto: intent.text,
-      paraQuem: target,
-      quando: intent.when,
-      origem: tgCtx.message?.text ?? "",
-    });
+    await Promise.all(
+      targets.map((paraQuem) =>
+        notion.createReminder({ texto: intent.text, paraQuem, quando: intent.when, origem }),
+      ),
+    );
     const when = new Date(intent.when).toLocaleString("pt-PT", {
       timeZone: "Europe/Lisbon",
       weekday: "long",
+      day: "numeric",
+      month: "long",
       hour: "2-digit",
       minute: "2-digit",
     });
-    await tgCtx.reply(`⏰ lembrete: ${when} — ${intent.text}`);
+    const whoLabel = intent.for === "all" ? "todas" : intent.for;
+    await tgCtx.reply(`⏰ lembrete para ${whoLabel}: ${when} — ${intent.text}`);
   } catch (err) {
     log.error("remind.create_from_intent_failed", {
       message: err instanceof Error ? err.message : String(err),

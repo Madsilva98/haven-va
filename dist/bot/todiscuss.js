@@ -4,17 +4,9 @@
  * Flow:
  *   1. User types `/todiscuss <texto>` in any chat the bot is in.
  *   2. Bot replies with a proposal + inline keyboard for urgency:
- *      [🟢 pode esperar] [🟡 decisão rápida] [🔴 urgente] [❌ cancelar]
+ *      [🗓 próxima reunião] [💬 decisão offline] [🔴 urgente] [❌ cancelar]
  *   3. On urgency tap → `notion.createToDiscuss(...)`, reply with a confirm.
  *   4. On cancel → bot replies "cancelado".
- *
- * Pending state is module-scoped (Map keyed by Telegram bot message id).
- * The bot is deployed on Railway as a long-running process per the stack
- * recommendation, so in-memory state survives across user taps.
- *
- * Wiring: the caller in `src/bot/index.ts` registers
- *   bot.command("todiscuss", handleToDiscussCommand)
- *   // and routes callback_data starting with "todiscuss:" to handleToDiscussCallback
  */
 import { InlineKeyboard } from "grammy";
 import { getFounderName } from "../lib/founders.js";
@@ -22,7 +14,7 @@ import { log } from "../lib/log.js";
 import { formatToDiscussProposal } from "../messages/decisions.js";
 import * as notion from "../notion.js";
 const pending = new Map();
-const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const PENDING_TTL_MS = 30 * 60 * 1000;
 function gc() {
     const cutoff = Date.now() - PENDING_TTL_MS;
     for (const [k, v] of pending) {
@@ -32,20 +24,17 @@ function gc() {
 }
 export function todiscussKeyboard() {
     return new InlineKeyboard()
-        .text("🟢 pode esperar", "todiscuss:wait")
-        .text("🟡 decisão rápida", "todiscuss:fast")
+        .text("🗓 próxima reunião", "todiscuss:meeting")
+        .text("💬 decisão offline", "todiscuss:offline")
         .row()
         .text("🔴 urgente", "todiscuss:urgent")
         .text("❌ cancelar", "todiscuss:cancel");
 }
 const URGENCY_BY_KEY = {
-    wait: "Pode esperar",
-    fast: "Precisa de decisão rápida",
+    meeting: "Próxima reunião",
+    offline: "Decisão offline",
     urgent: "Urgente",
 };
-/**
- * Handle `/todiscuss <texto>` — proposes urgency selection.
- */
 export async function handleToDiscussCommand(ctx) {
     const fromId = ctx.from?.id;
     if (!fromId)
@@ -53,7 +42,6 @@ export async function handleToDiscussCommand(ctx) {
     const sender = getFounderName(fromId);
     if (!sender)
         return;
-    // grammy puts the args after the command in `ctx.match` for command handlers.
     const raw = typeof ctx.match === "string"
         ? ctx.match
         : ctx.message?.text?.replace(/^\/todiscuss(@\S+)?\s*/i, "") ?? "";
@@ -62,9 +50,7 @@ export async function handleToDiscussCommand(ctx) {
         await ctx.reply("usa: /todiscuss <texto>");
         return;
     }
-    // Default urgency in the proposal preview is "Pode esperar"; the buttons
-    // let the user pick the real one before we write to Notion.
-    const proposal = formatToDiscussProposal(tema, "Pode esperar");
+    const proposal = formatToDiscussProposal(tema, "Próxima reunião");
     const sent = await ctx.reply(proposal.text, {
         parse_mode: proposal.parseMode,
         reply_markup: todiscussKeyboard(),
@@ -78,15 +64,8 @@ export async function handleToDiscussCommand(ctx) {
         adicionadoPor: sender,
         createdAt: Date.now(),
     });
-    log.debug("todiscuss.proposal_sent", {
-        botMessageId: sent.message_id,
-        sender,
-    });
+    log.debug("todiscuss.proposal_sent", { botMessageId: sent.message_id, sender });
 }
-/**
- * Handle the inline-button reply on a /todiscuss proposal.
- * Callback data shape: "todiscuss:<wait|fast|urgent|cancel>".
- */
 export async function handleToDiscussCallback(ctx) {
     const data = ctx.callbackQuery?.data ?? "";
     const botMessageId = ctx.callbackQuery?.message?.message_id;
@@ -100,7 +79,7 @@ export async function handleToDiscussCallback(ctx) {
             await ctx.editMessageReplyMarkup({ reply_markup: undefined });
         }
         catch {
-            // ignore — message may already be edited
+            // ignore
         }
         return;
     }
@@ -122,7 +101,6 @@ export async function handleToDiscussCallback(ctx) {
         return;
     }
     try {
-        // Area defaults to "Outro"; future versions can ask the LLM.
         const area = "Outro";
         await notion.createToDiscuss({
             tema: entry.tema,

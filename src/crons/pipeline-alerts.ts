@@ -152,6 +152,11 @@ async function processContentCalendar(week: number): Promise<number> {
 
 export async function run(): Promise<void> {
   const week = weekOfYear();
+  // Prune entries from previous weeks to prevent unbounded Set growth.
+  for (const key of seen) {
+    const keyWeek = Number(key.split("|").at(-1));
+    if (keyWeek !== week) seen.delete(key);
+  }
   const counts = {
     partner_no_response: await processPartners("no_response", week),
     partner_no_progress: await processPartners("no_progress", week),

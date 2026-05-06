@@ -1,9 +1,7 @@
 /**
- * Slash commands: /help, /start, /task <descrição>, /status, /hoje.
+ * Slash commands: /help, /start, /task <descrição>, /status, /hoje, /dashboard.
  *
- * /task bypasses the regex + classifier filters and runs Tier 2a directly
- * on whatever text the user wrote after the command. Useful when the
- * bot misses an implicit task.
+ * /task creates a task directly in Notion without going through the AI pipeline.
  */
 
 import type { Context } from "grammy";
@@ -19,8 +17,7 @@ import * as notion from "../notion.js";
 import { currentWeekLabel } from "../lib/week.js";
 import type { FounderName } from "../types.js";
 import { buildFreeTimeDesc } from "../crons/daily-madalena.js";
-import { extractIntents } from "./multi-intent.js";
-import { proposeNewTask } from "./propose-task.js";
+import { taskUndoKeyboard } from "./keyboards.js";
 
 export async function handleStart(ctx: Context): Promise<void> {
   await ctx.reply(WELCOME_MESSAGE);
@@ -46,32 +43,25 @@ export async function handleTask(ctx: Context): Promise<void> {
   const senderName = getFounderName(senderId);
   if (!senderName) return;
 
-  const chatId = ctx.chat?.id;
-  if (chatId === undefined) {
-    log.warn("commands.task.no_chat_id");
-    return;
+  try {
+    const pageId = await notion.createTask(
+      {
+        title: description.slice(0, 80),
+        owner: "Unassigned",
+        area: "Outro",
+        why: "levantado via /task",
+      },
+      "Média",
+      description,
+      senderName,
+    );
+    await ctx.reply(`✅ task criada: "${description.slice(0, 80)}"`, {
+      reply_markup: taskUndoKeyboard(pageId),
+    });
+  } catch (err) {
+    log.error("commands.task.failed", { err: String(err) });
+    await ctx.reply("erro a criar task — tenta outra vez");
   }
-
-  const openTasks = await notion.getOpenTasks().catch(() => []);
-  const chatCtx = {
-    text: description,
-    sender: senderName,
-    recentMessages: [],
-    recentBotActions: [],
-    openTasks,
-  };
-
-  const intents = await extractIntents(chatCtx);
-  const newTask = intents.find((i) => i.type === "NEW_TASK") ?? {
-    type: "NEW_TASK" as const,
-    title: description.slice(0, 80),
-    owner: "Unassigned" as const,
-    area: "Outro" as const,
-    why: "levantado via /task",
-    priority: "Média" as const,
-  };
-
-  await proposeNewTask(ctx, chatCtx, newTask);
 }
 
 export async function handleHoje(ctx: Context): Promise<void> {

@@ -2,14 +2,11 @@
  * Inline-button callback handler.
  *
  * Routes:
- *   priority:alta|media|baixa  → confirm a NEW_TASK with chosen priority
+ *   task:undo:<pageId>          → archive a directly-created task (no pending state)
+ *   priority:alta|media|baixa  → confirm a NEW_TASK proposal with chosen priority
  *   priority:cancel            → drop a NEW_TASK proposal as false positive
  *   edit:apply                 → apply an EDIT_TASK to Notion
  *   edit:cancel                → drop an EDIT_TASK proposal as false positive
- *
- * Pending state is looked up by the bot's reply message id (the message
- * the button is attached to). If state is missing (bot restarted), we
- * tell the user the proposal expired and let them re-mention.
  */
 import { isFounder, getFounderName } from "../lib/founders.js";
 import { log } from "../lib/log.js";
@@ -34,6 +31,34 @@ export async function handleCallback(ctx) {
         await ctx.answerCallbackQuery({ text: "só founders podem confirmar" });
         return;
     }
+    const parts = data.split(":");
+    const scope = parts[0];
+    const action = parts[1];
+    // task:undo:pageId — archive directly, no pending state needed.
+    // answerCallbackQuery FIRST so Telegram doesn't show infinite loading
+    // if any subsequent Notion/Telegram call is slow or fails.
+    if (scope === "task" && action === "undo") {
+        const pageId = parts.slice(2).join(":");
+        await ctx.answerCallbackQuery();
+        try {
+            await notion.archivePage(pageId);
+            notion.invalidateOpenTasksCache();
+        }
+        catch (err) {
+            log.error("callback.undo_archive_failed", { err: String(err), pageId });
+            await ctx.reply("erro ao desfazer — tenta outra vez");
+            return;
+        }
+        try {
+            await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+        }
+        catch {
+            // message may be too old to edit — ignore
+        }
+        await ctx.reply("↩ task removida");
+        return;
+    }
+    // Remaining handlers need senderName + pending proposal
     const senderName = getFounderName(userId);
     if (!senderName) {
         await ctx.answerCallbackQuery();
@@ -44,21 +69,7 @@ export async function handleCallback(ctx) {
         await ctx.answerCallbackQuery({ text: confirmationMessages.pendingExpired() });
         return;
     }
-    const parts = data.split(":");
-    const scope = parts[0];
-    const action = parts[1];
     try {
-        if (scope === "task" && action === "undo") {
-            const pageId = parts.slice(2).join(":");
-            await notion.archivePage(pageId);
-            notion.invalidateOpenTasksCache();
-            await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-            await ctx.reply("↩ task removida", {
-                reply_parameters: { message_id: botMessageId },
-            });
-            await ctx.answerCallbackQuery();
-            return;
-        }
         if (scope === "edit" && proposal.type === "edit") {
             if (action === "cancel") {
                 await record("false_positive", proposal.originalMsg, senderName, proposal.extraction, "❌ deixa");

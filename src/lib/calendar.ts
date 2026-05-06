@@ -99,6 +99,7 @@ export async function exchangeCodeForToken(codeOrUrl: string): Promise<void> {
   saveTokens(tokens as Record<string, unknown>);
   _oauthClient = null; // force recreation with new tokens
   _eventsCache = { data: [], ts: 0 };
+  _calsCache = { data: [], ts: 0 };
 }
 
 async function getAuthenticatedClient(): Promise<ReturnType<
@@ -210,7 +211,10 @@ export async function listEvents(days = 7): Promise<CalendarEvent[]> {
     }),
   );
 
-  const all = results.flat().sort((a, b) => a.start.getTime() - b.start.getTime());
+  const all = results
+    .flat()
+    .filter((e) => !Number.isNaN(e.start.getTime()))
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
   _eventsCache = { data: all, ts: now };
   return all;
 }

@@ -94,8 +94,8 @@ export interface ReminderRow {
 // ----- Phase 5 -----
 
 export type ToDiscussUrgency =
-  | "Pode esperar"
-  | "Precisa de decisão rápida"
+  | "Próxima reunião"
+  | "Decisão offline"
   | "Urgente";
 
 export type ToDiscussState = "Pendente" | "Discutido" | "Arquivado";
@@ -109,6 +109,7 @@ export interface ToDiscussRow {
   estado: ToDiscussState;
   data: string;
   resolucao: string;
+  deadline?: string;
 }
 
 export interface DecisionRow {

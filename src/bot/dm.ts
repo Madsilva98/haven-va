@@ -1,16 +1,8 @@
 /**
  * DM router — handles private chats with founders.
  *
- * Phase 1's `bot/index.ts` only listens in groups. Phase 2 wires this
- * module in for `chat.type === "private"` updates so:
- *   - the `/week` and `/focus` rituals work in DM (less noise)
- *   - free text in a DM still runs through the Phase 1 pipeline, but
- *     the sender becomes the implicit task owner
- *
- * Strangers (anyone not in the founder map) get one polite message
- * then are silently ignored. Warned-set is in-memory; that's fine
- * because warning the same stranger twice across cold starts is
- * harmless.
+ * Slash commands (/week, /focus) are handled first. Free text goes to
+ * the conversational assistant. Strangers get one polite message.
  */
 
 import type { Context } from "grammy";
@@ -19,18 +11,13 @@ import { getFounderName, isFounder } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import * as notion from "../notion.js";
-import { getRecentActions } from "../state/pending.js";
-import type { ChatContext, OpenTask, RecentAction } from "../types.js";
-import { extractIntents } from "./multi-intent.js";
-import { route } from "./router.js";
+import type { OpenTask } from "../types.js";
+import { handleAssistant } from "./assistant.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
-import { isQuery, handleQuery } from "./query.js";
 import {
   handleWeek,
-  handleWeekCallback,
   handleWeekTextStep,
   isWeekCommand,
-  isWeekCallback,
   isAwaitingFocusFor,
 } from "./week.js";
 
@@ -39,8 +26,7 @@ const warnedStrangers = new Set<number>();
 const errorLimit = new ErrorRateLimit();
 
 /**
- * Returns true if the update was handled here. The orchestrator can
- * use this to short-circuit the group pipeline.
+ * Returns true if the update was handled here.
  */
 export async function handleDM(ctx: Context): Promise<boolean> {
   if (ctx.chat?.type !== "private") return false;
@@ -63,21 +49,9 @@ export async function handleDM(ctx: Context): Promise<boolean> {
   const senderName = getFounderName(fromId);
   if (!senderName) return false;
 
-  // Inline-button callbacks for the /week wizard.
-  const cbData = ctx.callbackQuery?.data;
-  if (cbData && isWeekCallback(cbData)) {
-    try {
-      await handleWeekCallback(ctx, senderName);
-    } catch (err) {
-      log.error("dm.week_callback_failed", { err: String(err) });
-    }
-    return true;
-  }
-
   const text = ctx.message?.text;
   if (!text) return false;
 
-  // Slash commands first.
   if (isWeekCommand(text)) {
     try {
       await handleWeek(ctx, senderName);
@@ -87,6 +61,7 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     }
     return true;
   }
+
   if (isFocusCommand(text)) {
     try {
       await handleFocus(ctx, senderName, text);
@@ -97,7 +72,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  // /week wizard last step: founder typed a focus sentence.
   if (isAwaitingFocusFor(fromId)) {
     try {
       await handleWeekTextStep(ctx, senderName, text);
@@ -107,7 +81,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  // Free text → Phase 1 pipeline, with the sender as implicit owner.
   const hasNonTextMedia = Boolean(
     ctx.message?.photo ||
       ctx.message?.video ||
@@ -116,58 +89,21 @@ export async function handleDM(ctx: Context): Promise<boolean> {
       ctx.message?.document ||
       ctx.message?.sticker,
   );
-
   if (hasNonTextMedia) return true;
 
-  // Query: answer directly without intent extraction.
-  if (isQuery(text)) {
-    try {
-      await handleQuery(ctx, text, senderName);
-    } catch (err) {
-      log.error("dm.query_failed", { err: String(err) });
-    }
-    return true;
-  }
-
-  // DM mode: skip keyword filter — any message ≥ 4 chars goes to the pipeline.
   if (text.trim().length < 4) return true;
 
-  const chatId = ctx.chat?.id;
-  if (chatId === undefined) {
-    log.warn("dm.no_chat_id");
-    return true;
-  }
-
-  let recentBotActions: RecentAction[] = [];
   let openTasks: OpenTask[] = [];
   try {
-    [recentBotActions, openTasks] = await Promise.all([
-      getRecentActions(chatId),
-      notion.getOpenTasks(),
-    ]);
+    openTasks = await notion.getOpenTasks();
   } catch (err) {
-    log.warn("dm.context_fetch_failed", { err: String(err) });
+    log.warn("dm.tasks_fetch_failed", { err: String(err) });
   }
 
-  const chatCtx: ChatContext = {
-    text,
-    sender: senderName,
-    recentMessages: [],
-    recentBotActions,
-    openTasks,
-  };
-
   try {
-    const intents = await extractIntents(chatCtx);
-    // DM-specific: if a NEW_TASK has owner=Unassigned, default to sender.
-    const adjusted = intents.map((i) =>
-      i.type === "NEW_TASK" && i.owner === "Unassigned"
-        ? { ...i, owner: senderName }
-        : i,
-    );
-    await route(ctx, chatCtx, adjusted);
+    await handleAssistant(ctx, senderName, text, openTasks, []);
   } catch (err) {
-    log.error("dm.pipeline_error", { err: String(err) });
+    log.error("dm.assistant_failed", { err: String(err) });
     await safeReply(ctx);
   }
   return true;

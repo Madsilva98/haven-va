@@ -191,13 +191,15 @@ export function rankTasks(tasks) {
     });
 }
 export function trafficLight(task) {
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
     if (task.priority === "Alta" || task.deadline === today)
         return "red";
     if (task.deadline) {
         const daysUntil = Math.ceil((new Date(task.deadline).getTime() - new Date(today).getTime()) /
             (1000 * 60 * 60 * 24));
-        if (task.priority === "Média" || (daysUntil >= 0 && daysUntil <= 3))
+        if (daysUntil < 0)
+            return "red";
+        if (task.priority === "Média" || daysUntil <= 3)
             return "yellow";
     }
     else if (task.priority === "Média") {

@@ -214,14 +214,21 @@ export async function handleWeekCallback(
     await ctx.answerCallbackQuery({ text: "a guardar..." });
 
     // Apply: set Prioridade semanal=true on picked, =false on the rest of her open tasks.
+    let hadFailures = false;
     try {
       const allOpen = await notion.getOpenTasksFor(founder);
-      const writes: Promise<void>[] = [];
-      for (const t of allOpen) {
-        const shouldBeTrue = state.selected.has(t.id);
-        writes.push(notion.setWeeklyPriority(t.id, shouldBeTrue));
+      const writes = allOpen.map((t) =>
+        notion.setWeeklyPriority(t.id, state.selected.has(t.id)),
+      );
+      const results = await Promise.allSettled(writes);
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length > 0) {
+        log.error("week.set_priorities_partial_failure", {
+          failed: failed.length,
+          total: writes.length,
+        });
+        hadFailures = true;
       }
-      await Promise.all(writes);
     } catch (err) {
       log.error("week.set_priorities_failed", { err: String(err) });
       try {
@@ -235,13 +242,14 @@ export async function handleWeekCallback(
 
     state.awaitingFocus = true;
     state.startedAt = Date.now(); // reset TTL
+    const suffix = hadFailures ? " (algumas não guardaram — verifica o Notion)" : "";
     try {
       await ctx.editMessageText(
-        `prioridades guardadas (${state.selected.size}). qual o teu foco operacional desta semana? (uma frase)`,
+        `prioridades guardadas (${state.selected.size})${suffix}. qual o teu foco operacional desta semana? (uma frase)`,
       );
     } catch {
       await ctx.reply(
-        `prioridades guardadas (${state.selected.size}). qual o teu foco operacional desta semana? (uma frase)`,
+        `prioridades guardadas (${state.selected.size})${suffix}. qual o teu foco operacional desta semana? (uma frase)`,
       );
     }
     return;

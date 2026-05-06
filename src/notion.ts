@@ -1438,6 +1438,9 @@ async function createToDiscuss(
   if (item.resolucao) {
     properties["Resolução"] = richText(item.resolucao);
   }
+  if (item.deadline) {
+    properties["Deadline"] = { date: { start: item.deadline } };
+  }
   const page = await withRetry("createToDiscuss", () =>
     client.pages.create({
       parent: { database_id: NOTION_TO_DISCUSS_DB_ID },
@@ -1483,11 +1486,11 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
       }
       const urgenciaName = readSelectName(props["Urgência"]);
       const urgencia: ToDiscussUrgency =
-        urgenciaName === "Pode esperar" ||
-        urgenciaName === "Precisa de decisão rápida" ||
+        urgenciaName === "Próxima reunião" ||
+        urgenciaName === "Decisão offline" ||
         urgenciaName === "Urgente"
           ? urgenciaName
-          : "Pode esperar";
+          : "Próxima reunião";
       const estadoName = readSelectName(props["Estado"]);
       const estado: ToDiscussState =
         estadoName === "Pendente" ||
@@ -1495,6 +1498,7 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
         estadoName === "Arquivado"
           ? estadoName
           : "Pendente";
+      const deadline = readDateStart(props["Deadline"]) ?? undefined;
       rows.push({
         id: row.id,
         tema: readPlainText(props["Name"]),
@@ -1504,6 +1508,7 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
         estado,
         data: readDateStart(props["Data"]) ?? "",
         resolucao: readPlainText(props["Resolução"]),
+        ...(deadline ? { deadline } : {}),
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;

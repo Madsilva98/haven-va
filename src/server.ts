@@ -62,13 +62,18 @@ log.info("server.crons_registered", { count: tasks.length });
 
 const bot = buildBot();
 
-const shutdown = () => {
+async function shutdown(): Promise<void> {
   log.info("server.shutdown");
   tasks.forEach((t) => t.stop());
-  bot.stop();
-};
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
+  try {
+    await bot.stop();
+  } catch (err) {
+    log.error("server.stop_failed", { err: String(err) });
+  }
+}
+
+process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
+process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
 
 bot.start({
   onStart: (info) => log.info("bot.started", { username: info.username }),

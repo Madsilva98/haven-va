@@ -2,12 +2,11 @@
  * Bot setup and message router.
  *
  * Handles:
- *   - group messages → Phase 1 pipeline + Phase 5 decisions/launch detection
- *   - private messages → DM router (Phase 2) with same pipeline
- *   - slash commands: /help /start /task /status (Phase 1) + /week /focus
- *     /remind /todiscuss (Phase 2/3/5)
- *   - inline button callbacks: namespaced by data prefix and dispatched
- *     to the right handler
+ *   - group messages → conversational assistant (handleAssistant)
+ *   - private messages → DM router (handleDM)
+ *   - slash commands: /help /start /task /hoje /status /dashboard
+ *     /week /focus /remind /todiscuss
+ *   - inline button callbacks: namespaced by data prefix
  */
 
 import { Bot, type Context } from "grammy";
@@ -18,16 +17,8 @@ import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
 import * as notion from "../notion.js";
-import { getRecentActions } from "../state/pending.js";
-import type {
-  ChatContext,
-  FounderName,
-  OpenTask,
-  Priority,
-  RecentAction,
-} from "../types.js";
+import type { FounderName, OpenTask } from "../types.js";
 
-// Phase 1
 import { handleCallback as handlePhase1Callback } from "./callbacks.js";
 import {
   handleDashboard,
@@ -37,15 +28,7 @@ import {
   handleStatus,
   handleTask,
 } from "./commands.js";
-import { shouldProcess } from "./filter.js";
-import { isQuery, handleQuery } from "./query.js";
-
-// Phase 1 redesign — multi-intent
-import { extractIntents } from "./multi-intent.js";
-import { route, dispatch } from "./router.js";
-import { popBatch } from "./batch.js";
-
-// Phase 2
+import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
 import {
   handleWeek,
@@ -54,17 +37,11 @@ import {
   isAwaitingFocusFor,
 } from "./week.js";
 import { handleFocus } from "./focus.js";
-
-// Phase 3
 import { handleRemind } from "./remind.js";
-
-// Phase 5
 import {
   handleToDiscussCommand,
   handleToDiscussCallback,
 } from "./todiscuss.js";
-import { handleDecisionCallback } from "./decisions.js";
-import { handleLaunchCallback } from "./launch.js";
 
 const RECENT_MAX = 6;
 const recentByChat = new Map<number, { sender: FounderName; text: string }[]>();
@@ -98,11 +75,6 @@ function dedupe(updateId: number): boolean {
   return false;
 }
 
-/**
- * Routes inline-button callbacks to the right handler based on the
- * `callback_data` prefix. Phase-1 and Phase-2/5 handlers each own
- * their namespace.
- */
 async function callbackRouter(ctx: Context): Promise<void> {
   const data = ctx.callbackQuery?.data;
   if (!data) {
@@ -111,7 +83,7 @@ async function callbackRouter(ctx: Context): Promise<void> {
   }
   const [scope] = data.split(":");
   try {
-    if (scope === "priority" || scope === "edit") {
+    if (scope === "priority" || scope === "edit" || scope === "task") {
       await handlePhase1Callback(ctx);
       return;
     }
@@ -127,18 +99,6 @@ async function callbackRouter(ctx: Context): Promise<void> {
     }
     if (scope === "todiscuss") {
       await handleToDiscussCallback(ctx);
-      return;
-    }
-    if (scope === "decision") {
-      await handleDecisionCallback(ctx);
-      return;
-    }
-    if (scope === "launch") {
-      await handleLaunchCallback(ctx);
-      return;
-    }
-    if (scope === "batch") {
-      await handleBatchCallback(ctx);
       return;
     }
     log.warn("callback.unknown_scope", { scope, data });
@@ -171,19 +131,20 @@ export function buildBot(): Bot {
     })
     .catch((err) => log.error("bot.getMe_failed", { err: String(err) }));
 
-  // Welcome on group join.
+  // Welcome on group join — only in the configured Haven group.
   bot.on("my_chat_member", async (ctx) => {
     const status = ctx.myChatMember.new_chat_member.status;
-    if (status === "member" || status === "administrator") {
-      try {
-        await ctx.reply(WELCOME_MESSAGE);
-      } catch (err) {
-        log.warn("welcome.send_failed", { err: String(err) });
-      }
+    if (status !== "member" && status !== "administrator") return;
+    const groupId = Number(process.env.TELEGRAM_GROUP_ID);
+    if (groupId && ctx.chat?.id !== groupId) return;
+    try {
+      await ctx.reply(WELCOME_MESSAGE);
+    } catch (err) {
+      log.warn("welcome.send_failed", { err: String(err) });
     }
   });
 
-  // Register slash commands for Telegram dropdown (fire-and-forget).
+  // Register slash commands for Telegram dropdown.
   bot.api.setMyCommands([
     { command: "task",      description: "Criar task manualmente" },
     { command: "hoje",      description: "Ver as minhas tasks de hoje" },
@@ -268,8 +229,7 @@ export function buildBot(): Bot {
     const chatId = ctx.chat.id;
     const chatType = ctx.chat.type;
 
-    // 1) DM-only wizard step: if founder is mid-/week flow waiting for
-    // operational focus text, route there first.
+    // 1) DM-only: if mid-/week flow, route there first.
     if (chatType === "private" && isAwaitingFocusFor(fromId)) {
       try {
         await handleWeekTextStep(ctx, senderName, text);
@@ -279,9 +239,9 @@ export function buildBot(): Bot {
       return;
     }
 
-    // 2) DM router: any other DM goes through the dedicated handler.
+    // 2) DM router.
     if (chatType === "private") {
-      // Intercept Google Calendar auth code paste.
+      // Google Calendar auth code intercept.
       if (awaitingAuthCodeFrom === fromId && text.startsWith("4/")) {
         try {
           await calendar.exchangeCodeForToken(text.trim());
@@ -305,27 +265,11 @@ export function buildBot(): Bot {
       }
     }
 
-    // 3) Group: detect replies to the bot as corrections.
+    // 3) Group pipeline.
     const repliedTo = ctx.message.reply_to_message;
     const isReplyToBot =
       botInfoUserId !== null && repliedTo?.from?.id === botInfoUserId;
-
-    if (isReplyToBot) {
-      try {
-        const { record } = await import("../feedback.js");
-        await record(
-          "correction",
-          repliedTo?.text ?? "",
-          senderName,
-          { telegram_reply_to: repliedTo?.message_id },
-          "reply",
-          text,
-        );
-      } catch (err) {
-        log.warn("correction.log_failed", { err: String(err) });
-      }
-      return;
-    }
+    const repliedToText = isReplyToBot ? (repliedTo?.text ?? undefined) : undefined;
 
     const hasNonTextMedia = Boolean(
       ctx.message.photo ||
@@ -338,41 +282,25 @@ export function buildBot(): Bot {
 
     pushRecent(chatId, senderName, text);
 
-    if (!shouldProcess({ text, isReplyToBot: false, hasNonTextMedia })) {
-      return;
-    }
+    if (text.trim().length < 4) return;
+    if (hasNonTextMedia) return;
 
-    if (isQuery(text)) {
-      try {
-        await handleQuery(ctx, text, senderName);
-      } catch (err) {
-        log.error("query.group_failed", { err: String(err) });
-      }
-      return;
-    }
-
-    let recentBotActions: RecentAction[] = [];
     let openTasks: OpenTask[] = [];
     try {
-      [recentBotActions, openTasks] = await Promise.all([
-        getRecentActions(chatId),
-        notion.getOpenTasks(),
-      ]);
+      openTasks = await notion.getOpenTasks();
     } catch (err) {
-      log.warn("pipeline.context_fetch_failed", { err: String(err) });
+      log.warn("pipeline.tasks_fetch_failed", { err: String(err) });
     }
 
-    const chatCtx: ChatContext = {
-      text,
-      sender: senderName,
-      recentMessages: getPriors(chatId),
-      recentBotActions,
-      openTasks,
-    };
-
     try {
-      const intents = await extractIntents(chatCtx);
-      await route(ctx, chatCtx, intents);
+      await handleAssistant(
+        ctx,
+        senderName,
+        text,
+        openTasks,
+        getPriors(chatId),
+        repliedToText,
+      );
     } catch (err) {
       log.error("pipeline.error", { err: String(err) });
       if (errorLimit.tryNotify()) {
@@ -393,108 +321,4 @@ export function buildBot(): Bot {
 
   botInstance = bot;
   return bot;
-}
-
-async function handleBatchCallback(ctx: Context): Promise<void> {
-  const data = ctx.callbackQuery?.data;
-  if (!data) {
-    await ctx.answerCallbackQuery();
-    return;
-  }
-  const [, action, batchId] = data.split(":");
-  if (!action || !batchId) {
-    await ctx.answerCallbackQuery();
-    return;
-  }
-
-  const intents = popBatch(batchId);
-  if (!intents) {
-    await ctx.answerCallbackQuery({ text: "expirou — manda outra vez" });
-    return;
-  }
-
-  const fromId = ctx.from?.id;
-  if (!fromId || !isFounder(fromId)) {
-    await ctx.answerCallbackQuery({ text: "só founders podem confirmar" });
-    return;
-  }
-  const sender = getFounderName(fromId);
-  if (!sender) {
-    await ctx.answerCallbackQuery();
-    return;
-  }
-  const chatId = ctx.chat?.id;
-  if (chatId === undefined) {
-    await ctx.answerCallbackQuery();
-    return;
-  }
-
-  await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-
-  if (action === "cancel") {
-    await ctx.answerCallbackQuery();
-    await ctx.reply("cancelado");
-    return;
-  }
-
-  // Build a chatCtx for handlers that need it (REMINDER/LOG/etc.).
-  const recentBotActions = await getRecentActions(chatId).catch(() => []);
-  const openTasks = await notion.getOpenTasks().catch(() => []);
-  const chatCtx: ChatContext = {
-    text: "",
-    sender,
-    recentMessages: [],
-    recentBotActions,
-    openTasks,
-  };
-
-  if (action === "review") {
-    await ctx.answerCallbackQuery();
-    for (const intent of intents) {
-      try {
-        await dispatch(ctx, chatCtx, intent);
-      } catch (err) {
-        log.error("batch.review_dispatch_failed", { err: String(err) });
-      }
-    }
-    return;
-  }
-
-  if (action === "accept") {
-    await ctx.answerCallbackQuery();
-    let count = 0;
-    for (const intent of intents) {
-      try {
-        if (intent.type === "NEW_TASK") {
-          // Mass-accept: skip the priority button card; default Média.
-          await notion.createTask(
-            {
-              title: intent.title,
-              owner: intent.owner,
-              area: intent.area,
-              why: intent.why,
-            },
-            "Média" as Priority,
-            "(batch accept)",
-            sender,
-          );
-          count++;
-          continue;
-        }
-        // For LOG / REMINDER / EDIT_PENDING — auto-commit via dispatch.
-        // For EDIT_TASK / DECISION / LAUNCH_INTENT — dispatch posts a confirm card.
-        await dispatch(ctx, chatCtx, intent);
-        count++;
-      } catch (err) {
-        log.error("batch.accept_dispatch_failed", {
-          type: intent.type,
-          err: String(err),
-        });
-      }
-    }
-    await ctx.reply(`feito ✅ — ${count} coisas processadas`);
-    return;
-  }
-
-  await ctx.answerCallbackQuery();
 }
