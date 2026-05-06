@@ -100,8 +100,18 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     log.warn("dm.tasks_fetch_failed", { err: String(err) });
   }
 
+  const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+  let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
+  if (calendarKeywords.test(text)) {
+    try {
+      contentCalendar = await notion.getContentCalendarRows();
+    } catch (err) {
+      log.warn("dm.calendar_fetch_failed", { err: String(err) });
+    }
+  }
+
   try {
-    await handleAssistant(ctx, senderName, text, openTasks, []);
+    await handleAssistant(ctx, senderName, text, openTasks, [], undefined, contentCalendar);
   } catch (err) {
     log.error("dm.assistant_failed", { err: String(err) });
     await safeReply(ctx);

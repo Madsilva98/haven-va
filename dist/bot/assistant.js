@@ -36,6 +36,7 @@ const TOOLS = [
                 owner: { type: "string", enum: OWNERS },
                 area: { type: "string", enum: AREAS },
                 priority: { type: "string", enum: PRIORITIES },
+                deadline: { type: "string", description: "Data limite YYYY-MM-DD (opcional)" },
                 why: { type: "string", description: "Razão de negócio, <120 chars" },
                 entity_ref: {
                     type: "object",
@@ -157,7 +158,7 @@ function wordOverlap(a, b) {
             overlap++;
     return overlap / Math.max(wa.size, wb.size);
 }
-function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText) {
+function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar) {
     const lines = [];
     const now = new Date();
     const today = now.toLocaleDateString("pt-PT", {
@@ -193,6 +194,16 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
         lines.push(`[Em resposta ao bot: "${repliedToText}"]`);
         lines.push("");
     }
+    if (contentCalendar && contentCalendar.length > 0) {
+        lines.push("Social Media Calendar:");
+        for (const row of contentCalendar) {
+            const date = row.publishDate ?? "sem data";
+            const platform = row.platform ? ` [${row.platform}]` : "";
+            const owner = row.owner ? ` — ${row.owner}` : "";
+            lines.push(`  - "${row.title}" | ${row.status ?? "—"} | ${date}${platform}${owner}`);
+        }
+        lines.push("");
+    }
     lines.push(`${sender}: ${text}`);
     return lines.join("\n");
 }
@@ -208,6 +219,7 @@ async function execCreateTask(input, sender, ctx, openTasks) {
         ? input.priority
         : "Média";
     const why = typeof input.why === "string" ? input.why : "";
+    const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
     let entityRef;
     const rawRef = input.entity_ref;
     if (rawRef && typeof rawRef === "object" && !Array.isArray(rawRef)) {
@@ -219,7 +231,7 @@ async function execCreateTask(input, sender, ctx, openTasks) {
         }
     }
     const duplicate = openTasks.find((t) => wordOverlap(title, t.title) >= 0.5);
-    const pageId = await notion.createTask({ title, owner, area, why }, priority, ctx.message?.text ?? "", sender, entityRef);
+    const pageId = await notion.createTask({ title, owner, area, why }, priority, ctx.message?.text ?? "", sender, entityRef, deadline);
     let replyText = `✅ task criada: "${title}"`;
     if (duplicate)
         replyText += `\nℹ️ parecida com task existente: "${duplicate.title}"`;
@@ -319,7 +331,7 @@ async function execCreateEntity(input, sender, ctx) {
     log.info("assistant.entity_created", { kind, nome, owner, sender: sender });
     await ctx.reply(`✅ ${kindLabel[kind]} criado: "${nome}"`);
 }
-export async function handleAssistant(ctx, sender, text, openTasks, recentMessages, repliedToText) {
+export async function handleAssistant(ctx, sender, text, openTasks, recentMessages, repliedToText, contentCalendar) {
     let runtime;
     try {
         runtime = initRuntime();
@@ -345,7 +357,7 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
             messages: [
                 {
                     role: "user",
-                    content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText),
+                    content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar),
                 },
             ],
         });

@@ -14,6 +14,7 @@ import type { Context } from "grammy";
 
 import { log } from "../lib/log.js";
 import * as notion from "../notion.js";
+import type { ContentCalendarRow } from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import type {
   Area,
@@ -52,6 +53,7 @@ const TOOLS: Anthropic.Tool[] = [
         owner: { type: "string", enum: OWNERS },
         area: { type: "string", enum: AREAS },
         priority: { type: "string", enum: PRIORITIES },
+        deadline: { type: "string", description: "Data limite YYYY-MM-DD (opcional)" },
         why: { type: "string", description: "Razão de negócio, <120 chars" },
         entity_ref: {
           type: "object",
@@ -188,6 +190,7 @@ function buildUserMessage(
   openTasks: OpenTask[],
   recentMessages: { sender: FounderName; text: string }[],
   repliedToText?: string,
+  contentCalendar?: ContentCalendarRow[],
 ): string {
   const lines: string[] = [];
 
@@ -231,6 +234,17 @@ function buildUserMessage(
     lines.push("");
   }
 
+  if (contentCalendar && contentCalendar.length > 0) {
+    lines.push("Social Media Calendar:");
+    for (const row of contentCalendar) {
+      const date = row.publishDate ?? "sem data";
+      const platform = row.platform ? ` [${row.platform}]` : "";
+      const owner = row.owner ? ` — ${row.owner}` : "";
+      lines.push(`  - "${row.title}" | ${row.status ?? "—"} | ${date}${platform}${owner}`);
+    }
+    lines.push("");
+  }
+
   lines.push(`${sender}: ${text}`);
   return lines.join("\n");
 }
@@ -251,6 +265,7 @@ async function execCreateTask(
     ? (input.priority as Priority)
     : "Média";
   const why = typeof input.why === "string" ? input.why : "";
+  const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
 
   let entityRef: EntityRef | undefined;
   const rawRef = input.entity_ref;
@@ -271,6 +286,7 @@ async function execCreateTask(
     ctx.message?.text ?? "",
     sender,
     entityRef,
+    deadline,
   );
 
   let replyText = `✅ task criada: "${title}"`;
@@ -408,6 +424,7 @@ export async function handleAssistant(
   openTasks: OpenTask[],
   recentMessages: { sender: FounderName; text: string }[],
   repliedToText?: string,
+  contentCalendar?: ContentCalendarRow[],
 ): Promise<void> {
   let runtime: ReturnType<typeof initRuntime>;
   try {
@@ -435,7 +452,7 @@ export async function handleAssistant(
       messages: [
         {
           role: "user",
-          content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText),
+          content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar),
         },
       ],
     });

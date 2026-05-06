@@ -260,7 +260,7 @@ async function entityRelationProps(entityRef) {
     return { [ENTITY_KIND_TO_FIELD[entityRef.kind]]: { relation: [{ id: pageId }] } };
 }
 // ----- methods -----
-async function createTask(extraction, priority, originalMsg, sender, entityRef) {
+async function createTask(extraction, priority, originalMsg, sender, entityRef, deadline) {
     const notas = `originating: ${sender}: "${originalMsg}"\nwhy: ${extraction.why}`;
     const relProps = await entityRelationProps(entityRef);
     const props = {
@@ -272,6 +272,8 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef) 
         Notas: richText(notas),
         ...relProps,
     };
+    if (deadline)
+        props["Deadline"] = { date: { start: deadline } };
     const page = await withRetry("createTask", () => client.pages.create({
         parent: { database_id: NOTION_BACKLOG_DB_ID },
         properties: props,
@@ -1042,6 +1044,44 @@ async function getContentCalendarAlerts() {
         return empty;
     }
 }
+async function getContentCalendarRows() {
+    if (!NOTION_CONTENT_CALENDAR_DB_ID)
+        return [];
+    try {
+        const rows = [];
+        let cursor;
+        do {
+            const res = await withRetry("getContentCalendarRows", () => client.databases.query({
+                database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+                start_cursor: cursor,
+            }));
+            for (const row of res.results) {
+                if (!("properties" in row))
+                    continue;
+                const props = row.properties;
+                const title = readPlainText(props["Name"] ?? props["Título"] ?? props["Title"]);
+                const status = readSelectName(props["Status"]) ??
+                    readStatusName(props["Status"]) ?? null;
+                const publishDate = readDateStart(props["Data publicação"]) ??
+                    readDateStart(props["Publish date"]) ??
+                    readDateStart(props["Data"]) ?? null;
+                const platform = readSelectName(props["Plataforma"]) ??
+                    readSelectName(props["Platform"]) ??
+                    readSelectName(props["Canal"]) ?? null;
+                const owner = readSelectName(props["Owner"]) ?? null;
+                rows.push({ id: row.id, title, status, publishDate, platform, owner });
+            }
+            cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+        } while (cursor);
+        return rows;
+    }
+    catch (err) {
+        log.warn("notion.content_calendar_rows_failed", {
+            message: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+    }
+}
 // ── Studio Log (Phase 1 redesign) ────────────────────────────────────────────
 async function createLogEntry(params) {
     if (!NOTION_STUDIO_LOG_DB_ID) {
@@ -1440,7 +1480,7 @@ export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, logFeed
 // Phase 2
 getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getCompletedSince, getOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
 // Phase 3
-getPartnersStale, getInfluencersStale, getContentCalendarAlerts, createReminder, getDueReminders, markReminderSent, 
+getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createReminder, getDueReminders, markReminderSent, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Phase 1 redesign — Studio Log
@@ -1477,6 +1517,7 @@ export const notion = {
     getPartnersStale,
     getInfluencersStale,
     getContentCalendarAlerts,
+    getContentCalendarRows,
     createReminder,
     getDueReminders,
     markReminderSent,

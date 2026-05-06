@@ -261,8 +261,18 @@ export function buildBot() {
         catch (err) {
             log.warn("pipeline.tasks_fetch_failed", { err: String(err) });
         }
+        const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+        let contentCalendar;
+        if (calendarKeywords.test(text)) {
+            try {
+                contentCalendar = await notion.getContentCalendarRows();
+            }
+            catch (err) {
+                log.warn("pipeline.calendar_fetch_failed", { err: String(err) });
+            }
+        }
         try {
-            await handleAssistant(ctx, senderName, text, openTasks, getPriors(chatId), repliedToText);
+            await handleAssistant(ctx, senderName, text, openTasks, getPriors(chatId), repliedToText, contentCalendar);
         }
         catch (err) {
             log.error("pipeline.error", { err: String(err) });

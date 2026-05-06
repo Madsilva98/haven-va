@@ -347,6 +347,7 @@ async function createTask(
   originalMsg: string,
   sender: FounderName,
   entityRef?: EntityRef,
+  deadline?: string,
 ): Promise<string> {
   const notas = `originating: ${sender}: "${originalMsg}"\nwhy: ${extraction.why}`;
   const relProps = await entityRelationProps(entityRef);
@@ -360,6 +361,7 @@ async function createTask(
     Notas: richText(notas),
     ...relProps,
   };
+  if (deadline) props["Deadline"] = { date: { start: deadline } };
 
   const page = await withRetry("createTask", () =>
     client.pages.create({
@@ -1295,6 +1297,56 @@ async function getContentCalendarAlerts(): Promise<{
   }
 }
 
+export interface ContentCalendarRow {
+  id: string;
+  title: string;
+  status: string | null;
+  publishDate: string | null;
+  platform: string | null;
+  owner: string | null;
+}
+
+async function getContentCalendarRows(): Promise<ContentCalendarRow[]> {
+  if (!NOTION_CONTENT_CALENDAR_DB_ID) return [];
+  try {
+    const rows: ContentCalendarRow[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await withRetry("getContentCalendarRows", () =>
+        client.databases.query({
+          database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+          start_cursor: cursor,
+        }),
+      );
+      for (const row of res.results) {
+        if (!("properties" in row)) continue;
+        const props = row.properties as Record<string, unknown>;
+        const title = readPlainText(props["Name"] ?? props["Título"] ?? props["Title"]);
+        const status =
+          readSelectName(props["Status"]) ??
+          readStatusName(props["Status"]) ?? null;
+        const publishDate =
+          readDateStart(props["Data publicação"]) ??
+          readDateStart(props["Publish date"]) ??
+          readDateStart(props["Data"]) ?? null;
+        const platform =
+          readSelectName(props["Plataforma"]) ??
+          readSelectName(props["Platform"]) ??
+          readSelectName(props["Canal"]) ?? null;
+        const owner = readSelectName(props["Owner"]) ?? null;
+        rows.push({ id: row.id, title, status, publishDate, platform, owner });
+      }
+      cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+    } while (cursor);
+    return rows;
+  } catch (err) {
+    log.warn("notion.content_calendar_rows_failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
 // ── Studio Log (Phase 1 redesign) ────────────────────────────────────────────
 async function createLogEntry(params: {
   text: string;
@@ -1809,6 +1861,7 @@ export {
   getPartnersStale,
   getInfluencersStale,
   getContentCalendarAlerts,
+  getContentCalendarRows,
   createReminder,
   getDueReminders,
   markReminderSent,
@@ -1858,6 +1911,7 @@ export const notion = {
   getPartnersStale,
   getInfluencersStale,
   getContentCalendarAlerts,
+  getContentCalendarRows,
   createReminder,
   getDueReminders,
   markReminderSent,
