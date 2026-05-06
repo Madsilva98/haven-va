@@ -204,6 +204,7 @@ export interface NewTaskIntent {
   area: Area;
   why: string;
   priority: Priority;
+  entityRef?: EntityRef;
 }
 
 export interface EditTaskIntent {
@@ -270,6 +271,11 @@ export interface ToDiscussIntent {
 }
 
 export type EntityKind = "projeto" | "evento" | "parceria" | "influencer";
+
+export interface EntityRef {
+  kind: EntityKind;
+  nome: string;
+}
 
 export interface CreateEntityIntent {
   type: "CREATE_ENTITY";

@@ -21,6 +21,7 @@ import type {
   ChatContext,
   EditPendingField,
   EntityKind,
+  EntityRef,
   FounderName,
   Intent,
   LaunchKind,
@@ -139,6 +140,13 @@ function isString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
 }
 
+function validateEntityRef(ref: unknown): EntityRef | undefined {
+  if (!ref || typeof ref !== "object") return undefined;
+  const r = ref as Record<string, unknown>;
+  if (!ENTITY_KINDS.includes(r.kind as EntityKind) || !isString(r.nome)) return undefined;
+  return { kind: r.kind as EntityKind, nome: (r.nome as string).trim() };
+}
+
 function validateIntent(input: unknown): Intent | null {
   if (!input || typeof input !== "object") return null;
   const o = input as Record<string, unknown>;
@@ -159,6 +167,7 @@ function validateIntent(input: unknown): Intent | null {
         priority: PRIORITIES.includes(o.priority as Priority)
           ? (o.priority as Priority)
           : "Média",
+        ...( validateEntityRef(o.entityRef) ? { entityRef: validateEntityRef(o.entityRef) } : {} ),
       };
     case "EDIT_TASK":
       return { type: "EDIT_TASK" };

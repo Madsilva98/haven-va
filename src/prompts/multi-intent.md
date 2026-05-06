@@ -32,6 +32,13 @@ Future intent / assignment / open commitment.
 }
 ```
 
+**`entityRef`** (optional) — fill when the task clearly belongs to a specific named entity:
+```json
+"entityRef": { "kind": "projeto | evento | parceria | influencer", "nome": "name as mentioned" }
+```
+Signals: "ao evento X", "no projeto Y", "para a parceria Z", "do influencer W", "do evento X".
+Omit if the task has no clear entity association.
+
 **Priority inference:**
 - **Alta**: "urgente", "crítico", "hoje preciso", "prioridade alta", "asap", "para hoje"
 - **Baixa**: "backlog", "quando houver tempo", "sem pressa", "mais tarde", "eventual", "um dia"
@@ -368,10 +375,10 @@ Message (sender: Madalena): `Adiciona uma tarefa ao evento Anos da Bia que é co
 
 Output:
 ```json
-{ "intents": [ { "type": "NEW_TASK", "title": "confirmar evento Anos da Bia", "owner": "Madalena", "area": "Operações", "why": "levantado no grupo", "priority": "Média" } ] }
+{ "intents": [ { "type": "NEW_TASK", "title": "confirmar evento Anos da Bia", "owner": "Madalena", "area": "Operações", "why": "levantado no grupo", "priority": "Média", "entityRef": { "kind": "evento", "nome": "Anos da Bia" } } ] }
 ```
 
-(The word "evento" describes context, not a new entity to create. No `CREATE_ENTITY`.)
+(No `CREATE_ENTITY` — "evento" is context, not a new entity. `entityRef` links the task to the existing event.)
 
 ### Nothing actionable
 

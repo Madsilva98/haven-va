@@ -224,21 +224,57 @@ function buildEditPatch(field, newValue) {
             return { [property]: { date: { start: newValue } } };
     }
 }
+// ----- entity relation helpers -----
+const ENTITY_KIND_TO_FIELD = {
+    projeto: "Projects",
+    evento: "Events Pipeline",
+    parceria: "Partner Pipeline",
+    influencer: "Influencer Pipeline",
+};
+async function findEntityByName(kind, nome) {
+    const dbId = kind === "projeto" ? NOTION_PROJECTS_DB_ID
+        : kind === "evento" ? NOTION_EVENT_DB_ID
+            : kind === "parceria" ? NOTION_PARTNER_DB_ID
+                : NOTION_INFLUENCER_DB_ID;
+    if (!dbId)
+        return null;
+    try {
+        const res = await withRetry("findEntityByName", () => client.databases.query({
+            database_id: dbId,
+            filter: { property: "Name", title: { contains: nome } },
+            page_size: 1,
+        }));
+        return res.results[0]?.id ?? null;
+    }
+    catch (err) {
+        log.warn("notion.find_entity_failed", { kind, nome, err: String(err) });
+        return null;
+    }
+}
+async function entityRelationProps(entityRef) {
+    if (!entityRef)
+        return {};
+    const pageId = await findEntityByName(entityRef.kind, entityRef.nome);
+    if (!pageId)
+        return {};
+    return { [ENTITY_KIND_TO_FIELD[entityRef.kind]]: { relation: [{ id: pageId }] } };
+}
 // ----- methods -----
-async function createTask(extraction, priority, originalMsg, sender) {
+async function createTask(extraction, priority, originalMsg, sender, entityRef) {
     const notas = `originating: ${sender}: "${originalMsg}"\nwhy: ${extraction.why}`;
+    const relProps = await entityRelationProps(entityRef);
+    const props = {
+        "Título": { title: [{ text: { content: extraction.title } }] },
+        Owner: { select: { name: extraction.owner } },
+        "Área": { select: { name: extraction.area } },
+        Prioridade: { select: { name: priority } },
+        Status: { select: { name: "A fazer" } },
+        Notas: richText(notas),
+        ...relProps,
+    };
     const page = await withRetry("createTask", () => client.pages.create({
         parent: { database_id: NOTION_BACKLOG_DB_ID },
-        properties: {
-            "Título": {
-                title: [{ text: { content: extraction.title } }],
-            },
-            Owner: { select: { name: extraction.owner } },
-            "Área": { select: { name: extraction.area } },
-            Prioridade: { select: { name: priority } },
-            Status: { select: { name: "A fazer" } },
-            Notas: richText(notas),
-        },
+        properties: props,
     }));
     invalidateOpenTasksCache();
     log.info("notion.task_created", {
@@ -1407,7 +1443,9 @@ createLogEntry,
 // Dependencies
 setTaskDependency, getDependentTasks, 
 // Feature D — entities
-createProject, createEvent, createPartner, createInfluencer, };
+createProject, createEvent, createPartner, createInfluencer, 
+// Feature E — entity lookup
+findEntityByName, };
 export const notion = {
     createTask,
     updateTask,
@@ -1453,4 +1491,6 @@ export const notion = {
     createEvent,
     createPartner,
     createInfluencer,
+    // Feature E — entity lookup
+    findEntityByName,
 };

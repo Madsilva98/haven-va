@@ -106,6 +106,14 @@ function buildUserMessage(ctx) {
 function isString(v) {
     return typeof v === "string" && v.length > 0;
 }
+function validateEntityRef(ref) {
+    if (!ref || typeof ref !== "object")
+        return undefined;
+    const r = ref;
+    if (!ENTITY_KINDS.includes(r.kind) || !isString(r.nome))
+        return undefined;
+    return { kind: r.kind, nome: r.nome.trim() };
+}
 function validateIntent(input) {
     if (!input || typeof input !== "object")
         return null;
@@ -126,6 +134,7 @@ function validateIntent(input) {
                 priority: PRIORITIES.includes(o.priority)
                     ? o.priority
                     : "Média",
+                ...(validateEntityRef(o.entityRef) ? { entityRef: validateEntityRef(o.entityRef) } : {}),
             };
         case "EDIT_TASK":
             return { type: "EDIT_TASK" };

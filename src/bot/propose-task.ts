@@ -51,6 +51,7 @@ export async function proposeNewTask(
       priority,
       chatCtx.text,
       chatCtx.sender,
+      intent.entityRef,
     );
     notion.invalidateOpenTasksCache();
   } catch (err) {
@@ -68,10 +69,13 @@ export async function proposeNewTask(
       ? esc(intent.owner === "Unassigned" ? "sem owner" : intent.owner)
       : `<a href="tg://user?id=${ownerId}">${esc(intent.owner)}</a>`;
 
+  const entityLine = intent.entityRef
+    ? `\n🔗 ${intent.entityRef.kind}: ${esc(intent.entityRef.nome)}`
+    : "";
   const text =
     `✅ task criada\n\n` +
     `<b>${esc(intent.title)}</b>\n` +
-    `📁 ${esc(intent.area)} · ${ownerLabel} · ${PRIORITY_EMOJI[priority]} ${priority}`;
+    `📁 ${esc(intent.area)} · ${ownerLabel} · ${PRIORITY_EMOJI[priority]} ${priority}${entityLine}`;
 
   const sent = await tgCtx.reply(text, {
     parse_mode: "HTML",

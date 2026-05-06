@@ -32,7 +32,7 @@ export async function proposeNewTask(tgCtx, chatCtx, intent) {
     };
     let createdPageId;
     try {
-        createdPageId = await notion.createTask(extraction, priority, chatCtx.text, chatCtx.sender);
+        createdPageId = await notion.createTask(extraction, priority, chatCtx.text, chatCtx.sender, intent.entityRef);
         notion.invalidateOpenTasksCache();
     }
     catch (err) {
@@ -44,9 +44,12 @@ export async function proposeNewTask(tgCtx, chatCtx, intent) {
     const ownerLabel = intent.owner === "Unassigned" || !ownerId
         ? esc(intent.owner === "Unassigned" ? "sem owner" : intent.owner)
         : `<a href="tg://user?id=${ownerId}">${esc(intent.owner)}</a>`;
+    const entityLine = intent.entityRef
+        ? `\n🔗 ${intent.entityRef.kind}: ${esc(intent.entityRef.nome)}`
+        : "";
     const text = `✅ task criada\n\n` +
         `<b>${esc(intent.title)}</b>\n` +
-        `📁 ${esc(intent.area)} · ${ownerLabel} · ${PRIORITY_EMOJI[priority]} ${priority}`;
+        `📁 ${esc(intent.area)} · ${ownerLabel} · ${PRIORITY_EMOJI[priority]} ${priority}${entityLine}`;
     const sent = await tgCtx.reply(text, {
         parse_mode: "HTML",
         reply_markup: taskUndoKeyboard(createdPageId),
