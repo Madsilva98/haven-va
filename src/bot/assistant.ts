@@ -275,6 +275,21 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+const SILENCE_PHRASES = [
+  "fico em silêncio",
+  "staying silent",
+  "não há nada a fazer",
+  "é apenas contexto",
+  "não é uma ação",
+  "não requer ação",
+  "não vou responder",
+];
+
+function isSilenceResponse(text: string): boolean {
+  const lower = text.toLowerCase();
+  return SILENCE_PHRASES.some((p) => lower.includes(p));
+}
+
 let anthropicClient: Anthropic | null = null;
 let systemPromptText: string | null = null;
 let modelId: string | null = null;
@@ -656,7 +671,19 @@ async function execUpdateRecord(
       ) ?? null;
     }
     if (!best) {
-      await ctx.reply(`não encontrei nenhuma task com "${item}"`);
+      // Fall back to direct Notion API query
+      const found = await notion.findBacklogTask(item);
+      if (!found) {
+        await ctx.reply(`não encontrei nenhuma task com "${item}"`);
+        return;
+      }
+      await notion.updateTask(found.id, editField, newValue);
+      if (editField === "status" && newValue === "Feito") {
+        await checkAndUnblockDependents(found.id, found.title);
+      }
+      const replyText = `✅ "${found.title}" — ${field} → ${newValue}`;
+      collector.push(replyText);
+      await ctx.reply(replyText);
       return;
     }
 
@@ -820,7 +847,7 @@ export async function handleAssistant(
   }
 
   const textBlock = response.content.find((b) => b.type === "text");
-  if (textBlock?.type === "text" && textBlock.text.trim()) {
+  if (textBlock?.type === "text" && textBlock.text.trim() && !isSilenceResponse(textBlock.text)) {
     try {
       collector.push(textBlock.text.trim());
       await ctx.reply(textBlock.text.trim());

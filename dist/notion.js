@@ -374,6 +374,11 @@ async function findRecordByTitle(dbId, titleProp, query) {
     const title = readPlainText(firstPage.properties[titleProp]);
     return { id: firstPage.id, title };
 }
+async function findBacklogTask(query) {
+    if (!NOTION_BACKLOG_DB_ID)
+        return null;
+    return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query);
+}
 async function updateRecord(db, itemTitle, field, newValue) {
     const config = RECORD_DB_CONFIGS[db];
     if (!config)
@@ -1549,7 +1554,7 @@ findEntityByName,
 // Lists
 addToList, checkListItem, getList, 
 // Generic record update
-updateRecord, 
+updateRecord, findBacklogTask, 
 // Page section editing
 findPageInDb, appendToPageSection, uploadAndAttachFile, };
 export const notion = {
@@ -1599,6 +1604,7 @@ export const notion = {
     getList,
     // Generic record update
     updateRecord,
+    findBacklogTask,
     // Page section editing
     findPageInDb,
     appendToPageSection,

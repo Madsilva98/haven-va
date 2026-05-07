@@ -490,6 +490,11 @@ async function findRecordByTitle(
   return { id: firstPage.id, title };
 }
 
+async function findBacklogTask(query: string): Promise<{ id: string; title: string } | null> {
+  if (!NOTION_BACKLOG_DB_ID) return null;
+  return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query);
+}
+
 async function updateRecord(
   db: string,
   itemTitle: string,
@@ -1932,6 +1937,7 @@ export {
   getList,
   // Generic record update
   updateRecord,
+  findBacklogTask,
   // Page section editing
   findPageInDb,
   appendToPageSection,
@@ -1985,6 +1991,7 @@ export const notion = {
   getList,
   // Generic record update
   updateRecord,
+  findBacklogTask,
   // Page section editing
   findPageInDb,
   appendToPageSection,
