@@ -99,33 +99,6 @@ export async function handleHoje(ctx: Context): Promise<void> {
   }
 }
 
-export async function handleStatus(ctx: Context): Promise<void> {
-  try {
-    const feedback = await notion.getRecentFeedback(100);
-    let confirmed = 0;
-    let falsePositive = 0;
-    let corrections = 0;
-    for (const entry of feedback) {
-      if (entry.type === "confirmed") confirmed++;
-      else if (entry.type === "false_positive") falsePositive++;
-      else if (entry.type === "correction") corrections++;
-    }
-    const total = confirmed + falsePositive;
-    const rate = total === 0 ? "—" : `${Math.round((confirmed / total) * 100)}%`;
-
-    const lines = [
-      "📊 últimas ~100 interacções:",
-      `• confirmadas: ${confirmed}`,
-      `• ignoradas: ${falsePositive}`,
-      `• correcções: ${corrections}`,
-      `• taxa de acerto: ${rate}`,
-    ];
-    await ctx.reply(lines.join("\n"));
-  } catch (err) {
-    log.error("status.failed", { err: String(err) });
-    await ctx.reply("erro a buscar status");
-  }
-}
 
 export async function handleLista(ctx: Context): Promise<void> {
   const arg = (ctx.message?.text ?? "")

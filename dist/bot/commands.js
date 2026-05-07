@@ -83,34 +83,46 @@ export async function handleHoje(ctx) {
         await ctx.reply("erro a buscar tasks — tenta outra vez");
     }
 }
-export async function handleStatus(ctx) {
+export async function handleLista(ctx) {
+    const arg = (ctx.message?.text ?? "")
+        .replace(/^\/lista(@\w+)?\s*/i, "")
+        .trim();
     try {
-        const feedback = await notion.getRecentFeedback(100);
-        let confirmed = 0;
-        let falsePositive = 0;
-        let corrections = 0;
-        for (const entry of feedback) {
-            if (entry.type === "confirmed")
-                confirmed++;
-            else if (entry.type === "false_positive")
-                falsePositive++;
-            else if (entry.type === "correction")
-                corrections++;
+        const items = await notion.getList(arg || undefined);
+        if (items.length === 0) {
+            const msg = arg ? `lista *${arg}* está vazia` : "não há itens em nenhuma lista";
+            await ctx.reply(msg, { parse_mode: "Markdown" });
+            return;
         }
-        const total = confirmed + falsePositive;
-        const rate = total === 0 ? "—" : `${Math.round((confirmed / total) * 100)}%`;
-        const lines = [
-            "📊 últimas ~100 interacções:",
-            `• confirmadas: ${confirmed}`,
-            `• ignoradas: ${falsePositive}`,
-            `• correcções: ${corrections}`,
-            `• taxa de acerto: ${rate}`,
-        ];
-        await ctx.reply(lines.join("\n"));
+        if (!arg) {
+            // Aggregate: show list names with pending counts
+            const counts = new Map();
+            for (const i of items) {
+                if (!i.feito)
+                    counts.set(i.lista, (counts.get(i.lista) ?? 0) + 1);
+            }
+            const lines = ["📋 *Listas*"];
+            for (const [nome, count] of counts) {
+                lines.push(`  • ${nome} — ${count} item${count !== 1 ? "s" : ""} por fazer`);
+            }
+            await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+            return;
+        }
+        const pending = items.filter((i) => !i.feito);
+        const done = items.filter((i) => i.feito);
+        const lines = [`📋 *${arg}*`];
+        for (const i of pending)
+            lines.push(`  ☐ ${i.item}`);
+        if (done.length > 0) {
+            lines.push("");
+            for (const i of done)
+                lines.push(`  ☑ ~${i.item}~`);
+        }
+        await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
     }
     catch (err) {
-        log.error("status.failed", { err: String(err) });
-        await ctx.reply("erro a buscar status");
+        log.error("commands.lista.failed", { err: String(err) });
+        await ctx.reply("erro a carregar lista — tenta outra vez");
     }
 }
 export async function handleDashboard(ctx) {

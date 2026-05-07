@@ -16,7 +16,7 @@ import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
 import * as notion from "../notion.js";
 import { handleCallback as handlePhase1Callback } from "./callbacks.js";
-import { handleDashboard, handleHelp, handleHoje, handleStart, handleStatus, handleTask, } from "./commands.js";
+import { handleDashboard, handleHelp, handleHoje, handleLista, handleStart, handleTask, } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
 import { handleWeek, handleWeekCallback, handleWeekTextStep, isAwaitingFocusFor, } from "./week.js";
@@ -130,14 +130,13 @@ export function buildBot() {
         { command: "todiscuss", description: "Adicionar à lista de discussão" },
         { command: "remind", description: "Criar lembrete" },
         { command: "week", description: "Definir foco semanal" },
-        { command: "status", description: "Ver métricas do bot" },
+        { command: "lista", description: "Ver uma lista (/lista compras)" },
         { command: "help", description: "Ajuda" },
     ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
     // Slash commands (work in both group and DM).
     bot.command("start", handleStart);
     bot.command("help", handleHelp);
     bot.command("task", handleTask);
-    bot.command("status", handleStatus);
     bot.command("week", async (ctx) => {
         const fromId = ctx.from?.id;
         const founder = fromId ? getFounderName(fromId) : null;
@@ -156,6 +155,7 @@ export function buildBot() {
     bot.command("todiscuss", handleToDiscussCommand);
     bot.command("hoje", handleHoje);
     bot.command("dashboard", handleDashboard);
+    bot.command("lista", handleLista);
     // Google Calendar auth — Madalena's private DM only.
     bot.command("auth", async (ctx) => {
         if (ctx.chat.type !== "private")

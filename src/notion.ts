@@ -17,7 +17,6 @@ import type {
   EditableField,
   EntityKind,
   EntityRef,
-  FeedbackEntry,
   FounderName,
   NewTaskExtraction,
   OpenTask,
@@ -42,8 +41,6 @@ import { log } from "./lib/log.js";
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
 const NOTION_BACKLOG_DB_ID = process.env.NOTION_BACKLOG_DB_ID;
-const NOTION_FEEDBACK_DB_ID = process.env.NOTION_FEEDBACK_DB_ID;
-const NOTION_PENDING_DB_ID = process.env.NOTION_PENDING_DB_ID;
 
 // Phase 2/3/5 — all optional
 const NOTION_FOUNDER_FOCUS_DB_ID = process.env.NOTION_FOUNDER_FOCUS_DB_ID;
@@ -64,12 +61,6 @@ if (!NOTION_API_KEY) {
 }
 if (!NOTION_BACKLOG_DB_ID) {
   throw new Error("notion: NOTION_BACKLOG_DB_ID is required");
-}
-if (!NOTION_FEEDBACK_DB_ID) {
-  throw new Error("notion: NOTION_FEEDBACK_DB_ID is required");
-}
-if (!NOTION_PENDING_DB_ID) {
-  throw new Error("notion: NOTION_PENDING_DB_ID is required");
 }
 
 const client = new Client({ auth: NOTION_API_KEY });
@@ -122,14 +113,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 // ----- caches -----
 
 const OPEN_TASKS_TTL_MS = 60 * 1000;
-const FEEDBACK_TTL_MS = 5 * 60 * 1000;
-
 let openTasksCache: { value: OpenTask[]; expiresAt: number } | null = null;
-let recentFeedbackCache: {
-  n: number;
-  value: FeedbackEntry[];
-  expiresAt: number;
-} | null = null;
 
 const WEEKLY_PRIORITIES_TTL_MS = 60 * 1000;
 const OVERDUE_TTL_MS = 60 * 1000;
@@ -464,356 +448,6 @@ async function getOpenTasks(): Promise<OpenTask[]> {
   return tasks;
 }
 
-async function logFeedback(entry: FeedbackEntry): Promise<void> {
-  const properties: Record<string, unknown> = {
-    Tipo: { select: { name: entry.type } },
-    "Mensagem original": richText(entry.originalMsg),
-    Sender: { select: { name: entry.sender } },
-    "Bot extraction": richText(entry.botExtraction),
-    "Tua acção": { select: { name: entry.userAction } },
-  };
-  if (entry.userText !== undefined) {
-    properties["Texto da correcção"] = richText(entry.userText);
-  }
-
-  await withRetry("logFeedback", () =>
-    client.pages.create({
-      parent: { database_id: NOTION_FEEDBACK_DB_ID! },
-      properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
-    }),
-  );
-  log.info("notion.feedback_logged", { type: entry.type, sender: entry.sender });
-}
-
-async function getRecentFeedback(n = 20): Promise<FeedbackEntry[]> {
-  const now = Date.now();
-  if (
-    recentFeedbackCache &&
-    recentFeedbackCache.n === n &&
-    recentFeedbackCache.expiresAt > now
-  ) {
-    return recentFeedbackCache.value;
-  }
-
-  const res = await withRetry("getRecentFeedback", () =>
-    client.databases.query({
-      database_id: NOTION_FEEDBACK_DB_ID!,
-      sorts: [{ property: "Data", direction: "descending" }],
-      page_size: Math.min(n, 100),
-    }),
-  );
-
-  const entries: FeedbackEntry[] = [];
-  for (const row of res.results) {
-    if (!("properties" in row)) continue;
-    const props = row.properties as Record<string, unknown>;
-    const typeName = readSelectName(props["Tipo"]);
-    if (
-      typeName !== "confirmed" &&
-      typeName !== "false_positive" &&
-      typeName !== "correction"
-    ) {
-      continue;
-    }
-    const senderName = readSelectName(props["Sender"]);
-    if (
-      senderName !== "Madalena" &&
-      senderName !== "Mafalda" &&
-      senderName !== "Beatriz"
-    ) {
-      continue;
-    }
-    const userText = readPlainText(props["Texto da correcção"]);
-    entries.push({
-      type: typeName,
-      originalMsg: readPlainText(props["Mensagem original"]),
-      sender: senderName,
-      botExtraction: readPlainText(props["Bot extraction"]),
-      userAction: readSelectName(props["Tua acção"]) ?? "",
-      ...(userText ? { userText } : {}),
-    });
-  }
-
-  recentFeedbackCache = {
-    n,
-    value: entries,
-    expiresAt: now + FEEDBACK_TTL_MS,
-  };
-  log.debug("notion.recent_feedback_fetched", { count: entries.length });
-  return entries;
-}
-
-// ----- Bot Pending DB (replaces in-memory pending state for Vercel serverless) -----
-
-import type { PendingProposal, RecentAction, IntentType } from "./types.js";
-
-async function createPending(
-  proposal: PendingProposal,
-  chatId: number,
-): Promise<void> {
-  // Title is just human-readable; lookup is by Bot Message ID number.
-  const properties: Record<string, unknown> = {
-    Título: {
-      title: [{ text: { content: `Pending #${proposal.botMessageId}` } }],
-    },
-    "Bot Message ID": { number: proposal.botMessageId },
-    "Chat ID": { number: chatId },
-    Tipo: { select: { name: proposal.type } },
-    Extraction: richText(JSON.stringify(proposal.extraction)),
-    "Mensagem original": richText(proposal.originalMsg),
-    Sender: { select: { name: proposal.originalSender } },
-    Committed: { checkbox: false },
-    Cancelled: { checkbox: false },
-  };
-
-  await withRetry("createPending", () =>
-    client.pages.create({
-      parent: { database_id: NOTION_PENDING_DB_ID! },
-      properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
-    }),
-  );
-  log.debug("notion.pending_created", {
-    botMessageId: proposal.botMessageId,
-    chatId,
-  });
-}
-
-async function markCommitted(
-  botMessageId: number,
-  notionPageId: string | null,
-): Promise<void> {
-  const res = await withRetry("markCommitted.find", () =>
-    client.databases.query({
-      database_id: NOTION_PENDING_DB_ID!,
-      filter: {
-        property: "Bot Message ID",
-        number: { equals: botMessageId },
-      },
-      page_size: 1,
-    }),
-  );
-  const page = res.results[0];
-  if (!page) return;
-
-  const properties: Record<string, unknown> = {
-    Committed: { checkbox: true },
-  };
-  if (notionPageId !== null) {
-    properties["Notion Page ID"] = richText(notionPageId);
-  }
-
-  await withRetry("markCommitted.update", () =>
-    client.pages.update({
-      page_id: page.id,
-      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
-    }),
-  );
-  log.debug("notion.pending_committed", { botMessageId, notionPageId });
-}
-
-async function markCancelled(botMessageId: number): Promise<void> {
-  const res = await withRetry("markCancelled.find", () =>
-    client.databases.query({
-      database_id: NOTION_PENDING_DB_ID!,
-      filter: {
-        property: "Bot Message ID",
-        number: { equals: botMessageId },
-      },
-      page_size: 1,
-    }),
-  );
-  const page = res.results[0];
-  if (!page) return;
-
-  await withRetry("markCancelled.update", () =>
-    client.pages.update({
-      page_id: page.id,
-      properties: {
-        Cancelled: { checkbox: true },
-      } as Parameters<typeof client.pages.update>[0]["properties"],
-    }),
-  );
-  log.debug("notion.pending_cancelled", { botMessageId });
-}
-
-async function getRecentActions(
-  chatId: number,
-  ttlMinutes: number,
-  limit: number,
-): Promise<RecentAction[]> {
-  const sinceIso = new Date(Date.now() - ttlMinutes * 60 * 1000).toISOString();
-
-  const res = await withRetry("getRecentActions", () =>
-    client.databases.query({
-      database_id: NOTION_PENDING_DB_ID!,
-      filter: {
-        and: [
-          { property: "Chat ID", number: { equals: chatId } },
-          { property: "Cancelled", checkbox: { equals: false } },
-          {
-            timestamp: "created_time",
-            created_time: { on_or_after: sinceIso },
-          },
-        ],
-      },
-      sorts: [{ timestamp: "created_time", direction: "descending" }],
-      page_size: limit,
-    }),
-  );
-
-  const actions: RecentAction[] = [];
-  for (const page of res.results) {
-    if (!("properties" in page)) continue;
-    const props = page.properties as Record<string, unknown>;
-
-    try {
-      const tipo = readSelectName(props["Tipo"]);
-      let type: IntentType;
-      let idPrefix: string;
-      if (tipo === "new_task") {
-        type = "NEW_TASK";
-        idPrefix = "t";
-      } else if (tipo === "edit") {
-        type = "EDIT_TASK";
-        idPrefix = "e";
-      } else {
-        continue;
-      }
-
-      const committed = readCheckbox(props["Committed"]);
-      const status: RecentAction["status"] = committed ? "committed" : "pending";
-
-      const botMessageIdRaw = props["Bot Message ID"];
-      const botMessageId =
-        botMessageIdRaw &&
-        typeof botMessageIdRaw === "object" &&
-        "number" in botMessageIdRaw &&
-        typeof (botMessageIdRaw as { number: unknown }).number === "number"
-          ? (botMessageIdRaw as { number: number }).number
-          : null;
-
-      const id =
-        botMessageId !== null
-          ? `${idPrefix}${botMessageId % 1000}`
-          : `${idPrefix}?`;
-
-      const extractionRaw = readPlainText(props["Extraction"]);
-      let summary: string;
-      try {
-        const extraction = JSON.parse(extractionRaw) as Record<string, unknown>;
-        if (type === "NEW_TASK") {
-          summary = `${extraction["title"] ?? ""} (${extraction["area"] ?? ""}, ${extraction["owner"] ?? ""})`;
-        } else {
-          summary = `edição: ${extraction["field"] ?? ""} → ${extraction["newValue"] ?? ""} em ${extraction["targetTitle"] ?? ""}`;
-        }
-      } catch {
-        continue;
-      }
-
-      const createdAt =
-        "created_time" in page ? Date.parse(page.created_time) : Date.now();
-
-      const notionPageIdText = readPlainText(props["Notion Page ID"]);
-      const notionPageId = notionPageIdText.length > 0 ? notionPageIdText : null;
-
-      actions.push({
-        id,
-        type,
-        status,
-        summary,
-        createdAt,
-        notionPageId,
-        botMessageId,
-      });
-    } catch (err) {
-      log.warn("notion.recent_action_map_failed", {
-        message: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
-  }
-
-  return actions;
-}
-
-async function getPending(botMessageId: number): Promise<PendingProposal | null> {
-  const res = await withRetry("getPending", () =>
-    client.databases.query({
-      database_id: NOTION_PENDING_DB_ID!,
-      filter: {
-        and: [
-          { property: "Bot Message ID", number: { equals: botMessageId } },
-          { property: "Committed", checkbox: { equals: false } },
-          { property: "Cancelled", checkbox: { equals: false } },
-        ],
-      },
-      page_size: 1,
-    }),
-  );
-
-  if (res.results.length === 0) return null;
-  const page = res.results[0];
-  if (!page || !("properties" in page)) return null;
-  const props = page.properties as Record<string, unknown>;
-
-  const type = readSelectName(props["Tipo"]);
-  if (type !== "new_task" && type !== "edit") return null;
-
-  const sender = readSelectName(props["Sender"]);
-  if (sender !== "Madalena" && sender !== "Mafalda" && sender !== "Beatriz") {
-    return null;
-  }
-
-  const extractionRaw = readPlainText(props["Extraction"]);
-  let extraction: unknown;
-  try {
-    extraction = JSON.parse(extractionRaw);
-  } catch {
-    log.warn("notion.pending_parse_failed", { botMessageId });
-    return null;
-  }
-
-  const originalMsg = readPlainText(props["Mensagem original"]);
-  const createdAt = "created_time" in page ? new Date(page.created_time).getTime() : Date.now();
-
-  // Stash the Notion page id on the proposal via a side channel:
-  // we use it for delete; piggyback on a custom field of PendingProposal.
-  const proposal = {
-    type,
-    botMessageId,
-    extraction,
-    originalMsg,
-    originalSender: sender,
-    createdAt,
-    _notionPageId: page.id,
-  } as PendingProposal & { _notionPageId: string };
-
-  return proposal;
-}
-
-async function deletePending(botMessageId: number): Promise<void> {
-  // Find the page first, then archive it.
-  const res = await withRetry("deletePending.find", () =>
-    client.databases.query({
-      database_id: NOTION_PENDING_DB_ID!,
-      filter: {
-        property: "Bot Message ID",
-        number: { equals: botMessageId },
-      },
-      page_size: 1,
-    }),
-  );
-  const page = res.results[0];
-  if (!page) return;
-
-  await withRetry("deletePending.archive", () =>
-    client.pages.update({
-      page_id: page.id,
-      archived: true,
-    }),
-  );
-  log.debug("notion.pending_deleted", { botMessageId });
-}
 
 // ============================================================
 // Phase 2 — Weekly cycle
@@ -1950,15 +1584,7 @@ export {
   updateTask,
   getOpenTasks,
   invalidateOpenTasksCache,
-  logFeedback,
-  getRecentFeedback,
-  createPending,
-  getPending,
-  deletePending,
-  markCommitted,
-  markCancelled,
   archivePage,
-  getRecentActions,
   // Phase 2
   getOpenTasksFor,
   getWeeklyPriorities,
@@ -2004,15 +1630,7 @@ export const notion = {
   updateTask,
   getOpenTasks,
   invalidateOpenTasksCache,
-  logFeedback,
-  getRecentFeedback,
-  createPending,
-  getPending,
-  deletePending,
-  markCommitted,
-  markCancelled,
   archivePage,
-  getRecentActions,
   // Phase 2
   getOpenTasksFor,
   getWeeklyPriorities,

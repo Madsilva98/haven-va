@@ -26,7 +26,6 @@ import {
   handleHoje,
   handleLista,
   handleStart,
-  handleStatus,
   handleTask,
 } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
@@ -154,7 +153,6 @@ export function buildBot(): Bot {
     { command: "remind",    description: "Criar lembrete" },
     { command: "week",      description: "Definir foco semanal" },
     { command: "lista",     description: "Ver uma lista (/lista compras)" },
-    { command: "status",    description: "Ver métricas do bot" },
     { command: "help",      description: "Ajuda" },
   ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
 
@@ -162,7 +160,6 @@ export function buildBot(): Bot {
   bot.command("start", handleStart);
   bot.command("help", handleHelp);
   bot.command("task", handleTask);
-  bot.command("status", handleStatus);
   bot.command("week", async (ctx) => {
     const fromId = ctx.from?.id;
     const founder = fromId ? getFounderName(fromId) : null;
