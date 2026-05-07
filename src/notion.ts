@@ -616,83 +616,41 @@ async function getOverdueTasks(): Promise<OpenTask[]> {
 
 async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
   if (!NOTION_FOUNDER_FOCUS_DB_ID) {
-    throw new Error(
-      "NOTION_FOUNDER_FOCUS_DB_ID not set — Phase 2 founder focus features disabled",
-    );
+    throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
   }
-  // Find existing row by Founder (title) + Semana (rich_text)
-  const res = await withRetry("setFounderFocus.find", () =>
-    client.databases.query({
-      database_id: NOTION_FOUNDER_FOCUS_DB_ID,
-      filter: {
-        and: [
-          { property: "Founder", title: { equals: entry.founder } },
-          { property: "Semana", rich_text: { equals: entry.semana } },
-        ],
-      },
-      page_size: 1,
+  // Always create — latest entry per founder is the active focus.
+  await withRetry("setFounderFocus", () =>
+    client.pages.create({
+      parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID! },
+      properties: {
+        Founder: { title: [{ text: { content: entry.founder } }] },
+        Semana: richText(entry.semana),
+        "Foco operacional": richText(entry.focoOperacional),
+      } as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
-
-  const properties: Record<string, unknown> = {
-    Founder: { title: [{ text: { content: entry.founder } }] },
-    Semana: richText(entry.semana),
-    "Foco operacional": richText(entry.focoOperacional),
-  };
-
-  const existing = res.results[0];
-  if (existing) {
-    await withRetry("setFounderFocus.update", () =>
-      client.pages.update({
-        page_id: existing.id,
-        properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
-      }),
-    );
-    log.info("notion.founder_focus_updated", {
-      founder: entry.founder,
-      semana: entry.semana,
-    });
-  } else {
-    await withRetry("setFounderFocus.create", () =>
-      client.pages.create({
-        parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID },
-        properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
-      }),
-    );
-    log.info("notion.founder_focus_created", {
-      founder: entry.founder,
-      semana: entry.semana,
-    });
-  }
+  log.info("notion.founder_focus_created", { founder: entry.founder, semana: entry.semana });
 }
 
 async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]> {
-  if (!NOTION_FOUNDER_FOCUS_DB_ID) {
-    throw new Error(
-      "NOTION_FOUNDER_FOCUS_DB_ID not set — Phase 2 founder focus features disabled",
-    );
-  }
+  if (!NOTION_FOUNDER_FOCUS_DB_ID) return [];
   const res = await withRetry("getFounderFocusForWeek", () =>
     client.databases.query({
-      database_id: NOTION_FOUNDER_FOCUS_DB_ID,
-      filter: {
-        property: "Semana",
-        rich_text: { equals: week },
-      },
+      database_id: NOTION_FOUNDER_FOCUS_DB_ID!,
+      filter: { property: "Semana", rich_text: { equals: week } },
+      sorts: [{ timestamp: "created_time", direction: "descending" }],
     }),
   );
+  // Latest entry per founder is the active focus.
+  const seen = new Set<string>();
   const entries: FounderFocusEntry[] = [];
   for (const row of res.results) {
     if (!("properties" in row)) continue;
     const props = row.properties as Record<string, unknown>;
     const founderName = readPlainText(props["Founder"]);
-    if (
-      founderName !== "Madalena" &&
-      founderName !== "Mafalda" &&
-      founderName !== "Beatriz"
-    ) {
-      continue;
-    }
+    if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") continue;
+    if (seen.has(founderName)) continue;
+    seen.add(founderName);
     entries.push({
       founder: founderName,
       semana: readPlainText(props["Semana"]) || week,

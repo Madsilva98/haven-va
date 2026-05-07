@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { InlineKeyboard, type Context } from "grammy";
 
 import { log } from "../lib/log.js";
+import { currentWeekLabel } from "../lib/week.js";
 import * as notion from "../notion.js";
 import type { ContentCalendarRow } from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
@@ -116,6 +117,22 @@ const TOOLS: Anthropic.Tool[] = [
         deadline: { type: "string", description: "Data limite, YYYY-MM-DD (opcional)" },
       },
       required: ["tema"],
+    },
+  },
+  {
+    name: "set_focus",
+    description: "Define o foco operacional da founder para a semana atual",
+    input_schema: {
+      type: "object",
+      properties: {
+        foco: { type: "string", description: "Descrição do foco semanal, pt-PT, <200 chars" },
+        founder: {
+          type: "string",
+          enum: ["Madalena", "Mafalda", "Beatriz"],
+          description: "Founder em questão (default: sender)",
+        },
+      },
+      required: ["foco"],
     },
   },
   {
@@ -442,6 +459,21 @@ async function execAddToDiscuss(
   await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
 }
 
+async function execSetFocus(
+  input: Record<string, unknown>,
+  sender: FounderName,
+  ctx: Context,
+): Promise<void> {
+  const foco = typeof input.foco === "string" ? input.foco.trim().slice(0, 200) : "";
+  if (!foco) return;
+  const founder = FOUNDERS.includes(input.founder as FounderName)
+    ? (input.founder as FounderName)
+    : sender;
+
+  await notion.setFounderFocus({ founder, semana: currentWeekLabel(), focoOperacional: foco });
+  await ctx.reply(`🎯 foco de ${founder} esta semana: "${foco}"`);
+}
+
 async function execLogEntry(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -652,6 +684,9 @@ export async function handleAssistant(
           break;
         case "add_to_discuss":
           await execAddToDiscuss(input, sender, ctx);
+          break;
+        case "set_focus":
+          await execSetFocus(input, sender, ctx);
           break;
         case "log_entry":
           await execLogEntry(input, sender, ctx);
