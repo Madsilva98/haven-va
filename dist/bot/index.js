@@ -365,13 +365,6 @@ export function buildBot() {
             return;
         if (hasNonTextMedia)
             return;
-        let openTasks = [];
-        try {
-            openTasks = await notion.getOpenTasks();
-        }
-        catch (err) {
-            log.warn("pipeline.tasks_fetch_failed", { err: String(err) });
-        }
         const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
         let contentCalendar;
         if (calendarKeywords.test(text)) {
@@ -383,7 +376,7 @@ export function buildBot() {
             }
         }
         try {
-            const botReplies = await handleAssistant(ctx, senderName, text, openTasks, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId));
+            const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId));
             if (botReplies.length > 0) {
                 lastBotRepliesByChat.set(chatId, botReplies);
             }

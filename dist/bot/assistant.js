@@ -9,7 +9,6 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
-import { InlineKeyboard } from "grammy";
 import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
 import * as notion from "../notion.js";
@@ -241,6 +240,25 @@ const TOOLS = [
         },
     },
     {
+        name: "search_records",
+        description: "Pesquisa registos em qualquer DB do Notion por título. Usa antes de criar (verificar duplicados) ou antes de atualizar (encontrar o registo certo). NÃO envia resposta ao utilizador.",
+        input_schema: {
+            type: "object",
+            properties: {
+                db: {
+                    type: "string",
+                    enum: ["backlog", "to_discuss", "decisions", "content_calendar", "partners", "influencers", "events", "projects"],
+                    description: "Base de dados a pesquisar",
+                },
+                query: {
+                    type: "string",
+                    description: "Título ou parte do título a pesquisar",
+                },
+            },
+            required: ["db", "query"],
+        },
+    },
+    {
         name: "create_entity",
         description: "Cria um parceiro, projeto, evento ou influencer no Notion",
         input_schema: {
@@ -302,18 +320,7 @@ function lisbonLocalToUtc(lisbonNaive) {
     return (`${utc.getUTCFullYear()}-${p(utc.getUTCMonth() + 1)}-${p(utc.getUTCDate())}` +
         `T${p(utc.getUTCHours())}:${p(utc.getUTCMinutes())}:${p(utc.getUTCSeconds())}`);
 }
-function wordOverlap(a, b) {
-    const wa = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
-    const wb = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
-    if (wa.size === 0 || wb.size === 0)
-        return 0;
-    let overlap = 0;
-    for (const w of wa)
-        if (wb.has(w))
-            overlap++;
-    return overlap / Math.max(wa.size, wb.size);
-}
-function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
+function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
     const lines = [];
     const now = new Date();
     const today = now.toLocaleDateString("pt-PT", {
@@ -330,14 +337,6 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
     });
     lines.push(`Hoje: ${today}, ${time} (Europe/Lisbon)`);
     lines.push("");
-    if (openTasks.length > 0) {
-        lines.push("Tasks em aberto:");
-        for (const t of openTasks.slice(0, 20)) {
-            const dead = t.deadline ? ` | prazo=${t.deadline}` : "";
-            lines.push(`  - [${t.area}] "${t.title}" — ${t.owner}, ${t.priority ?? "—"}${dead}`);
-        }
-        lines.push("");
-    }
     if (recentMessages.length > 0) {
         lines.push("Conversa recente:");
         for (const m of recentMessages) {
@@ -365,10 +364,10 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
     lines.push(`${sender}: ${text}`);
     return lines.join("\n");
 }
-async function execCreateTask(input, sender, ctx, openTasks, collector) {
+async function execCreateTask(input, sender, ctx, collector) {
     const title = (typeof input.title === "string" ? input.title.trim() : "").slice(0, 80);
     if (!title)
-        return;
+        return "título em falta";
     const owner = OWNERS.includes(input.owner)
         ? input.owner
         : "Unassigned";
@@ -388,22 +387,18 @@ async function execCreateTask(input, sender, ctx, openTasks, collector) {
             entityRef = { kind, nome };
         }
     }
-    const duplicate = openTasks.find((t) => wordOverlap(title, t.title) >= 0.5);
     const pageId = await notion.createTask({ title, owner, area, why }, priority, ctx.message?.text ?? "", sender, entityRef, deadline);
-    let replyText = `✅ task criada: "${title}"`;
-    if (duplicate)
-        replyText += `\nℹ️ parecida com task existente: "${duplicate.title}"`;
+    const replyText = `✅ task criada: "${title}"`;
     collector.push(replyText);
-    await ctx.reply(replyText, {
-        reply_markup: taskUndoKeyboard(pageId),
-    });
+    await ctx.reply(replyText, { reply_markup: taskUndoKeyboard(pageId) });
+    return "ok";
 }
 async function execCreateReminder(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
     const whenRaw = typeof input.when_iso === "string" ? input.when_iso : "";
     const forWho = typeof input.for === "string" ? input.for : sender;
     if (!text || !whenRaw)
-        return;
+        return "parâmetros em falta";
     const quando = lisbonLocalToUtc(whenRaw);
     const targets = forWho === "all"
         ? [...FOUNDERS]
@@ -420,11 +415,12 @@ async function execCreateReminder(input, sender, ctx, collector) {
     const reminderReply = `⏰ lembrete criado para ${label}: "${text}"`;
     collector.push(reminderReply);
     await ctx.reply(reminderReply);
+    return "ok";
 }
 async function execLogDecision(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
     if (!text)
-        return;
+        return "parâmetros em falta";
     const area = AREAS.includes(input.area) ? input.area : "Outro";
     const notes = typeof input.notes === "string" ? input.notes : "";
     await notion.createDecision({
@@ -438,11 +434,12 @@ async function execLogDecision(input, sender, ctx, collector) {
     const decisionReply = `📋 decisão registada: "${text}"`;
     collector.push(decisionReply);
     await ctx.reply(decisionReply);
+    return "ok";
 }
 async function execAddToDiscuss(input, sender, ctx, collector) {
     const tema = typeof input.tema === "string" ? input.tema.trim() : "";
     if (!tema)
-        return;
+        return "parâmetros em falta";
     const urgencia = TO_DISCUSS_URGENCIES.includes(input.urgencia)
         ? input.urgencia
         : "Próxima reunião";
@@ -459,11 +456,12 @@ async function execAddToDiscuss(input, sender, ctx, collector) {
     const discussReply = `💬 adicionado à lista de discussão: "${tema}"`;
     collector.push(discussReply);
     await ctx.reply(discussReply);
+    return "ok";
 }
 async function execSetFocus(input, sender, ctx, collector) {
     const foco = typeof input.foco === "string" ? input.foco.trim().slice(0, 200) : "";
     if (!foco)
-        return;
+        return "parâmetros em falta";
     const founder = FOUNDERS.includes(input.founder)
         ? input.founder
         : sender;
@@ -471,11 +469,12 @@ async function execSetFocus(input, sender, ctx, collector) {
     const focusReply = `🎯 foco de ${founder} esta semana: "${foco}"`;
     collector.push(focusReply);
     await ctx.reply(focusReply);
+    return "ok";
 }
 async function execLogEntry(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
     if (!text)
-        return;
+        return "parâmetros em falta";
     const tags = Array.isArray(input.tags)
         ? input.tags.filter((t) => typeof t === "string").map((t) => t.trim()).slice(0, 3)
         : [];
@@ -483,21 +482,23 @@ async function execLogEntry(input, sender, ctx, collector) {
     const logReply = `📓 registado: "${text}"`;
     collector.push(logReply);
     await ctx.reply(logReply);
+    return "ok";
 }
 async function execAddToList(input, sender, ctx, collector) {
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
-        return;
+        return "parâmetros em falta";
     await notion.addToList(item, lista, sender, ctx.message?.text ?? "");
     const listReply = `📝 "${item}" adicionado à lista *${lista}*`;
     collector.push(listReply);
     await ctx.reply(listReply);
+    return "ok";
 }
 async function execCreateContentCalendarEntry(input, sender, ctx, collector) {
     const title = typeof input.title === "string" ? input.title.trim() : "";
     if (!title)
-        return;
+        return "parâmetros em falta";
     const status = typeof input.status === "string" ? input.status.trim() : "Raw Idea";
     const publishDate = typeof input.publish_date === "string" && input.publish_date ? input.publish_date : undefined;
     const adType = typeof input.ad_type === "string" ? input.ad_type.trim() : undefined;
@@ -511,103 +512,60 @@ async function execCreateContentCalendarEntry(input, sender, ctx, collector) {
     const calReply = `📅 "${title}" adicionado ao Content Calendar`;
     collector.push(calReply);
     await ctx.reply(calReply);
+    return "ok";
 }
 async function execCheckListItem(input, ctx, collector) {
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
-        return;
+        return "parâmetros em falta";
     const pageId = await notion.checkListItem(item, lista);
     if (!pageId) {
         await ctx.reply(`não encontrei "${item}" na lista *${lista}*`);
-        return;
+        return `não encontrado: ${item}`;
     }
     const checkReply = `✅ "${item}" marcado como feito`;
     collector.push(checkReply);
     await ctx.reply(checkReply);
+    return "ok";
 }
-async function execUpdateRecord(input, openTasks, ctx, collector) {
+async function execUpdateRecord(input, ctx, collector) {
     const db = typeof input.db === "string" ? input.db.trim() : "";
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const field = typeof input.field === "string" ? input.field.trim() : "";
     const newValue = typeof input.new_value === "string" ? input.new_value.trim() : "";
     if (!db || !item || !field || !newValue)
-        return;
-    // Backlog: use cached open tasks + undo support
+        return "parâmetros em falta";
     if (db === "backlog") {
         const editableFields = ["status", "owner", "deadline", "prioridade", "area"];
         if (!editableFields.includes(field))
-            return;
+            return `campo desconhecido: ${field}`;
         const editField = field;
-        let best = null;
-        let bestScore = 0;
-        for (const t of openTasks) {
-            const score = wordOverlap(item, t.title);
-            if (score > bestScore) {
-                bestScore = score;
-                best = t;
-            }
+        const found = await notion.findBacklogTask(item);
+        if (!found) {
+            const msg = `não encontrei nenhuma task com "${item}"`;
+            await ctx.reply(msg);
+            return msg;
         }
-        if (!best || bestScore === 0) {
-            const q = item.toLowerCase();
-            best = openTasks.find((t) => t.title.toLowerCase().includes(q) || q.includes(t.title.toLowerCase())) ?? null;
-        }
-        if (!best) {
-            // Fall back to direct Notion API query
-            const found = await notion.findBacklogTask(item);
-            if (!found) {
-                await ctx.reply(`não encontrei nenhuma task com "${item}"`);
-                return;
-            }
-            await notion.updateTask(found.id, editField, newValue);
-            if (editField === "status" && newValue === "Feito") {
-                await checkAndUnblockDependents(found.id, found.title);
-            }
-            const replyText = `✅ "${found.title}" — ${field} → ${newValue}`;
-            collector.push(replyText);
-            await ctx.reply(replyText);
-            return;
-        }
-        const oldValue = (() => {
-            switch (editField) {
-                case "status": return best.status;
-                case "owner": return best.owner;
-                case "deadline": return best.deadline ?? "none";
-                case "prioridade": return best.priority ?? "none";
-                case "area": return best.area;
-            }
-        })();
-        await notion.updateTask(best.id, editField, newValue);
+        await notion.updateTask(found.id, editField, newValue);
         if (editField === "status" && newValue === "Feito") {
-            await checkAndUnblockDependents(best.id, best.title);
+            await checkAndUnblockDependents(found.id, found.title);
         }
-        const replyText = `✅ "${best.title}" — ${field} → ${newValue}`;
-        collector.push(replyText);
-        if (oldValue === "none") {
-            await ctx.reply(replyText);
-        }
-        else {
-            const undoData = `task:edit_undo:${best.id}:${editField}:${oldValue}`;
-            const kb = new InlineKeyboard().text("↩ Desfazer", undoData);
-            await ctx.reply(replyText, { reply_markup: kb });
-        }
-        return;
-    }
-    // All other DBs
-    try {
-        const result = await notion.updateRecord(db, item, field, newValue);
-        if (!result) {
-            await ctx.reply(`não encontrei "${item}" em ${db}`);
-            return;
-        }
-        const replyText = `✅ "${result.title}" — ${field} → ${newValue}`;
+        const replyText = `✅ "${found.title}" — ${field} → ${newValue}`;
         collector.push(replyText);
         await ctx.reply(replyText);
+        return "ok";
     }
-    catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await ctx.reply(`erro a atualizar: ${msg}`);
+    const result = await notion.updateRecord(db, item, field, newValue);
+    if (!result) {
+        const msg = `não encontrei "${item}" em ${db}`;
+        await ctx.reply(msg);
+        return msg;
     }
+    const replyText = `✅ "${result.title}" — ${field} → ${newValue}`;
+    collector.push(replyText);
+    await ctx.reply(replyText);
+    return "ok";
 }
 async function execAddToPageSection(input, ctx, collector) {
     const db = typeof input.db === "string" ? input.db.trim() : "";
@@ -615,27 +573,53 @@ async function execAddToPageSection(input, ctx, collector) {
     const content = typeof input.content === "string" ? input.content.trim() : "";
     const section = typeof input.section === "string" ? input.section.trim() : undefined;
     if (!db || !pageName || !content)
-        return;
+        return "parâmetros em falta";
     const page = await notion.findPageInDb(db, pageName);
     if (!page) {
         await ctx.reply(`não encontrei "${pageName}" em ${db}`);
-        return;
+        return `não encontrado: ${pageName}`;
     }
     await notion.appendToPageSection(page.id, content, section);
     const where = section ? `secção "${section}"` : "página";
     const reply = `✏️ escrito em "${page.title}" — ${where}`;
     collector.push(reply);
     await ctx.reply(reply);
+    return "ok";
+}
+async function execSearchRecords(input) {
+    const db = typeof input.db === "string" ? input.db.trim() : "backlog";
+    const query = typeof input.query === "string" ? input.query.trim() : "";
+    if (!query)
+        return "query vazia";
+    const results = await notion.searchRecords(db, query);
+    if (results.length === 0)
+        return `nenhum resultado para "${query}" em ${db}`;
+    return results
+        .map((r) => {
+        const parts = [`"${r.title}"`];
+        if (r.owner)
+            parts.push(r.owner);
+        if (r.status)
+            parts.push(r.status);
+        if (r.area)
+            parts.push(r.area);
+        if (r.priority)
+            parts.push(r.priority);
+        if (r.deadline)
+            parts.push(`prazo: ${r.deadline}`);
+        return parts.join(" | ");
+    })
+        .join("\n");
 }
 async function execCreateEntity(input, sender, ctx, collector) {
     const kind = ENTITY_KINDS.includes(input.kind)
         ? input.kind
         : null;
     if (!kind)
-        return;
+        return "parâmetros em falta";
     const nome = typeof input.nome === "string" ? input.nome.trim() : "";
     if (!nome)
-        return;
+        return "parâmetros em falta";
     const owner = OWNERS.includes(input.owner)
         ? input.owner
         : "Unassigned";
@@ -663,8 +647,42 @@ async function execCreateEntity(input, sender, ctx, collector) {
     const entityReply = `✅ ${kindLabel[kind]} criado: "${nome}"`;
     collector.push(entityReply);
     await ctx.reply(entityReply);
+    return "ok";
 }
-export async function handleAssistant(ctx, sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
+async function dispatchTool(name, input, sender, ctx, collector) {
+    switch (name) {
+        case "search_records":
+            return await execSearchRecords(input);
+        case "create_task":
+            return await execCreateTask(input, sender, ctx, collector);
+        case "create_reminder":
+            return await execCreateReminder(input, sender, ctx, collector);
+        case "log_decision":
+            return await execLogDecision(input, sender, ctx, collector);
+        case "add_to_discuss":
+            return await execAddToDiscuss(input, sender, ctx, collector);
+        case "set_focus":
+            return await execSetFocus(input, sender, ctx, collector);
+        case "log_entry":
+            return await execLogEntry(input, sender, ctx, collector);
+        case "add_to_list":
+            return await execAddToList(input, sender, ctx, collector);
+        case "create_content_calendar_entry":
+            return await execCreateContentCalendarEntry(input, sender, ctx, collector);
+        case "check_list_item":
+            return await execCheckListItem(input, ctx, collector);
+        case "update_record":
+            return await execUpdateRecord(input, ctx, collector);
+        case "add_to_page_section":
+            return await execAddToPageSection(input, ctx, collector);
+        case "create_entity":
+            return await execCreateEntity(input, sender, ctx, collector);
+        default:
+            log.warn("assistant.unknown_tool", { name });
+            return `tool desconhecida: ${name}`;
+    }
+}
+export async function handleAssistant(ctx, sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
     const collector = [];
     let runtime;
     try {
@@ -681,96 +699,68 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
             cache_control: { type: "ephemeral" },
         },
     ];
-    let response;
-    try {
-        response = await runtime.client.messages.create({
-            model: runtime.model,
-            max_tokens: MAX_TOKENS,
-            system: systemBlocks,
-            tools: TOOLS,
-            messages: [
-                {
-                    role: "user",
-                    content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies),
-                },
-            ],
-        });
-    }
-    catch (err) {
-        log.error("assistant.api_error", { err: String(err) });
-        return collector;
-    }
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (textBlock?.type === "text" && textBlock.text.trim() && !isSilenceResponse(textBlock.text)) {
+    const messages = [
+        {
+            role: "user",
+            content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies),
+        },
+    ];
+    const MAX_ITERATIONS = 5;
+    const allToolNames = [];
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+        let response;
         try {
-            collector.push(textBlock.text.trim());
-            await ctx.reply(textBlock.text.trim());
+            response = await runtime.client.messages.create({
+                model: runtime.model,
+                max_tokens: MAX_TOKENS,
+                system: systemBlocks,
+                tools: TOOLS,
+                messages,
+            });
         }
         catch (err) {
-            log.warn("assistant.reply_failed", { err: String(err) });
+            log.error("assistant.api_error", { err: String(err) });
+            break;
         }
-    }
-    const toolCalls = response.content.filter((b) => b.type === "tool_use");
-    for (const block of toolCalls) {
-        if (block.type !== "tool_use")
-            continue;
-        const input = block.input;
-        try {
-            switch (block.name) {
-                case "create_task":
-                    await execCreateTask(input, sender, ctx, openTasks, collector);
-                    break;
-                case "create_reminder":
-                    await execCreateReminder(input, sender, ctx, collector);
-                    break;
-                case "log_decision":
-                    await execLogDecision(input, sender, ctx, collector);
-                    break;
-                case "add_to_discuss":
-                    await execAddToDiscuss(input, sender, ctx, collector);
-                    break;
-                case "set_focus":
-                    await execSetFocus(input, sender, ctx, collector);
-                    break;
-                case "log_entry":
-                    await execLogEntry(input, sender, ctx, collector);
-                    break;
-                case "add_to_list":
-                    await execAddToList(input, sender, ctx, collector);
-                    break;
-                case "create_content_calendar_entry":
-                    await execCreateContentCalendarEntry(input, sender, ctx, collector);
-                    break;
-                case "check_list_item":
-                    await execCheckListItem(input, ctx, collector);
-                    break;
-                case "update_record":
-                    await execUpdateRecord(input, openTasks, ctx, collector);
-                    break;
-                case "add_to_page_section":
-                    await execAddToPageSection(input, ctx, collector);
-                    break;
-                case "create_entity":
-                    await execCreateEntity(input, sender, ctx, collector);
-                    break;
-                default:
-                    log.warn("assistant.unknown_tool", { name: block.name });
+        // Send text blocks to user (except silence responses)
+        for (const block of response.content) {
+            if (block.type === "text" && block.text.trim() && !isSilenceResponse(block.text)) {
+                try {
+                    collector.push(block.text.trim());
+                    await ctx.reply(block.text.trim());
+                }
+                catch (err) {
+                    log.warn("assistant.reply_failed", { err: String(err) });
+                }
             }
         }
-        catch (err) {
-            log.error("assistant.tool_failed", { tool: block.name, err: String(err) });
+        const toolCalls = response.content.filter((b) => b.type === "tool_use");
+        if (toolCalls.length === 0 || response.stop_reason === "end_turn")
+            break;
+        // Execute tools and collect results for next turn
+        const toolResults = [];
+        for (const block of toolCalls) {
+            if (block.type !== "tool_use")
+                continue;
+            allToolNames.push(block.name);
+            const input = block.input;
+            let result;
             try {
-                await ctx.reply(`erro a executar ação — tenta outra vez`);
+                result = await dispatchTool(block.name, input, sender, ctx, collector);
             }
-            catch {
-                // ignore
+            catch (err) {
+                log.error("assistant.tool_failed", { tool: block.name, err: String(err) });
+                result = `erro: ${String(err)}`;
+                try {
+                    await ctx.reply("erro a executar ação — tenta outra vez");
+                }
+                catch { /* ignore */ }
             }
+            toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
         }
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({ role: "user", content: toolResults });
     }
-    log.info("assistant.handled", {
-        sender,
-        tools: toolCalls.map((b) => (b.type === "tool_use" ? b.name : "")),
-        hasText: Boolean(textBlock?.type === "text" && textBlock.text.trim()),
-    });
+    log.info("assistant.handled", { sender, tools: allToolNames });
     return collector;
 }

@@ -80,13 +80,6 @@ export async function handleDM(ctx) {
         return true;
     if (text.trim().length < 4)
         return true;
-    let openTasks = [];
-    try {
-        openTasks = await notion.getOpenTasks();
-    }
-    catch (err) {
-        log.warn("dm.tasks_fetch_failed", { err: String(err) });
-    }
     const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
     let contentCalendar;
     if (calendarKeywords.test(text)) {
@@ -98,7 +91,7 @@ export async function handleDM(ctx) {
         }
     }
     try {
-        await handleAssistant(ctx, senderName, text, openTasks, [], undefined, contentCalendar);
+        await handleAssistant(ctx, senderName, text, [], undefined, contentCalendar);
     }
     catch (err) {
         log.error("dm.assistant_failed", { err: String(err) });

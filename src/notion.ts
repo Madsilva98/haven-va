@@ -495,6 +495,69 @@ async function findBacklogTask(query: string): Promise<{ id: string; title: stri
   return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query);
 }
 
+interface SearchResult {
+  id: string;
+  title: string;
+  owner?: string;
+  status?: string;
+  area?: string;
+  priority?: string;
+  deadline?: string;
+}
+
+async function searchRecords(db: string, query: string): Promise<SearchResult[]> {
+  if (db === "backlog") {
+    if (!NOTION_BACKLOG_DB_ID) return [];
+    const res = await withRetry("searchRecords.backlog", () =>
+      client.databases.query({
+        database_id: NOTION_BACKLOG_DB_ID!,
+        filter: { property: "Título", title: { contains: query } },
+        page_size: 10,
+      }),
+    );
+    return res.results
+      .filter((r) => "properties" in r)
+      .map((r) => {
+        const row = r as { id: string; properties: Record<string, unknown> };
+        return {
+          id: row.id,
+          title: readPlainText(row.properties["Título"]),
+          owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
+          status: readSelectName(row.properties["Status"]) ?? "A fazer",
+          area: readSelectName(row.properties["Área"]) ?? undefined,
+          priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
+          deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
+        };
+      });
+  }
+
+  const config = RECORD_DB_CONFIGS[db];
+  if (!config) return [];
+  const dbId = config.dbId();
+  if (!dbId) return [];
+
+  const res = await withRetry("searchRecords", () =>
+    client.databases.query({
+      database_id: dbId,
+      filter: { property: config.titleProp, title: { contains: query } },
+      page_size: 10,
+    }),
+  );
+  return res.results
+    .filter((r) => "properties" in r)
+    .map((r) => {
+      const row = r as { id: string; properties: Record<string, unknown> };
+      const title = readPlainText(row.properties[config.titleProp]);
+      const statusFieldConf = Object.values(config.fields).find(
+        (f) => f.notionProp === "Status" || f.notionProp === "Estado",
+      );
+      const status = statusFieldConf
+        ? (readSelectName(row.properties[statusFieldConf.notionProp]) ?? undefined)
+        : undefined;
+      return { id: row.id, title, status };
+    });
+}
+
 async function updateRecord(
   db: string,
   itemTitle: string,
@@ -1938,6 +2001,7 @@ export {
   // Generic record update
   updateRecord,
   findBacklogTask,
+  searchRecords,
   // Page section editing
   findPageInDb,
   appendToPageSection,
@@ -1992,6 +2056,7 @@ export const notion = {
   // Generic record update
   updateRecord,
   findBacklogTask,
+  searchRecords,
   // Page section editing
   findPageInDb,
   appendToPageSection,

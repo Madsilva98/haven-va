@@ -11,7 +11,6 @@ import { getFounderName, isFounder } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import * as notion from "../notion.js";
-import type { OpenTask } from "../types.js";
 import { handleAssistant } from "./assistant.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
 import {
@@ -93,13 +92,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
 
   if (text.trim().length < 4) return true;
 
-  let openTasks: OpenTask[] = [];
-  try {
-    openTasks = await notion.getOpenTasks();
-  } catch (err) {
-    log.warn("dm.tasks_fetch_failed", { err: String(err) });
-  }
-
   const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
   let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
   if (calendarKeywords.test(text)) {
@@ -111,7 +103,7 @@ export async function handleDM(ctx: Context): Promise<boolean> {
   }
 
   try {
-    await handleAssistant(ctx, senderName, text, openTasks, [], undefined, contentCalendar);
+    await handleAssistant(ctx, senderName, text, [], undefined, contentCalendar);
   } catch (err) {
     log.error("dm.assistant_failed", { err: String(err) });
     await safeReply(ctx);

@@ -17,7 +17,7 @@ import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
 import * as notion from "../notion.js";
-import type { FounderName, OpenTask } from "../types.js";
+import type { FounderName } from "../types.js";
 
 import { handleCallback as handlePhase1Callback } from "./callbacks.js";
 import {
@@ -419,13 +419,6 @@ export function buildBot(): Bot {
     if (text.trim().length < 4) return;
     if (hasNonTextMedia) return;
 
-    let openTasks: OpenTask[] = [];
-    try {
-      openTasks = await notion.getOpenTasks();
-    } catch (err) {
-      log.warn("pipeline.tasks_fetch_failed", { err: String(err) });
-    }
-
     const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
     let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
     if (calendarKeywords.test(text)) {
@@ -441,7 +434,6 @@ export function buildBot(): Bot {
         ctx,
         senderName,
         text,
-        openTasks,
         getPriors(chatId),
         repliedToText,
         contentCalendar,
