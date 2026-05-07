@@ -422,16 +422,14 @@ async function execLogDecision(
   if (!text) return;
   const area = AREAS.includes(input.area as Area) ? (input.area as Area) : "Outro";
   const notes = typeof input.notes === "string" ? input.notes : "";
-  const today = new Date().toISOString().split("T")[0]!;
-
   await notion.createDecision({
     decisao: text,
     area,
     tomadaPor: [sender],
-    data: today,
+    data: null,
     estado: "Pendente implementação",
     notas: notes,
-  });
+  }, ctx.message?.text ?? "");
   await ctx.reply(`📋 decisão registada: "${text}"`);
 }
 
@@ -455,7 +453,7 @@ async function execAddToDiscuss(
     area,
     resolucao: "",
     deadline,
-  });
+  }, ctx.message?.text ?? "");
   await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
 }
 
@@ -496,7 +494,7 @@ async function execAddToList(
   const item = typeof input.item === "string" ? input.item.trim() : "";
   const lista = typeof input.lista === "string" ? input.lista.trim() : "";
   if (!item || !lista) return;
-  await notion.addToList(item, lista, sender);
+  await notion.addToList(item, lista, sender, ctx.message?.text ?? "");
   await ctx.reply(`📝 "${item}" adicionado à lista *${lista}*`);
 }
 
@@ -597,13 +595,13 @@ async function execCreateEntity(
 
   switch (kind) {
     case "projeto":
-      await notion.createProject(nome, owner);
+      await notion.createProject(nome, owner, ctx.message?.text ?? "");
       break;
     case "evento":
-      await notion.createEvent(nome, owner);
+      await notion.createEvent(nome, owner, ctx.message?.text ?? "");
       break;
     case "parceria":
-      await notion.createPartner(nome, owner);
+      await notion.createPartner(nome, owner, ctx.message?.text ?? "");
       break;
     case "influencer":
       await notion.createInfluencer(nome, owner);

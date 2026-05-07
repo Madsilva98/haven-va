@@ -128,7 +128,7 @@ export async function handleToDiscussCallback(ctx: Context): Promise<void> {
       urgencia,
       area,
       resolucao: "",
-    });
+    }, entry.tema);
     pending.delete(botMessageId);
     await ctx.answerCallbackQuery({ text: "✅ adicionado" });
     try {

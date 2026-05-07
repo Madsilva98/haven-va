@@ -190,6 +190,19 @@ function readSelectName(prop: unknown): string | null {
   return null;
 }
 
+function readMultiSelectFirst(prop: unknown): string | null {
+  if (
+    prop &&
+    typeof prop === "object" &&
+    "multi_select" in prop &&
+    Array.isArray((prop as { multi_select: unknown }).multi_select)
+  ) {
+    const first = (prop as { multi_select: Array<{ name?: string }> }).multi_select[0];
+    return first?.name ?? null;
+  }
+  return null;
+}
+
 function readStatusName(prop: unknown): string | null {
   if (
     prop &&
@@ -278,6 +291,7 @@ function buildEditPatch(field: EditableField, newValue: string): Record<string, 
     case "status":
       return { [property]: { select: { name: newValue } } };
     case "owner":
+      return { [property]: { multi_select: [{ name: newValue }] } };
     case "prioridade":
     case "area":
       return { [property]: { select: { name: newValue } } };
@@ -336,16 +350,15 @@ async function createTask(
   entityRef?: EntityRef,
   deadline?: string,
 ): Promise<string> {
-  const notas = `originating: ${sender}: "${originalMsg}"\nwhy: ${extraction.why}`;
   const relProps = await entityRelationProps(entityRef);
 
   const props: Record<string, unknown> = {
     "Título": { title: [{ text: { content: extraction.title } }] },
-    Owner: { select: { name: extraction.owner } },
+    Owner: { multi_select: [{ name: extraction.owner }] },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
     Status: { select: { name: "A fazer" satisfies Status } },
-    Notas: richText(notas),
+    Origem: richText(originalMsg),
     ...relProps,
   };
   if (deadline) props["Deadline"] = { date: { start: deadline } };
@@ -418,7 +431,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
       const title = readPlainText(props["Título"]);
-      const owner = (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue;
+      const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned") as OwnerValue;
       const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
       const priorityName = readSelectName(props["Prioridade"]);
       const priority =
@@ -456,7 +469,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
 function rowToOpenTask(row: { id: string; properties: Record<string, unknown> }): OpenTask {
   const props = row.properties;
   const title = readPlainText(props["Título"]);
-  const owner = (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue;
+  const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned") as OwnerValue;
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priorityName = readSelectName(props["Prioridade"]);
   const priority =
@@ -623,9 +636,10 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
     client.pages.create({
       parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID! },
       properties: {
-        Founder: { title: [{ text: { content: entry.founder } }] },
-        Semana: richText(entry.semana),
+        Name: { title: [{ text: { content: entry.focoOperacional.slice(0, 80) } }] },
+        Founder: { select: { name: entry.founder } },
         "Foco operacional": richText(entry.focoOperacional),
+        Ativo: { checkbox: true },
       } as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -637,7 +651,7 @@ async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]
   const res = await withRetry("getFounderFocusForWeek", () =>
     client.databases.query({
       database_id: NOTION_FOUNDER_FOCUS_DB_ID!,
-      filter: { property: "Semana", rich_text: { equals: week } },
+      filter: { property: "Semana", formula: { string: { equals: week } } },
       sorts: [{ timestamp: "created_time", direction: "descending" }],
     }),
   );
@@ -647,7 +661,7 @@ async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]
   for (const row of res.results) {
     if (!("properties" in row)) continue;
     const props = row.properties as Record<string, unknown>;
-    const founderName = readPlainText(props["Founder"]);
+    const founderName = readSelectName(props["Founder"]);
     if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") continue;
     if (seen.has(founderName)) continue;
     seen.add(founderName);
@@ -984,7 +998,7 @@ async function createReminder(
   }
   const properties: Record<string, unknown> = {
     Texto: { title: [{ text: { content: r.texto } }] },
-    "Para quem": { select: { name: r.paraQuem } },
+    "Para quem": { multi_select: [{ name: r.paraQuem }] },
     Quando: { date: { start: r.quando } },
     Origem: richText(r.origem),
     Enviado: { checkbox: false },
@@ -1024,7 +1038,7 @@ async function getDueReminders(): Promise<ReminderRow[]> {
     for (const row of res.results) {
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
-      const paraQuem = readSelectName(props["Para quem"]);
+      const paraQuem = readMultiSelectFirst(props["Para quem"]);
       if (
         paraQuem !== "Madalena" &&
         paraQuem !== "Mafalda" &&
@@ -1070,6 +1084,7 @@ async function markReminderSent(id: string): Promise<void> {
 
 async function createToDiscuss(
   item: Omit<ToDiscussRow, "id" | "data" | "estado">,
+  originalMsg: string,
 ): Promise<string> {
   if (!NOTION_TO_DISCUSS_DB_ID) {
     throw new Error(
@@ -1077,11 +1092,12 @@ async function createToDiscuss(
     );
   }
   const properties: Record<string, unknown> = {
-    "Name": { title: [{ text: { content: item.tema } }] },
+    Tema: { title: [{ text: { content: item.tema } }] },
     "Adicionado por": { select: { name: item.adicionadoPor } },
     Urgência: { select: { name: item.urgencia } },
     Área: { select: { name: item.area } },
     Estado: { select: { name: "Pendente" satisfies ToDiscussState } },
+    Origem: richText(originalMsg),
   };
   if (item.resolucao) {
     properties["Resolução"] = richText(item.resolucao);
@@ -1149,12 +1165,12 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
       const deadline = readDateStart(props["Deadline"]) ?? undefined;
       rows.push({
         id: row.id,
-        tema: readPlainText(props["Name"]),
+        tema: readPlainText(props["Tema"]),
         adicionadoPor,
         urgencia,
         area: (readSelectName(props["Área"]) ?? "Outro") as Area,
         estado,
-        data: readDateStart(props["Data"]) ?? "",
+        data: "",
         resolucao: readPlainText(props["Resolução"]),
         ...(deadline ? { deadline } : {}),
       });
@@ -1183,7 +1199,7 @@ async function setToDiscussResolved(id: string, resolucao: string): Promise<void
   log.info("notion.to_discuss_resolved", { id });
 }
 
-async function createDecision(d: Omit<DecisionRow, "id">): Promise<string> {
+async function createDecision(d: Omit<DecisionRow, "id">, originalMsg: string): Promise<string> {
   if (!NOTION_DECISIONS_DB_ID) {
     throw new Error(
       "NOTION_DECISIONS_DB_ID not set — Phase 5 decision features disabled",
@@ -1196,10 +1212,8 @@ async function createDecision(d: Omit<DecisionRow, "id">): Promise<string> {
       multi_select: d.tomadaPor.map((name) => ({ name })),
     },
     Estado: { select: { name: d.estado } },
+    Origem: richText(originalMsg),
   };
-  if (d.data) {
-    properties["Data"] = { date: { start: d.data } };
-  }
   if (d.notas) {
     properties["Notas"] = richText(d.notas);
   }
@@ -1315,7 +1329,7 @@ function toggleHeading(title: string): object {
   };
 }
 
-async function createProject(nome: string, owner: OwnerValue): Promise<string> {
+async function createProject(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
   if (!NOTION_PROJECTS_DB_ID) {
     throw new Error("NOTION_PROJECTS_DB_ID not set");
   }
@@ -1324,7 +1338,8 @@ async function createProject(nome: string, owner: OwnerValue): Promise<string> {
       parent: { database_id: NOTION_PROJECTS_DB_ID! },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
-        Owner: { select: { name: owner } },
+        Owner: { multi_select: [{ name: owner }] },
+        Origem: richText(originalMsg),
       },
     }),
   );
@@ -1343,7 +1358,7 @@ async function createProject(nome: string, owner: OwnerValue): Promise<string> {
   return page.id;
 }
 
-async function createEvent(nome: string, owner: OwnerValue): Promise<string> {
+async function createEvent(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
   if (!NOTION_EVENT_DB_ID) {
     throw new Error("NOTION_EVENT_DB_ID not set");
   }
@@ -1352,8 +1367,9 @@ async function createEvent(nome: string, owner: OwnerValue): Promise<string> {
       parent: { database_id: NOTION_EVENT_DB_ID! },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
-        Owner: { select: { name: owner } },
-        Status: { select: { name: "A planear" } },
+        Owner: { multi_select: [{ name: owner }] },
+        Status: { select: { name: "Ideia" } },
+        Origem: richText(originalMsg),
       },
     }),
   );
@@ -1372,7 +1388,7 @@ async function createEvent(nome: string, owner: OwnerValue): Promise<string> {
   return page.id;
 }
 
-async function createPartner(nome: string, owner: OwnerValue): Promise<string> {
+async function createPartner(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
   if (!NOTION_PARTNER_DB_ID) {
     throw new Error("NOTION_PARTNER_DB_ID not set");
   }
@@ -1383,6 +1399,7 @@ async function createPartner(nome: string, owner: OwnerValue): Promise<string> {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
         Status: { select: { name: "A contactar" satisfies PartnerStatus } },
+        Origem: richText(originalMsg),
       },
     }),
   );
@@ -1411,7 +1428,7 @@ async function createInfluencer(nome: string, owner: OwnerValue): Promise<string
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { select: { name: "A identificar" satisfies InfluencerStatus } },
+        Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
       },
     }),
   );
@@ -1444,6 +1461,7 @@ async function addToList(
   item: string,
   lista: string,
   adicionadoPor: FounderName,
+  originalMsg: string,
 ): Promise<string> {
   if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
   const page = await withRetry("addToList", () =>
@@ -1452,8 +1470,9 @@ async function addToList(
       properties: {
         Item: { title: [{ text: { content: item.slice(0, 100) } }] },
         Lista: { select: { name: lista } },
-        Feito: { checkbox: false },
+        Fechada: { checkbox: false },
         "Adicionado por": { select: { name: adicionadoPor } },
+        Origem: richText(originalMsg),
       },
     }),
   );
@@ -1469,7 +1488,7 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
       filter: {
         and: [
           { property: "Lista", select: { equals: lista } },
-          { property: "Feito", checkbox: { equals: false } },
+          { property: "Fechada", checkbox: { equals: false } },
         ],
       },
       page_size: 50,
@@ -1499,7 +1518,7 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
   if (!bestId || bestScore === 0) return null;
 
   await withRetry("checkListItem.update", () =>
-    client.pages.update({ page_id: bestId!, properties: { Feito: { checkbox: true } } }),
+    client.pages.update({ page_id: bestId!, properties: { Fechada: { checkbox: true } } }),
   );
   log.info("notion.list_item_checked", { itemTitle, lista, pageId: bestId });
   return bestId;
@@ -1521,10 +1540,10 @@ async function getList(lista?: string): Promise<ListItem[]> {
   return res.results.map((row) => {
     const props = (row as { id: string; properties: Record<string, unknown> }).properties;
     const feito =
-      props["Feito"] &&
-      typeof props["Feito"] === "object" &&
-      "checkbox" in (props["Feito"] as object)
-        ? (props["Feito"] as { checkbox: boolean }).checkbox
+      props["Fechada"] &&
+      typeof props["Fechada"] === "object" &&
+      "checkbox" in (props["Fechada"] as object)
+        ? (props["Fechada"] as { checkbox: boolean }).checkbox
         : false;
     return {
       id: row.id,
