@@ -90,6 +90,7 @@ const FIELD_LABEL_PT: Record<EditableField, string> = {
   deadline: "deadline",
   prioridade: "prioridade",
   area: "área",
+  title: "título",
 };
 
 /**

@@ -69,6 +69,11 @@ const TOOLS = [
                     type: "string",
                     enum: ["Madalena", "Mafalda", "Beatriz", "all"],
                 },
+                task_page_id: {
+                    type: "string",
+                    description: "PageId da task associada (do resultado de create_task). " +
+                        "Só usar quando o lembrete se refere a uma task criada nesta mesma conversa.",
+                },
             },
             required: ["text", "when_iso", "for"],
         },
@@ -188,7 +193,7 @@ const TOOLS = [
                 field: {
                     type: "string",
                     description: "Campo a editar. " +
-                        "backlog: status|owner|deadline|prioridade|area. " +
+                        "backlog: status|owner|deadline|prioridade|area|title. " +
                         "to_discuss: urgencia|estado|area|resolucao. " +
                         "decisions: estado|area|notas. " +
                         "content_calendar: status|publish_date|ad_type. " +
@@ -391,7 +396,7 @@ async function execCreateTask(input, sender, ctx, collector) {
     const replyText = `✅ task criada: "${title}"`;
     collector.push(replyText);
     await ctx.reply(replyText, { reply_markup: taskUndoKeyboard(pageId) });
-    return "ok";
+    return `ok | pageId: ${pageId}`;
 }
 async function execCreateReminder(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
@@ -405,12 +410,15 @@ async function execCreateReminder(input, sender, ctx, collector) {
         : FOUNDERS.includes(forWho)
             ? [forWho]
             : [sender];
+    const taskPageId = typeof input.task_page_id === "string" && input.task_page_id
+        ? input.task_page_id
+        : undefined;
     await Promise.all(targets.map((paraQuem) => notion.createReminder({
         texto: text,
         paraQuem,
         quando,
         origem: ctx.message?.text ?? "",
-    })));
+    }, taskPageId)));
     const label = forWho === "all" ? "todas" : forWho;
     const reminderReply = `⏰ lembrete criado para ${label}: "${text}"`;
     collector.push(reminderReply);
@@ -537,7 +545,7 @@ async function execUpdateRecord(input, ctx, collector) {
     if (!db || !item || !field || !newValue)
         return "parâmetros em falta";
     if (db === "backlog") {
-        const editableFields = ["status", "owner", "deadline", "prioridade", "area"];
+        const editableFields = ["status", "owner", "deadline", "prioridade", "area", "title"];
         if (!editableFields.includes(field))
             return `campo desconhecido: ${field}`;
         const editField = field;

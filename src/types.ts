@@ -19,7 +19,7 @@ export type Priority = "1. Alta" | "2. Média" | "3. Baixa";
 
 export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
 
-export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area";
+export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area" | "title";
 
 
 // ----- Phase 2 -----

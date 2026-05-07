@@ -98,6 +98,7 @@ const FIELD_TO_PROPERTY = {
     deadline: "Deadline",
     prioridade: "Prioridade",
     area: "Área",
+    title: "Título",
 };
 // ----- helpers -----
 function richText(text) {
@@ -226,6 +227,8 @@ function buildEditPatch(field, newValue) {
             return newValue === "none"
                 ? { [property]: { date: null } }
                 : { [property]: { date: { start: newValue } } };
+        case "title":
+            return { [property]: { title: [{ text: { content: newValue } }] } };
     }
 }
 // ----- entity relation helpers -----
@@ -985,17 +988,21 @@ async function createLogEntry(params) {
     log.info("notion.log_entry_created", { id: page.id, author: params.author });
     return page.id;
 }
-async function createReminder(r) {
+async function createReminder(r, taskPageId) {
     if (!NOTION_REMINDERS_DB_ID) {
         throw new Error("NOTION_REMINDERS_DB_ID not set — Phase 3 reminder features disabled");
     }
     const properties = {
-        Texto: { title: [{ text: { content: r.texto } }] },
+        Name: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
+        Texto: richText(r.texto),
         "Para quem": { multi_select: [{ name: r.paraQuem }] },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
         Enviado: { checkbox: false },
     };
+    if (taskPageId) {
+        properties["Da tarefa"] = { relation: [{ id: taskPageId }] };
+    }
     const page = await withRetry("createReminder", () => client.pages.create({
         parent: { database_id: NOTION_REMINDERS_DB_ID },
         properties: properties,
@@ -1455,18 +1462,18 @@ async function uploadAndAttachFile(pageId, fileName, mimeType, fileBuffer, secti
             "Notion-Version": NOTION_VERSION,
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ mode: "single_part" }),
+        body: JSON.stringify({ mode: "single_part", filename: fileName, content_type: mimeType }),
     });
     if (!createRes.ok) {
         const body = await createRes.text();
         throw new Error(`notion: file_upload create ${createRes.status}: ${body}`);
     }
-    const { id: uploadId, upload_url: uploadUrl } = await createRes.json();
+    const { id: uploadId } = await createRes.json();
     // Step 2 — upload file data
     const form = new FormData();
     form.append("file", new Blob([fileBuffer], { type: mimeType }), fileName);
-    const uploadRes = await fetch(uploadUrl, {
-        method: "PUT",
+    const uploadRes = await fetch(`${NOTION_API_BASE}/file_uploads/${uploadId}/send`, {
+        method: "POST",
         headers: {
             Authorization: `Bearer ${NOTION_API_KEY}`,
             "Notion-Version": NOTION_VERSION,
@@ -1475,7 +1482,7 @@ async function uploadAndAttachFile(pageId, fileName, mimeType, fileBuffer, secti
     });
     if (!uploadRes.ok) {
         const body = await uploadRes.text();
-        throw new Error(`notion: file_upload PUT ${uploadRes.status}: ${body}`);
+        throw new Error(`notion: file_upload send ${uploadRes.status}: ${body}`);
     }
     // Step 3 — append file block
     const fileBlock = {

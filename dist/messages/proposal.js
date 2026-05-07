@@ -67,6 +67,7 @@ const FIELD_LABEL_PT = {
     deadline: "deadline",
     prioridade: "prioridade",
     area: "área",
+    title: "título",
 };
 /**
  * Builds the EDIT_TASK proposal message body. The caller adds the

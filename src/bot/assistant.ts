@@ -87,6 +87,12 @@ const TOOLS: Anthropic.Tool[] = [
           type: "string",
           enum: ["Madalena", "Mafalda", "Beatriz", "all"],
         },
+        task_page_id: {
+          type: "string",
+          description:
+            "PageId da task associada (do resultado de create_task). " +
+            "Só usar quando o lembrete se refere a uma task criada nesta mesma conversa.",
+        },
       },
       required: ["text", "when_iso", "for"],
     },
@@ -207,7 +213,7 @@ const TOOLS: Anthropic.Tool[] = [
           type: "string",
           description:
             "Campo a editar. " +
-            "backlog: status|owner|deadline|prioridade|area. " +
+            "backlog: status|owner|deadline|prioridade|area|title. " +
             "to_discuss: urgencia|estado|area|resolucao. " +
             "decisions: estado|area|notas. " +
             "content_calendar: status|publish_date|ad_type. " +
@@ -451,7 +457,7 @@ async function execCreateTask(
   const replyText = `✅ task criada: "${title}"`;
   collector.push(replyText);
   await ctx.reply(replyText, { reply_markup: taskUndoKeyboard(pageId) });
-  return "ok";
+  return `ok | pageId: ${pageId}`;
 }
 
 async function execCreateReminder(
@@ -473,6 +479,10 @@ async function execCreateReminder(
         ? [forWho as FounderName]
         : [sender];
 
+  const taskPageId = typeof input.task_page_id === "string" && input.task_page_id
+    ? input.task_page_id
+    : undefined;
+
   await Promise.all(
     targets.map((paraQuem) =>
       notion.createReminder({
@@ -480,7 +490,7 @@ async function execCreateReminder(
         paraQuem,
         quando,
         origem: ctx.message?.text ?? "",
-      }),
+      }, taskPageId),
     ),
   );
 
@@ -651,7 +661,7 @@ async function execUpdateRecord(
   if (!db || !item || !field || !newValue) return "parâmetros em falta";
 
   if (db === "backlog") {
-    const editableFields: EditableField[] = ["status", "owner", "deadline", "prioridade", "area"];
+    const editableFields: EditableField[] = ["status", "owner", "deadline", "prioridade", "area", "title"];
     if (!editableFields.includes(field as EditableField)) return `campo desconhecido: ${field}`;
     const editField = field as EditableField;
 
