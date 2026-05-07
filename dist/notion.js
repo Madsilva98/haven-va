@@ -139,6 +139,16 @@ function readSelectName(prop) {
     }
     return null;
 }
+function readMultiSelectFirst(prop) {
+    if (prop &&
+        typeof prop === "object" &&
+        "multi_select" in prop &&
+        Array.isArray(prop.multi_select)) {
+        const first = prop.multi_select[0];
+        return first?.name ?? null;
+    }
+    return null;
+}
 function readStatusName(prop) {
     if (prop &&
         typeof prop === "object" &&
@@ -208,6 +218,7 @@ function buildEditPatch(field, newValue) {
         case "status":
             return { [property]: { select: { name: newValue } } };
         case "owner":
+            return { [property]: { multi_select: [{ name: newValue }] } };
         case "prioridade":
         case "area":
             return { [property]: { select: { name: newValue } } };
@@ -254,15 +265,14 @@ async function entityRelationProps(entityRef) {
 }
 // ----- methods -----
 async function createTask(extraction, priority, originalMsg, sender, entityRef, deadline) {
-    const notas = `originating: ${sender}: "${originalMsg}"\nwhy: ${extraction.why}`;
     const relProps = await entityRelationProps(entityRef);
     const props = {
         "Título": { title: [{ text: { content: extraction.title } }] },
-        Owner: { select: { name: extraction.owner } },
+        Owner: { multi_select: [{ name: extraction.owner }] },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
         Status: { select: { name: "A fazer" } },
-        Notas: richText(notas),
+        Origem: richText(originalMsg),
         ...relProps,
     };
     if (deadline)
@@ -317,7 +327,7 @@ async function getOpenTasks() {
                 continue;
             const props = row.properties;
             const title = readPlainText(props["Título"]);
-            const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
+            const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
             const area = (readSelectName(props["Área"]) ?? "Outro");
             const priorityName = readSelectName(props["Prioridade"]);
             const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
@@ -348,7 +358,7 @@ async function getOpenTasks() {
 function rowToOpenTask(row) {
     const props = row.properties;
     const title = readPlainText(props["Título"]);
-    const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
+    const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
     const priorityName = readSelectName(props["Prioridade"]);
     const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
@@ -487,68 +497,41 @@ async function getOverdueTasks() {
 }
 async function setFounderFocus(entry) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID) {
-        throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set — Phase 2 founder focus features disabled");
+        throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
     }
-    // Find existing row by Founder (title) + Semana (rich_text)
-    const res = await withRetry("setFounderFocus.find", () => client.databases.query({
-        database_id: NOTION_FOUNDER_FOCUS_DB_ID,
-        filter: {
-            and: [
-                { property: "Founder", title: { equals: entry.founder } },
-                { property: "Semana", rich_text: { equals: entry.semana } },
-            ],
+    // Always create — latest entry per founder is the active focus.
+    await withRetry("setFounderFocus", () => client.pages.create({
+        parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID },
+        properties: {
+            Name: { title: [{ text: { content: entry.focoOperacional.slice(0, 80) } }] },
+            Founder: { select: { name: entry.founder } },
+            "Foco operacional": richText(entry.focoOperacional),
+            Ativo: { checkbox: true },
         },
-        page_size: 1,
     }));
-    const properties = {
-        Founder: { title: [{ text: { content: entry.founder } }] },
-        Semana: richText(entry.semana),
-        "Foco operacional": richText(entry.focoOperacional),
-    };
-    const existing = res.results[0];
-    if (existing) {
-        await withRetry("setFounderFocus.update", () => client.pages.update({
-            page_id: existing.id,
-            properties: properties,
-        }));
-        log.info("notion.founder_focus_updated", {
-            founder: entry.founder,
-            semana: entry.semana,
-        });
-    }
-    else {
-        await withRetry("setFounderFocus.create", () => client.pages.create({
-            parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID },
-            properties: properties,
-        }));
-        log.info("notion.founder_focus_created", {
-            founder: entry.founder,
-            semana: entry.semana,
-        });
-    }
+    log.info("notion.founder_focus_created", { founder: entry.founder, semana: entry.semana });
 }
 async function getFounderFocusForWeek(week) {
-    if (!NOTION_FOUNDER_FOCUS_DB_ID) {
-        throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set — Phase 2 founder focus features disabled");
-    }
+    if (!NOTION_FOUNDER_FOCUS_DB_ID)
+        return [];
     const res = await withRetry("getFounderFocusForWeek", () => client.databases.query({
         database_id: NOTION_FOUNDER_FOCUS_DB_ID,
-        filter: {
-            property: "Semana",
-            rich_text: { equals: week },
-        },
+        filter: { property: "Semana", formula: { string: { equals: week } } },
+        sorts: [{ timestamp: "created_time", direction: "descending" }],
     }));
+    // Latest entry per founder is the active focus.
+    const seen = new Set();
     const entries = [];
     for (const row of res.results) {
         if (!("properties" in row))
             continue;
         const props = row.properties;
-        const founderName = readPlainText(props["Founder"]);
-        if (founderName !== "Madalena" &&
-            founderName !== "Mafalda" &&
-            founderName !== "Beatriz") {
+        const founderName = readSelectName(props["Founder"]);
+        if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz")
             continue;
-        }
+        if (seen.has(founderName))
+            continue;
+        seen.add(founderName);
         entries.push({
             founder: founderName,
             semana: readPlainText(props["Semana"]) || week,
@@ -817,7 +800,7 @@ async function createReminder(r) {
     }
     const properties = {
         Texto: { title: [{ text: { content: r.texto } }] },
-        "Para quem": { select: { name: r.paraQuem } },
+        "Para quem": { multi_select: [{ name: r.paraQuem }] },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
         Enviado: { checkbox: false },
@@ -851,7 +834,7 @@ async function getDueReminders() {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            const paraQuem = readSelectName(props["Para quem"]);
+            const paraQuem = readMultiSelectFirst(props["Para quem"]);
             if (paraQuem !== "Madalena" &&
                 paraQuem !== "Mafalda" &&
                 paraQuem !== "Beatriz") {
@@ -886,16 +869,17 @@ async function markReminderSent(id) {
 // ============================================================
 // Phase 5 — To Discuss / Decisions
 // ============================================================
-async function createToDiscuss(item) {
+async function createToDiscuss(item, originalMsg) {
     if (!NOTION_TO_DISCUSS_DB_ID) {
         throw new Error("NOTION_TO_DISCUSS_DB_ID not set — Phase 5 to-discuss features disabled");
     }
     const properties = {
-        "Name": { title: [{ text: { content: item.tema } }] },
+        Tema: { title: [{ text: { content: item.tema } }] },
         "Adicionado por": { select: { name: item.adicionadoPor } },
         Urgência: { select: { name: item.urgencia } },
         Área: { select: { name: item.area } },
         Estado: { select: { name: "Pendente" } },
+        Origem: richText(originalMsg),
     };
     if (item.resolucao) {
         properties["Resolução"] = richText(item.resolucao);
@@ -953,12 +937,12 @@ async function getToDiscussPending() {
             const deadline = readDateStart(props["Deadline"]) ?? undefined;
             rows.push({
                 id: row.id,
-                tema: readPlainText(props["Name"]),
+                tema: readPlainText(props["Tema"]),
                 adicionadoPor,
                 urgencia,
                 area: (readSelectName(props["Área"]) ?? "Outro"),
                 estado,
-                data: readDateStart(props["Data"]) ?? "",
+                data: "",
                 resolucao: readPlainText(props["Resolução"]),
                 ...(deadline ? { deadline } : {}),
             });
@@ -981,7 +965,7 @@ async function setToDiscussResolved(id, resolucao) {
     }));
     log.info("notion.to_discuss_resolved", { id });
 }
-async function createDecision(d) {
+async function createDecision(d, originalMsg) {
     if (!NOTION_DECISIONS_DB_ID) {
         throw new Error("NOTION_DECISIONS_DB_ID not set — Phase 5 decision features disabled");
     }
@@ -992,10 +976,8 @@ async function createDecision(d) {
             multi_select: d.tomadaPor.map((name) => ({ name })),
         },
         Estado: { select: { name: d.estado } },
+        Origem: richText(originalMsg),
     };
-    if (d.data) {
-        properties["Data"] = { date: { start: d.data } };
-    }
     if (d.notas) {
         properties["Notas"] = richText(d.notas);
     }
@@ -1088,7 +1070,7 @@ function toggleHeading(title) {
         },
     };
 }
-async function createProject(nome, owner) {
+async function createProject(nome, owner, originalMsg) {
     if (!NOTION_PROJECTS_DB_ID) {
         throw new Error("NOTION_PROJECTS_DB_ID not set");
     }
@@ -1096,7 +1078,8 @@ async function createProject(nome, owner) {
         parent: { database_id: NOTION_PROJECTS_DB_ID },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
-            Owner: { select: { name: owner } },
+            Owner: { multi_select: [{ name: owner }] },
+            Origem: richText(originalMsg),
         },
     }));
     await withRetry("createProject.sections", () => client.blocks.children.append({
@@ -1111,7 +1094,7 @@ async function createProject(nome, owner) {
     log.info("notion.project_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function createEvent(nome, owner) {
+async function createEvent(nome, owner, originalMsg) {
     if (!NOTION_EVENT_DB_ID) {
         throw new Error("NOTION_EVENT_DB_ID not set");
     }
@@ -1119,8 +1102,9 @@ async function createEvent(nome, owner) {
         parent: { database_id: NOTION_EVENT_DB_ID },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
-            Owner: { select: { name: owner } },
-            Status: { select: { name: "A planear" } },
+            Owner: { multi_select: [{ name: owner }] },
+            Status: { select: { name: "Ideia" } },
+            Origem: richText(originalMsg),
         },
     }));
     await withRetry("createEvent.sections", () => client.blocks.children.append({
@@ -1135,7 +1119,7 @@ async function createEvent(nome, owner) {
     log.info("notion.event_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function createPartner(nome, owner) {
+async function createPartner(nome, owner, originalMsg) {
     if (!NOTION_PARTNER_DB_ID) {
         throw new Error("NOTION_PARTNER_DB_ID not set");
     }
@@ -1145,6 +1129,7 @@ async function createPartner(nome, owner) {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
             Status: { select: { name: "A contactar" } },
+            Origem: richText(originalMsg),
         },
     }));
     await withRetry("createPartner.sections", () => client.blocks.children.append({
@@ -1168,7 +1153,7 @@ async function createInfluencer(nome, owner) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { select: { name: "A identificar" } },
+            Status: { select: { name: "A contactar" } },
         },
     }));
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({
@@ -1183,7 +1168,7 @@ async function createInfluencer(nome, owner) {
     log.info("notion.influencer_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function addToList(item, lista, adicionadoPor) {
+async function addToList(item, lista, adicionadoPor, originalMsg) {
     if (!NOTION_LISTS_DB_ID)
         throw new Error("NOTION_LISTS_DB_ID not set");
     const page = await withRetry("addToList", () => client.pages.create({
@@ -1191,8 +1176,9 @@ async function addToList(item, lista, adicionadoPor) {
         properties: {
             Item: { title: [{ text: { content: item.slice(0, 100) } }] },
             Lista: { select: { name: lista } },
-            Feito: { checkbox: false },
+            Fechada: { checkbox: false },
             "Adicionado por": { select: { name: adicionadoPor } },
+            Origem: richText(originalMsg),
         },
     }));
     log.info("notion.list_item_added", { item, lista, adicionadoPor });
@@ -1206,7 +1192,7 @@ async function checkListItem(itemTitle, lista) {
         filter: {
             and: [
                 { property: "Lista", select: { equals: lista } },
-                { property: "Feito", checkbox: { equals: false } },
+                { property: "Fechada", checkbox: { equals: false } },
             ],
         },
         page_size: 50,
@@ -1239,7 +1225,7 @@ async function checkListItem(itemTitle, lista) {
     }
     if (!bestId || bestScore === 0)
         return null;
-    await withRetry("checkListItem.update", () => client.pages.update({ page_id: bestId, properties: { Feito: { checkbox: true } } }));
+    await withRetry("checkListItem.update", () => client.pages.update({ page_id: bestId, properties: { Fechada: { checkbox: true } } }));
     log.info("notion.list_item_checked", { itemTitle, lista, pageId: bestId });
     return bestId;
 }
@@ -1257,10 +1243,10 @@ async function getList(lista) {
     }));
     return res.results.map((row) => {
         const props = row.properties;
-        const feito = props["Feito"] &&
-            typeof props["Feito"] === "object" &&
-            "checkbox" in props["Feito"]
-            ? props["Feito"].checkbox
+        const feito = props["Fechada"] &&
+            typeof props["Fechada"] === "object" &&
+            "checkbox" in props["Fechada"]
+            ? props["Fechada"].checkbox
             : false;
         return {
             id: row.id,

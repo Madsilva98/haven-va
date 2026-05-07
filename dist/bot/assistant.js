@@ -11,6 +11,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
 import { InlineKeyboard } from "grammy";
 import { log } from "../lib/log.js";
+import { currentWeekLabel } from "../lib/week.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import { checkAndUnblockDependents } from "./dependencies.js";
@@ -98,6 +99,22 @@ const TOOLS = [
                 deadline: { type: "string", description: "Data limite, YYYY-MM-DD (opcional)" },
             },
             required: ["tema"],
+        },
+    },
+    {
+        name: "set_focus",
+        description: "Define o foco operacional da founder para a semana atual",
+        input_schema: {
+            type: "object",
+            properties: {
+                foco: { type: "string", description: "Descrição do foco semanal, pt-PT, <200 chars" },
+                founder: {
+                    type: "string",
+                    enum: ["Madalena", "Mafalda", "Beatriz"],
+                    description: "Founder em questão (default: sender)",
+                },
+            },
+            required: ["foco"],
         },
     },
     {
@@ -331,15 +348,14 @@ async function execLogDecision(input, sender, ctx) {
         return;
     const area = AREAS.includes(input.area) ? input.area : "Outro";
     const notes = typeof input.notes === "string" ? input.notes : "";
-    const today = new Date().toISOString().split("T")[0];
     await notion.createDecision({
         decisao: text,
         area,
         tomadaPor: [sender],
-        data: today,
+        data: null,
         estado: "Pendente implementação",
         notas: notes,
-    });
+    }, ctx.message?.text ?? "");
     await ctx.reply(`📋 decisão registada: "${text}"`);
 }
 async function execAddToDiscuss(input, sender, ctx) {
@@ -358,8 +374,18 @@ async function execAddToDiscuss(input, sender, ctx) {
         area,
         resolucao: "",
         deadline,
-    });
+    }, ctx.message?.text ?? "");
     await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
+}
+async function execSetFocus(input, sender, ctx) {
+    const foco = typeof input.foco === "string" ? input.foco.trim().slice(0, 200) : "";
+    if (!foco)
+        return;
+    const founder = FOUNDERS.includes(input.founder)
+        ? input.founder
+        : sender;
+    await notion.setFounderFocus({ founder, semana: currentWeekLabel(), focoOperacional: foco });
+    await ctx.reply(`🎯 foco de ${founder} esta semana: "${foco}"`);
 }
 async function execLogEntry(input, sender, ctx) {
     const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
@@ -376,7 +402,7 @@ async function execAddToList(input, sender, ctx) {
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
         return;
-    await notion.addToList(item, lista, sender);
+    await notion.addToList(item, lista, sender, ctx.message?.text ?? "");
     await ctx.reply(`📝 "${item}" adicionado à lista *${lista}*`);
 }
 async function execCheckListItem(input, ctx) {
@@ -461,13 +487,13 @@ async function execCreateEntity(input, sender, ctx) {
     };
     switch (kind) {
         case "projeto":
-            await notion.createProject(nome, owner);
+            await notion.createProject(nome, owner, ctx.message?.text ?? "");
             break;
         case "evento":
-            await notion.createEvent(nome, owner);
+            await notion.createEvent(nome, owner, ctx.message?.text ?? "");
             break;
         case "parceria":
-            await notion.createPartner(nome, owner);
+            await notion.createPartner(nome, owner, ctx.message?.text ?? "");
             break;
         case "influencer":
             await notion.createInfluencer(nome, owner);
@@ -538,6 +564,9 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
                     break;
                 case "add_to_discuss":
                     await execAddToDiscuss(input, sender, ctx);
+                    break;
+                case "set_focus":
+                    await execSetFocus(input, sender, ctx);
                     break;
                 case "log_entry":
                     await execLogEntry(input, sender, ctx);

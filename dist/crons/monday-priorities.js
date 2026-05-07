@@ -35,6 +35,7 @@ export async function run() {
         const dmText = formatDailyMadalenaPlaceholder({ tasks: prioritiesByFounder[founder] });
         try {
             await sendDM(tgId, dmText, "MarkdownV2");
+            await sendDM(tgId, "qual é o teu foco operacional esta semana?");
             dmsSent++;
         }
         catch (err) {
