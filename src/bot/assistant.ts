@@ -38,7 +38,7 @@ const AREAS: Area[] = [
   "Marketing", "Operações", "Parcerias", "Influencers",
   "Tech", "Cliente", "Financeiro", "Outro",
 ];
-const PRIORITIES: Priority[] = ["Alta", "Média", "Baixa"];
+const PRIORITIES: Priority[] = ["1. alta", "2. média", "3. baixa"];
 const TO_DISCUSS_URGENCIES: ToDiscussUrgency[] = [
   "Próxima reunião", "Decisão offline", "Urgente",
 ];
@@ -218,9 +218,9 @@ const TOOLS: Anthropic.Tool[] = [
           type: "string",
           description:
             "Novo valor. " +
-            "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
+            "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
             "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
-            "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
+            "backlog prioridade: 1. alta|2. média|3. baixa. deadline: YYYY-MM-DD. " +
             "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
             "to_discuss|decisions estado: Pendente|Resolvido (to_discuss) ou Pendente implementação|Em curso|Implementado|Arquivado (decisions). " +
             "content_calendar status: Raw Idea|Writing|Editing|Scheduled|Posted. " +
@@ -424,7 +424,7 @@ async function execCreateTask(
   const area = AREAS.includes(input.area as Area) ? (input.area as Area) : "Outro";
   const priority = PRIORITIES.includes(input.priority as Priority)
     ? (input.priority as Priority)
-    : "Média";
+    : "2. média";
   const why = typeof input.why === "string" ? input.why : "";
   const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
 

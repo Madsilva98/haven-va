@@ -32,7 +32,7 @@ export async function handleSetDependency(
           area: "Outro",
           why: "criada como pré-requisito via dependência",
         },
-        "Média" as Priority,
+        "2. média" as Priority,
         chatCtx.text,
         chatCtx.sender,
       );
@@ -55,7 +55,7 @@ export async function handleSetDependency(
           area: "Outro",
           why: `bloqueada até "${intent.prerequisite}" estar feita`,
         },
-        "Média" as Priority,
+        "2. média" as Priority,
         chatCtx.text,
         chatCtx.sender,
       );
@@ -91,7 +91,7 @@ export async function checkAndUnblockDependents(
 
     for (const task of dependents) {
       try {
-        await notion.updateTask(task.id, "status", "A fazer");
+        await notion.updateTask(task.id, "status", "To do");
         log.info("dependency.unblocked", {
           taskId: task.id,
           title: task.title,

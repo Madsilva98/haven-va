@@ -178,7 +178,7 @@ export function formatDailyMadalenaPlaceholder(args) {
     return lines.join("\n");
 }
 // ----- Task ranking + traffic lights (shared by daily DM and /hoje) -----
-const PRIORITY_RANK = { Alta: 0, Média: 1, Baixa: 2 };
+const PRIORITY_RANK = { "1. alta": 0, "2. média": 1, "3. baixa": 2 };
 export function rankTasks(tasks) {
     return [...tasks].sort((a, b) => {
         const pa = a.priority ? (PRIORITY_RANK[a.priority] ?? 3) : 3;
@@ -192,17 +192,17 @@ export function rankTasks(tasks) {
 }
 export function trafficLight(task) {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
-    if (task.priority === "Alta" || task.deadline === today)
+    if (task.priority === "1. alta" || task.deadline === today)
         return "red";
     if (task.deadline) {
         const daysUntil = Math.ceil((new Date(task.deadline).getTime() - new Date(today).getTime()) /
             (1000 * 60 * 60 * 24));
         if (daysUntil < 0)
             return "red";
-        if (task.priority === "Média" || daysUntil <= 3)
+        if (task.priority === "2. média" || daysUntil <= 3)
             return "yellow";
     }
-    else if (task.priority === "Média") {
+    else if (task.priority === "2. média") {
         return "yellow";
     }
     return "green";

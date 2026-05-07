@@ -271,7 +271,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
         Owner: { multi_select: [{ name: extraction.owner }] },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
-        Status: { select: { name: "A fazer" } },
+        Status: { select: { name: "To do" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
@@ -396,7 +396,7 @@ async function searchRecords(db, query) {
                 id: row.id,
                 title: readPlainText(row.properties["Título"]),
                 owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
-                status: readSelectName(row.properties["Status"]) ?? "A fazer",
+                status: readSelectName(row.properties["Status"]) ?? "To do",
                 area: readSelectName(row.properties["Área"]) ?? undefined,
                 priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
                 deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
@@ -497,11 +497,11 @@ async function getOpenTasks() {
             const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
             const area = (readSelectName(props["Área"]) ?? "Outro");
             const priorityName = readSelectName(props["Prioridade"]);
-            const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
+            const priority = priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
-            const statusName = readSelectName(props["Status"]) ?? "A fazer";
+            const statusName = readSelectName(props["Status"]) ?? "To do";
             const status = statusName;
             tasks.push({
                 id: row.id,
@@ -528,11 +528,11 @@ function rowToOpenTask(row) {
     const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
     const priorityName = readSelectName(props["Prioridade"]);
-    const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
+    const priority = priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
         ? priorityName
         : null;
     const deadline = readDateStart(props["Deadline"]);
-    const statusName = readSelectName(props["Status"]) ?? "A fazer";
+    const statusName = readSelectName(props["Status"]) ?? "To do";
     return {
         id: row.id,
         title,

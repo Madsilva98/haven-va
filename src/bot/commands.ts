@@ -51,7 +51,7 @@ export async function handleTask(ctx: Context): Promise<void> {
         area: "Outro",
         why: "levantado via /task",
       },
-      "Média",
+      "2. média",
       description,
       senderName,
     );

@@ -38,9 +38,9 @@ interface WizardState {
 }
 
 const PRIORITY_RANK: Record<Priority, number> = {
-  Alta: 0,
-  Média: 1,
-  Baixa: 2,
+  "1. alta": 0,
+  "2. média": 1,
+  "3. baixa": 2,
 };
 
 const MAX_TASKS_SHOWN = 7;

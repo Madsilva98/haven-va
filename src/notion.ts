@@ -357,7 +357,7 @@ async function createTask(
     Owner: { multi_select: [{ name: extraction.owner }] },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
-    Status: { select: { name: "A fazer" satisfies Status } },
+    Status: { select: { name: "To do" satisfies Status } },
     Origem: richText(originalMsg),
     ...relProps,
   };
@@ -523,7 +523,7 @@ async function searchRecords(db: string, query: string): Promise<SearchResult[]>
           id: row.id,
           title: readPlainText(row.properties["Título"]),
           owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
-          status: readSelectName(row.properties["Status"]) ?? "A fazer",
+          status: readSelectName(row.properties["Status"]) ?? "To do",
           area: readSelectName(row.properties["Área"]) ?? undefined,
           priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
           deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
@@ -634,11 +634,11 @@ async function getOpenTasks(): Promise<OpenTask[]> {
       const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
       const priorityName = readSelectName(props["Prioridade"]);
       const priority =
-        priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
+        priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
           ? (priorityName as Priority)
           : null;
       const deadline = readDateStart(props["Deadline"]);
-      const statusName = readSelectName(props["Status"]) ?? "A fazer";
+      const statusName = readSelectName(props["Status"]) ?? "To do";
       const status = statusName as Status;
 
       tasks.push({
@@ -672,11 +672,11 @@ function rowToOpenTask(row: { id: string; properties: Record<string, unknown> })
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priorityName = readSelectName(props["Prioridade"]);
   const priority =
-    priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
+    priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
       ? (priorityName as Priority)
       : null;
   const deadline = readDateStart(props["Deadline"]);
-  const statusName = readSelectName(props["Status"]) ?? "A fazer";
+  const statusName = readSelectName(props["Status"]) ?? "To do";
   return {
     id: row.id,
     title,
