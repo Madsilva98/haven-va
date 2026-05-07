@@ -1059,17 +1059,17 @@ async function getContentCalendarRows() {
                 if (!("properties" in row))
                     continue;
                 const props = row.properties;
-                const title = readPlainText(props["Name"] ?? props["Título"] ?? props["Title"]);
-                const status = readSelectName(props["Status"]) ??
-                    readStatusName(props["Status"]) ?? null;
-                const publishDate = readDateStart(props["Data publicação"]) ??
+                const title = readPlainText(props["Name"] ?? props["Título"] ?? props["Title"] ?? props["name"]);
+                const status = readStatusName(props["status"]) ??
+                    readSelectName(props["status"]) ??
+                    readStatusName(props["Status"]) ??
+                    readSelectName(props["Status"]) ?? null;
+                const publishDate = readDateStart(props["Posting Haven"]) ??
+                    readDateStart(props["Data publicação"]) ??
                     readDateStart(props["Publish date"]) ??
                     readDateStart(props["Data"]) ?? null;
-                const platform = readSelectName(props["Plataforma"]) ??
-                    readSelectName(props["Platform"]) ??
-                    readSelectName(props["Canal"]) ?? null;
-                const owner = readSelectName(props["Owner"]) ?? null;
-                rows.push({ id: row.id, title, status, publishDate, platform, owner });
+                const adType = readSelectName(props["Ad type"]) ?? null;
+                rows.push({ id: row.id, title, status, publishDate, platform: adType, owner: null });
             }
             cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
         } while (cursor);

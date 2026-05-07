@@ -198,9 +198,8 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
         lines.push("Social Media Calendar:");
         for (const row of contentCalendar) {
             const date = row.publishDate ?? "sem data";
-            const platform = row.platform ? ` [${row.platform}]` : "";
-            const owner = row.owner ? ` — ${row.owner}` : "";
-            lines.push(`  - "${row.title}" | ${row.status ?? "—"} | ${date}${platform}${owner}`);
+            const adType = row.platform ? ` [${row.platform}]` : "";
+            lines.push(`  - "${row.title}" | ${row.status ?? "—"} | ${date}${adType}`);
         }
         lines.push("");
     }
