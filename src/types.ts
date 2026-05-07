@@ -15,7 +15,7 @@ export type Area =
   | "Financeiro"
   | "Outro";
 
-export type Priority = "1. alta" | "2. média" | "3. baixa";
+export type Priority = "1. Alta" | "2. Média" | "3. Baixa";
 
 export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
 

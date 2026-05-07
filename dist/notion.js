@@ -497,7 +497,7 @@ async function getOpenTasks() {
             const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
             const area = (readSelectName(props["Área"]) ?? "Outro");
             const priorityName = readSelectName(props["Prioridade"]);
-            const priority = priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
+            const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
@@ -528,7 +528,7 @@ function rowToOpenTask(row) {
     const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
     const priorityName = readSelectName(props["Prioridade"]);
-    const priority = priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
+    const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
         ? priorityName
         : null;
     const deadline = readDateStart(props["Deadline"]);

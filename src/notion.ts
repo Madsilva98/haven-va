@@ -634,7 +634,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
       const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
       const priorityName = readSelectName(props["Prioridade"]);
       const priority =
-        priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
+        priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
           ? (priorityName as Priority)
           : null;
       const deadline = readDateStart(props["Deadline"]);
@@ -672,7 +672,7 @@ function rowToOpenTask(row: { id: string; properties: Record<string, unknown> })
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priorityName = readSelectName(props["Prioridade"]);
   const priority =
-    priorityName === "1. alta" || priorityName === "2. média" || priorityName === "3. baixa"
+    priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
       ? (priorityName as Priority)
       : null;
   const deadline = readDateStart(props["Deadline"]);

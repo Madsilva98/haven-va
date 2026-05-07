@@ -21,7 +21,7 @@ export async function handleSetDependency(ctx, chatCtx, intent) {
                 owner: intent.prerequisiteOwner,
                 area: "Outro",
                 why: "criada como pré-requisito via dependência",
-            }, "2. média", chatCtx.text, chatCtx.sender);
+            }, "2. Média", chatCtx.text, chatCtx.sender);
         }
         // Find or create blocked task.
         let blockedTask = findTask(openTasks, intent.blocked);
@@ -39,7 +39,7 @@ export async function handleSetDependency(ctx, chatCtx, intent) {
                 owner: intent.blockedOwner,
                 area: "Outro",
                 why: `bloqueada até "${intent.prerequisite}" estar feita`,
-            }, "2. média", chatCtx.text, chatCtx.sender);
+            }, "2. Média", chatCtx.text, chatCtx.sender);
             await notion.updateTask(blockedId, "status", "Bloqueado");
         }
         // Link the dependency.

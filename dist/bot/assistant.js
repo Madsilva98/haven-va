@@ -22,7 +22,7 @@ const AREAS = [
     "Marketing", "Operações", "Parcerias", "Influencers",
     "Tech", "Cliente", "Financeiro", "Outro",
 ];
-const PRIORITIES = ["1. alta", "2. média", "3. baixa"];
+const PRIORITIES = ["1. Alta", "2. Média", "3. Baixa"];
 const TO_DISCUSS_URGENCIES = [
     "Próxima reunião", "Decisão offline", "Urgente",
 ];
@@ -374,7 +374,7 @@ async function execCreateTask(input, sender, ctx, collector) {
     const area = AREAS.includes(input.area) ? input.area : "Outro";
     const priority = PRIORITIES.includes(input.priority)
         ? input.priority
-        : "2. média";
+        : "2. Média";
     const why = typeof input.why === "string" ? input.why : "";
     const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
     let entityRef;

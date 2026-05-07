@@ -32,7 +32,7 @@ export async function handleSetDependency(
           area: "Outro",
           why: "criada como pré-requisito via dependência",
         },
-        "2. média" as Priority,
+        "2. Média" as Priority,
         chatCtx.text,
         chatCtx.sender,
       );
@@ -55,7 +55,7 @@ export async function handleSetDependency(
           area: "Outro",
           why: `bloqueada até "${intent.prerequisite}" estar feita`,
         },
-        "2. média" as Priority,
+        "2. Média" as Priority,
         chatCtx.text,
         chatCtx.sender,
       );

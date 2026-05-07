@@ -38,7 +38,7 @@ const AREAS: Area[] = [
   "Marketing", "Operações", "Parcerias", "Influencers",
   "Tech", "Cliente", "Financeiro", "Outro",
 ];
-const PRIORITIES: Priority[] = ["1. alta", "2. média", "3. baixa"];
+const PRIORITIES: Priority[] = ["1. Alta", "2. Média", "3. Baixa"];
 const TO_DISCUSS_URGENCIES: ToDiscussUrgency[] = [
   "Próxima reunião", "Decisão offline", "Urgente",
 ];
@@ -424,7 +424,7 @@ async function execCreateTask(
   const area = AREAS.includes(input.area as Area) ? (input.area as Area) : "Outro";
   const priority = PRIORITIES.includes(input.priority as Priority)
     ? (input.priority as Priority)
-    : "2. média";
+    : "2. Média";
   const why = typeof input.why === "string" ? input.why : "";
   const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
 
