@@ -190,28 +190,47 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "update_task",
-    description: "Atualiza um campo de uma task existente no backlog",
+    name: "update_record",
+    description: "Atualiza uma propriedade de qualquer registo em qualquer DB do Notion.",
     input_schema: {
       type: "object",
       properties: {
-        task_title: {
+        db: {
           type: "string",
-          description: "Título ou parte do título da task a editar",
+          enum: ["backlog", "to_discuss", "decisions", "content_calendar", "partners", "influencers", "events", "projects"],
+          description: "Base de dados alvo",
+        },
+        item: {
+          type: "string",
+          description: "Título ou parte do título do registo a editar",
         },
         field: {
           type: "string",
-          enum: ["status", "owner", "deadline", "prioridade", "area"],
+          description:
+            "Campo a editar. " +
+            "backlog: status|owner|deadline|prioridade|area. " +
+            "to_discuss: urgencia|estado|area|resolucao. " +
+            "decisions: estado|area|notas. " +
+            "content_calendar: status|publish_date|ad_type. " +
+            "partners|influencers: status|owner. " +
+            "events|projects: status|owner.",
         },
         new_value: {
           type: "string",
           description:
-            "Novo valor. status: 'A fazer'|'Em curso'|'Bloqueado'|'Feito'|'Cancelado'. " +
-            "owner: Madalena|Mafalda|Beatriz|Unassigned. " +
-            "prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD.",
+            "Novo valor. " +
+            "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
+            "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
+            "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
+            "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
+            "to_discuss|decisions estado: Pendente|Resolvido (to_discuss) ou Pendente implementação|Em curso|Implementado|Arquivado (decisions). " +
+            "content_calendar status: Raw Idea|Writing|Editing|Scheduled|Posted. " +
+            "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
+            "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
+            "projects status: Ativo|Em pausa|Concluído|Cancelado.",
         },
       },
-      required: ["task_title", "field", "new_value"],
+      required: ["db", "item", "field", "new_value"],
     },
   },
   {
@@ -579,63 +598,81 @@ async function execCheckListItem(
   await ctx.reply(checkReply);
 }
 
-async function execUpdateTask(
+async function execUpdateRecord(
   input: Record<string, unknown>,
   openTasks: OpenTask[],
   ctx: Context,
   collector: string[],
 ): Promise<void> {
-  const taskTitle = typeof input.task_title === "string" ? input.task_title.trim() : "";
-  const field = input.field as EditableField;
+  const db = typeof input.db === "string" ? input.db.trim() : "";
+  const item = typeof input.item === "string" ? input.item.trim() : "";
+  const field = typeof input.field === "string" ? input.field.trim() : "";
   const newValue = typeof input.new_value === "string" ? input.new_value.trim() : "";
+  if (!db || !item || !field || !newValue) return;
 
-  if (!taskTitle || !field || !newValue) return;
-  if (!["status", "owner", "deadline", "prioridade", "area"].includes(field)) return;
+  // Backlog: use cached open tasks + undo support
+  if (db === "backlog") {
+    const editableFields: EditableField[] = ["status", "owner", "deadline", "prioridade", "area"];
+    if (!editableFields.includes(field as EditableField)) return;
+    const editField = field as EditableField;
 
-  // Best fuzzy match — try word overlap first, then substring
-  let best: OpenTask | null = null;
-  let bestScore = 0;
-  for (const t of openTasks) {
-    const score = wordOverlap(taskTitle, t.title);
-    if (score > bestScore) { bestScore = score; best = t; }
-  }
-  if (!best || bestScore === 0) {
-    const q = taskTitle.toLowerCase();
-    best = openTasks.find(
-      (t) => t.title.toLowerCase().includes(q) || q.includes(t.title.toLowerCase()),
-    ) ?? null;
-  }
+    let best: OpenTask | null = null;
+    let bestScore = 0;
+    for (const t of openTasks) {
+      const score = wordOverlap(item, t.title);
+      if (score > bestScore) { bestScore = score; best = t; }
+    }
+    if (!best || bestScore === 0) {
+      const q = item.toLowerCase();
+      best = openTasks.find(
+        (t) => t.title.toLowerCase().includes(q) || q.includes(t.title.toLowerCase()),
+      ) ?? null;
+    }
+    if (!best) {
+      await ctx.reply(`não encontrei nenhuma task com "${item}"`);
+      return;
+    }
 
-  if (!best) {
-    await ctx.reply(`não encontrei nenhuma task com "${taskTitle}"`);
+    const oldValue: string = (() => {
+      switch (editField) {
+        case "status": return best.status;
+        case "owner": return best.owner;
+        case "deadline": return best.deadline ?? "none";
+        case "prioridade": return best.priority ?? "none";
+        case "area": return best.area;
+      }
+    })();
+
+    await notion.updateTask(best.id, editField, newValue);
+    if (editField === "status" && newValue === "Feito") {
+      await checkAndUnblockDependents(best.id, best.title);
+    }
+
+    const replyText = `✅ "${best.title}" — ${field} → ${newValue}`;
+    collector.push(replyText);
+    if (oldValue === "none") {
+      await ctx.reply(replyText);
+    } else {
+      const undoData = `task:edit_undo:${best.id}:${editField}:${oldValue}`;
+      const kb = new InlineKeyboard().text("↩ Desfazer", undoData);
+      await ctx.reply(replyText, { reply_markup: kb });
+    }
     return;
   }
 
-  // Capture old value for undo (encode null as "none")
-  const oldValue: string = (() => {
-    switch (field) {
-      case "status": return best.status;
-      case "owner": return best.owner;
-      case "deadline": return best.deadline ?? "none";
-      case "prioridade": return best.priority ?? "none";
-      case "area": return best.area;
+  // All other DBs
+  try {
+    const result = await notion.updateRecord(db, item, field, newValue);
+    if (!result) {
+      await ctx.reply(`não encontrei "${item}" em ${db}`);
+      return;
     }
-  })();
-
-  await notion.updateTask(best.id, field, newValue);
-
-  if (field === "status" && newValue === "Feito") {
-    await checkAndUnblockDependents(best.id, best.title);
-  }
-
-  const replyText = `✅ "${best.title}" — ${field} → ${newValue}`;
-  collector.push(replyText);
-  if (oldValue === "none") {
+    const replyText = `✅ "${result.title}" — ${field} → ${newValue}`;
+    collector.push(replyText);
     await ctx.reply(replyText);
-  } else {
-    const undoData = `task:edit_undo:${best.id}:${field}:${oldValue}`;
-    const kb = new InlineKeyboard().text("↩ Desfazer", undoData);
-    await ctx.reply(replyText, { reply_markup: kb });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await ctx.reply(`erro a atualizar: ${msg}`);
   }
 }
 
@@ -773,8 +810,8 @@ export async function handleAssistant(
         case "check_list_item":
           await execCheckListItem(input, ctx, collector);
           break;
-        case "update_task":
-          await execUpdateTask(input, openTasks, ctx, collector);
+        case "update_record":
+          await execUpdateRecord(input, openTasks, ctx, collector);
           break;
         case "create_entity":
           await execCreateEntity(input, sender, ctx, collector);

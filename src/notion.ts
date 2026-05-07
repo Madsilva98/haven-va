@@ -396,6 +396,137 @@ async function updateTask(
   log.info("notion.task_updated", { pageId, field, newValue });
 }
 
+type FieldConfig = {
+  notionProp: string;
+  type: "select" | "multi_select" | "status" | "date" | "rich_text";
+};
+
+const RECORD_DB_CONFIGS: Record<string, {
+  dbId: () => string | undefined;
+  titleProp: string;
+  fields: Record<string, FieldConfig>;
+}> = {
+  to_discuss: {
+    dbId: () => NOTION_TO_DISCUSS_DB_ID,
+    titleProp: "Tema",
+    fields: {
+      urgencia: { notionProp: "Urgência", type: "select" },
+      estado: { notionProp: "Estado", type: "select" },
+      area: { notionProp: "Área", type: "select" },
+      resolucao: { notionProp: "Resolução", type: "rich_text" },
+    },
+  },
+  decisions: {
+    dbId: () => NOTION_DECISIONS_DB_ID,
+    titleProp: "Decisão",
+    fields: {
+      estado: { notionProp: "Estado", type: "select" },
+      area: { notionProp: "Área", type: "select" },
+      notas: { notionProp: "Notas", type: "rich_text" },
+    },
+  },
+  content_calendar: {
+    dbId: () => NOTION_CONTENT_CALENDAR_DB_ID,
+    titleProp: "Name",
+    fields: {
+      status: { notionProp: "status", type: "status" },
+      publish_date: { notionProp: "Posting Haven", type: "date" },
+      ad_type: { notionProp: "Ad type", type: "select" },
+    },
+  },
+  partners: {
+    dbId: () => NOTION_PARTNER_DB_ID,
+    titleProp: "Name",
+    fields: {
+      status: { notionProp: "Status", type: "select" },
+      owner: { notionProp: "Owner", type: "select" },
+    },
+  },
+  influencers: {
+    dbId: () => NOTION_INFLUENCER_DB_ID,
+    titleProp: "Name",
+    fields: {
+      status: { notionProp: "Status", type: "select" },
+      owner: { notionProp: "Owner", type: "select" },
+    },
+  },
+  events: {
+    dbId: () => NOTION_EVENT_DB_ID,
+    titleProp: "Name",
+    fields: {
+      status: { notionProp: "Status", type: "select" },
+      owner: { notionProp: "Owner", type: "multi_select" },
+    },
+  },
+  projects: {
+    dbId: () => NOTION_PROJECTS_DB_ID,
+    titleProp: "Name",
+    fields: {
+      status: { notionProp: "Status", type: "select" },
+      owner: { notionProp: "Owner", type: "multi_select" },
+    },
+  },
+};
+
+async function findRecordByTitle(
+  dbId: string,
+  titleProp: string,
+  query: string,
+): Promise<{ id: string; title: string } | null> {
+  const res = await withRetry("findRecordByTitle", () =>
+    client.databases.query({
+      database_id: dbId,
+      filter: { property: titleProp, title: { contains: query } },
+      page_size: 5,
+    }),
+  );
+  const pages = res.results.filter((r) => "properties" in r) as Array<{
+    id: string;
+    properties: Record<string, unknown>;
+  }>;
+  if (pages.length === 0) return null;
+  const firstPage = pages[0]!;
+  const title = readPlainText(firstPage.properties[titleProp]);
+  return { id: firstPage.id, title };
+}
+
+async function updateRecord(
+  db: string,
+  itemTitle: string,
+  field: string,
+  newValue: string,
+): Promise<{ pageId: string; title: string } | null> {
+  const config = RECORD_DB_CONFIGS[db];
+  if (!config) throw new Error(`Unknown db: ${db}`);
+  const dbId = config.dbId();
+  if (!dbId) throw new Error(`DB ${db} not configured`);
+  const fieldConfig = config.fields[field];
+  if (!fieldConfig) throw new Error(`Unknown field '${field}' for db '${db}'`);
+
+  const found = await findRecordByTitle(dbId, config.titleProp, itemTitle);
+  if (!found) return null;
+
+  let propValue: unknown;
+  switch (fieldConfig.type) {
+    case "select": propValue = { select: { name: newValue } }; break;
+    case "multi_select": propValue = { multi_select: [{ name: newValue }] }; break;
+    case "status": propValue = { status: { name: newValue } }; break;
+    case "date": propValue = { date: { start: newValue } }; break;
+    case "rich_text": propValue = richText(newValue); break;
+  }
+
+  await withRetry("updateRecord", () =>
+    client.pages.update({
+      page_id: found.id,
+      properties: {
+        [fieldConfig.notionProp]: propValue,
+      } as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.record_updated", { db, title: found.title, field, newValue });
+  return { pageId: found.id, title: found.title };
+}
+
 async function archivePage(pageId: string): Promise<void> {
   await withRetry("archivePage", () =>
     client.pages.update({ page_id: pageId, archived: true }),
@@ -1634,6 +1765,8 @@ export {
   addToList,
   checkListItem,
   getList,
+  // Generic record update
+  updateRecord,
 };
 
 export const notion = {
