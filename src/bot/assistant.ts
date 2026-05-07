@@ -234,6 +234,33 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "add_to_page_section",
+    description: "Adiciona conteúdo ao corpo de uma página (projeto, evento, parceiro ou influencer). Cria a secção se não existir.",
+    input_schema: {
+      type: "object",
+      properties: {
+        db: {
+          type: "string",
+          enum: ["projects", "events", "partners", "influencers"],
+          description: "Base de dados da página",
+        },
+        page_name: {
+          type: "string",
+          description: "Nome da página (projeto, evento, parceiro ou influencer)",
+        },
+        content: {
+          type: "string",
+          description: "Conteúdo a adicionar. Linhas com '- ' tornam-se bullets; texto normal torna-se parágrafo.",
+        },
+        section: {
+          type: "string",
+          description: "Nome da secção (toggle heading). Omitir para escrever na raiz. Se não existir, é criada com 📌.",
+        },
+      },
+      required: ["db", "page_name", "content"],
+    },
+  },
+  {
     name: "create_entity",
     description: "Cria um parceiro, projeto, evento ou influencer no Notion",
     input_schema: {
@@ -676,6 +703,31 @@ async function execUpdateRecord(
   }
 }
 
+async function execAddToPageSection(
+  input: Record<string, unknown>,
+  ctx: Context,
+  collector: string[],
+): Promise<void> {
+  const db = typeof input.db === "string" ? input.db.trim() : "";
+  const pageName = typeof input.page_name === "string" ? input.page_name.trim() : "";
+  const content = typeof input.content === "string" ? input.content.trim() : "";
+  const section = typeof input.section === "string" ? input.section.trim() : undefined;
+  if (!db || !pageName || !content) return;
+
+  const page = await notion.findPageInDb(db, pageName);
+  if (!page) {
+    await ctx.reply(`não encontrei "${pageName}" em ${db}`);
+    return;
+  }
+
+  await notion.appendToPageSection(page.id, content, section);
+
+  const where = section ? `secção "${section}"` : "página";
+  const reply = `✏️ escrito em "${page.title}" — ${where}`;
+  collector.push(reply);
+  await ctx.reply(reply);
+}
+
 async function execCreateEntity(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -812,6 +864,9 @@ export async function handleAssistant(
           break;
         case "update_record":
           await execUpdateRecord(input, openTasks, ctx, collector);
+          break;
+        case "add_to_page_section":
+          await execAddToPageSection(input, ctx, collector);
           break;
         case "create_entity":
           await execCreateEntity(input, sender, ctx, collector);

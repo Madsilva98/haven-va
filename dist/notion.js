@@ -1224,10 +1224,13 @@ async function createProject(nome, owner, originalMsg) {
     await withRetry("createProject.sections", () => client.blocks.children.append({
         block_id: page.id,
         children: [
-            toggleHeading("📋 Tarefas"),
+            toggleHeading("📋 Contexto"),
+            toggleHeading("🎯 Objetivos"),
+            toggleHeading("✅ Tasks"),
             toggleHeading("💬 To Discuss"),
-            toggleHeading("📖 Histórico"),
-            toggleHeading("📝 Notas"),
+            toggleHeading("📋 Decisions"),
+            toggleHeading("📎 Recursos"),
+            toggleHeading("📓 Notas"),
         ],
     }));
     log.info("notion.project_created", { pageId: page.id, nome, owner });
@@ -1249,10 +1252,13 @@ async function createEvent(nome, owner, originalMsg) {
     await withRetry("createEvent.sections", () => client.blocks.children.append({
         block_id: page.id,
         children: [
-            toggleHeading("📅 Detalhes"),
-            toggleHeading("🎯 Objetivos"),
-            toggleHeading("📋 Tarefas"),
-            toggleHeading("📝 Notas"),
+            toggleHeading("📋 Descrição"),
+            toggleHeading("📅 Logística"),
+            toggleHeading("✅ Tasks"),
+            toggleHeading("💬 To Discuss"),
+            toggleHeading("📋 Decisions"),
+            toggleHeading("📢 Comunicação"),
+            toggleHeading("📊 Resultados"),
         ],
     }));
     log.info("notion.event_created", { pageId: page.id, nome, owner });
@@ -1274,10 +1280,13 @@ async function createPartner(nome, owner, originalMsg) {
     await withRetry("createPartner.sections", () => client.blocks.children.append({
         block_id: page.id,
         children: [
-            toggleHeading("🤝 Contactos"),
-            toggleHeading("📋 Tarefas"),
-            toggleHeading("📖 Histórico"),
-            toggleHeading("📝 Notas"),
+            toggleHeading("🤝 Sobre o parceiro"),
+            toggleHeading("💼 Deal e proposta"),
+            toggleHeading("✅ Tasks"),
+            toggleHeading("💬 To Discuss"),
+            toggleHeading("📋 Decisions"),
+            toggleHeading("📞 Contactos"),
+            toggleHeading("📎 Contratos"),
         ],
     }));
     log.info("notion.partner_created", { pageId: page.id, nome, owner });
@@ -1298,14 +1307,92 @@ async function createInfluencer(nome, owner) {
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({
         block_id: page.id,
         children: [
-            toggleHeading("📱 Stats"),
-            toggleHeading("📋 Tarefas"),
-            toggleHeading("📖 Histórico"),
-            toggleHeading("📝 Notas"),
+            toggleHeading("👤 Perfil e stats"),
+            toggleHeading("🤝 Relação e histórico"),
+            toggleHeading("📸 Conteúdo e shoots"),
+            toggleHeading("✅ Tasks"),
+            toggleHeading("💬 To Discuss"),
+            toggleHeading("📋 Decisions"),
+            toggleHeading("📎 Briefings"),
         ],
     }));
     log.info("notion.influencer_created", { pageId: page.id, nome, owner });
     return page.id;
+}
+// ----- Page section editing -----
+function normalizeSectionName(text) {
+    return text
+        .replace(/\p{Emoji}/gu, "")
+        .replace(/[^\wàáâãéêíóôõúüç\s]/gi, "")
+        .toLowerCase()
+        .trim();
+}
+function contentToBlocks(content) {
+    return content
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.trim())
+        .map((line) => {
+        const t = line.trim();
+        if (t.startsWith("- ")) {
+            return {
+                type: "bulleted_list_item",
+                bulleted_list_item: { rich_text: [{ type: "text", text: { content: t.slice(2).trim() } }] },
+            };
+        }
+        return {
+            type: "paragraph",
+            paragraph: { rich_text: [{ type: "text", text: { content: t } }] },
+        };
+    });
+}
+async function findPageInDb(db, name) {
+    const config = RECORD_DB_CONFIGS[db];
+    if (!config)
+        return null;
+    const dbId = config.dbId();
+    if (!dbId)
+        return null;
+    return findRecordByTitle(dbId, config.titleProp, name);
+}
+async function appendToPageSection(pageId, content, section) {
+    const blocks = contentToBlocks(content);
+    if (!blocks.length)
+        return;
+    const children = blocks;
+    if (!section) {
+        await withRetry("appendToPage", () => client.blocks.children.append({ block_id: pageId, children }));
+        log.info("notion.page_content_added", { pageId, section: "root" });
+        return;
+    }
+    const queryNorm = normalizeSectionName(section);
+    const listRes = await withRetry("listPageBlocks", () => client.blocks.children.list({ block_id: pageId, page_size: 100 }));
+    let toggleId = null;
+    for (const block of listRes.results) {
+        if (!("type" in block))
+            continue;
+        const b = block;
+        if (!["heading_1", "heading_2", "heading_3"].includes(b.type))
+            continue;
+        const hData = b[b.type];
+        if (!hData.is_toggleable)
+            continue;
+        const blockNorm = normalizeSectionName((hData.rich_text ?? []).map((rt) => rt.plain_text ?? "").join(""));
+        if (blockNorm.includes(queryNorm) || queryNorm.includes(blockNorm)) {
+            toggleId = b.id;
+            break;
+        }
+    }
+    if (!toggleId) {
+        const label = /^\p{Emoji}/u.test(section.trim()) ? section : `📌 ${section}`;
+        const createRes = await withRetry("createToggle", () => client.blocks.children.append({
+            block_id: pageId,
+            children: [toggleHeading(label)],
+        }));
+        toggleId = createRes.results[0].id;
+    }
+    await withRetry("appendToSection", () => client.blocks.children.append({ block_id: toggleId, children }));
+    log.info("notion.page_section_content_added", { pageId, section });
 }
 async function addToList(item, lista, adicionadoPor, originalMsg) {
     if (!NOTION_LISTS_DB_ID)
@@ -1415,7 +1502,9 @@ findEntityByName,
 // Lists
 addToList, checkListItem, getList, 
 // Generic record update
-updateRecord, };
+updateRecord, 
+// Page section editing
+findPageInDb, appendToPageSection, };
 export const notion = {
     createTask,
     updateTask,
@@ -1457,4 +1546,13 @@ export const notion = {
     createInfluencer,
     // Feature E — entity lookup
     findEntityByName,
+    // Lists
+    addToList,
+    checkListItem,
+    getList,
+    // Generic record update
+    updateRecord,
+    // Page section editing
+    findPageInDb,
+    appendToPageSection,
 };
