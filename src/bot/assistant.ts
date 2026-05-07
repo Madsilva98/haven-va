@@ -119,6 +119,22 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "log_entry",
+    description: "Regista um acontecimento no Studio Log (eventos, reuniões, gravações, publicações — o que aconteceu, não decisões)",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Descrição do acontecimento, pt-PT, <150 chars" },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Tags relevantes, máx 3. Ex: gravação, reunião, parceria, publicação, aula, evento",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
     name: "add_to_list",
     description: "Adiciona um item a uma lista no Notion",
     input_schema: {
@@ -426,6 +442,20 @@ async function execAddToDiscuss(
   await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
 }
 
+async function execLogEntry(
+  input: Record<string, unknown>,
+  sender: FounderName,
+  ctx: Context,
+): Promise<void> {
+  const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
+  if (!text) return;
+  const tags = Array.isArray(input.tags)
+    ? (input.tags as unknown[]).filter((t) => typeof t === "string").map((t) => (t as string).trim()).slice(0, 3)
+    : [];
+  await notion.createLogEntry({ text, author: sender, tags, originalMessage: ctx.message?.text ?? "" });
+  await ctx.reply(`📓 registado: "${text}"`);
+}
+
 async function execAddToList(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -622,6 +652,9 @@ export async function handleAssistant(
           break;
         case "add_to_discuss":
           await execAddToDiscuss(input, sender, ctx);
+          break;
+        case "log_entry":
+          await execLogEntry(input, sender, ctx);
           break;
         case "add_to_list":
           await execAddToList(input, sender, ctx);
