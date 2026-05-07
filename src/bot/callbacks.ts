@@ -18,6 +18,7 @@ import * as notion from "../notion.js";
 import { record } from "../feedback.js";
 import { getPending, commitPending, cancelPending } from "../state/pending.js";
 import { checkAndUnblockDependents } from "./dependencies.js";
+import type { EditableField } from "../types.js";
 
 export async function handleCallback(ctx: Context): Promise<void> {
   const query = ctx.callbackQuery;
@@ -62,6 +63,29 @@ export async function handleCallback(ctx: Context): Promise<void> {
       // message may be too old to edit — ignore
     }
     await ctx.reply("↩ task removida");
+    return;
+  }
+
+  // task:edit_undo:pageId:field:oldValue — revert an update_task action
+  if (scope === "task" && action === "edit_undo") {
+    const pageId = parts[2];
+    const field = parts[3] as EditableField;
+    const oldValue = parts.slice(4).join(":");
+    await ctx.answerCallbackQuery();
+    if (!pageId || !field || !oldValue) return;
+    try {
+      await notion.updateTask(pageId, field, oldValue);
+    } catch (err) {
+      log.error("callback.edit_undo_failed", { err: String(err), pageId, field });
+      await ctx.reply("erro ao desfazer — tenta outra vez");
+      return;
+    }
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {
+      // message may be too old to edit — ignore
+    }
+    await ctx.reply("↩ edição desfeita");
     return;
   }
 

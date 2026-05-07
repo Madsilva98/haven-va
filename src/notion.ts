@@ -297,7 +297,9 @@ function buildEditPatch(field: EditableField, newValue: string): Record<string, 
     case "area":
       return { [property]: { select: { name: newValue } } };
     case "deadline":
-      return { [property]: { date: { start: newValue } } };
+      return newValue === "none"
+        ? { [property]: { date: null } }
+        : { [property]: { date: { start: newValue } } };
   }
 }
 

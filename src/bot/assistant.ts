@@ -10,14 +10,16 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
-import type { Context } from "grammy";
+import { InlineKeyboard, type Context } from "grammy";
 
 import { log } from "../lib/log.js";
 import * as notion from "../notion.js";
 import type { ContentCalendarRow } from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
+import { checkAndUnblockDependents } from "./dependencies.js";
 import type {
   Area,
+  EditableField,
   EntityKind,
   EntityRef,
   FounderName,
@@ -114,6 +116,31 @@ const TOOLS: Anthropic.Tool[] = [
         deadline: { type: "string", description: "Data limite, YYYY-MM-DD (opcional)" },
       },
       required: ["tema"],
+    },
+  },
+  {
+    name: "update_task",
+    description: "Atualiza um campo de uma task existente no backlog",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_title: {
+          type: "string",
+          description: "Título ou parte do título da task a editar",
+        },
+        field: {
+          type: "string",
+          enum: ["status", "owner", "deadline", "prioridade", "area"],
+        },
+        new_value: {
+          type: "string",
+          description:
+            "Novo valor. status: 'A fazer'|'Em curso'|'Bloqueado'|'Feito'|'Cancelado'. " +
+            "owner: Madalena|Mafalda|Beatriz|Unassigned. " +
+            "prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD.",
+        },
+      },
+      required: ["task_title", "field", "new_value"],
     },
   },
   {
@@ -375,6 +402,64 @@ async function execAddToDiscuss(
   await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
 }
 
+async function execUpdateTask(
+  input: Record<string, unknown>,
+  openTasks: OpenTask[],
+  ctx: Context,
+): Promise<void> {
+  const taskTitle = typeof input.task_title === "string" ? input.task_title.trim() : "";
+  const field = input.field as EditableField;
+  const newValue = typeof input.new_value === "string" ? input.new_value.trim() : "";
+
+  if (!taskTitle || !field || !newValue) return;
+  if (!["status", "owner", "deadline", "prioridade", "area"].includes(field)) return;
+
+  // Best fuzzy match — try word overlap first, then substring
+  let best: OpenTask | null = null;
+  let bestScore = 0;
+  for (const t of openTasks) {
+    const score = wordOverlap(taskTitle, t.title);
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  if (!best || bestScore === 0) {
+    const q = taskTitle.toLowerCase();
+    best = openTasks.find(
+      (t) => t.title.toLowerCase().includes(q) || q.includes(t.title.toLowerCase()),
+    ) ?? null;
+  }
+
+  if (!best) {
+    await ctx.reply(`não encontrei nenhuma task com "${taskTitle}"`);
+    return;
+  }
+
+  // Capture old value for undo (encode null as "none")
+  const oldValue: string = (() => {
+    switch (field) {
+      case "status": return best.status;
+      case "owner": return best.owner;
+      case "deadline": return best.deadline ?? "none";
+      case "prioridade": return best.priority ?? "none";
+      case "area": return best.area;
+    }
+  })();
+
+  await notion.updateTask(best.id, field, newValue);
+
+  if (field === "status" && newValue === "Feito") {
+    await checkAndUnblockDependents(best.id, best.title);
+  }
+
+  const replyText = `✅ "${best.title}" — ${field} → ${newValue}`;
+  if (oldValue === "none") {
+    await ctx.reply(replyText);
+  } else {
+    const undoData = `task:edit_undo:${best.id}:${field}:${oldValue}`;
+    const kb = new InlineKeyboard().text("↩ Desfazer", undoData);
+    await ctx.reply(replyText, { reply_markup: kb });
+  }
+}
+
 async function execCreateEntity(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -486,6 +571,9 @@ export async function handleAssistant(
           break;
         case "add_to_discuss":
           await execAddToDiscuss(input, sender, ctx);
+          break;
+        case "update_task":
+          await execUpdateTask(input, openTasks, ctx);
           break;
         case "create_entity":
           await execCreateEntity(input, sender, ctx);
