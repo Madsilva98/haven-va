@@ -1327,6 +1327,7 @@ function normalizeSectionName(text) {
         .toLowerCase()
         .trim();
 }
+const URL_RE = /^https?:\/\/\S+$/i;
 function contentToBlocks(content) {
     return content
         .split("\n")
@@ -1334,6 +1335,9 @@ function contentToBlocks(content) {
         .filter((l) => l.trim())
         .map((line) => {
         const t = line.trim();
+        if (URL_RE.test(t)) {
+            return { type: "bookmark", bookmark: { url: t } };
+        }
         if (t.startsWith("- ")) {
             return {
                 type: "bulleted_list_item",
