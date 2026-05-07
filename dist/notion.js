@@ -773,6 +773,30 @@ async function getContentCalendarRows() {
         return [];
     }
 }
+async function createContentCalendarEntry(params) {
+    if (!NOTION_CONTENT_CALENDAR_DB_ID) {
+        throw new Error("notion: NOTION_CONTENT_CALENDAR_DB_ID is not configured");
+    }
+    const properties = {
+        Name: { title: [{ text: { content: params.title } }] },
+        status: { status: { name: params.status ?? "Raw Idea" } },
+    };
+    if (params.publishDate) {
+        properties["Posting Haven"] = { date: { start: params.publishDate } };
+    }
+    if (params.adType) {
+        properties["Ad type"] = { select: { name: params.adType } };
+    }
+    if (params.originalMsg) {
+        properties["Origem"] = richText(params.originalMsg);
+    }
+    const page = await withRetry("createContentCalendarEntry", () => client.pages.create({
+        parent: { database_id: NOTION_CONTENT_CALENDAR_DB_ID },
+        properties: properties,
+    }));
+    log.info("notion.content_calendar_entry_created", { title: params.title });
+    return page.id;
+}
 // ── Studio Log (Phase 1 redesign) ────────────────────────────────────────────
 async function createLogEntry(params) {
     if (!NOTION_STUDIO_LOG_DB_ID) {
@@ -1262,7 +1286,7 @@ export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archive
 // Phase 2
 getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getCompletedSince, getOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
 // Phase 3
-getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createReminder, getDueReminders, markReminderSent, 
+getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createContentCalendarEntry, createReminder, getDueReminders, markReminderSent, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Phase 1 redesign — Studio Log
@@ -1294,6 +1318,7 @@ export const notion = {
     getInfluencersStale,
     getContentCalendarAlerts,
     getContentCalendarRows,
+    createContentCalendarEntry,
     createReminder,
     getDueReminders,
     markReminderSent,

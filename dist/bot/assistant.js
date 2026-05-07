@@ -134,8 +134,22 @@ const TOOLS = [
         },
     },
     {
+        name: "create_content_calendar_entry",
+        description: "Adiciona uma entrada ao Content Calendar (Social Media Calendar). NUNCA usar add_to_list para conteúdo social.",
+        input_schema: {
+            type: "object",
+            properties: {
+                title: { type: "string", description: "Título do conteúdo" },
+                status: { type: "string", description: "Estado: Raw Idea, Writing, Editing, Scheduled, Posted. Default: Raw Idea" },
+                publish_date: { type: "string", description: "Data de publicação YYYY-MM-DD (opcional)" },
+                ad_type: { type: "string", description: "Tipo: Post, Story, Reel, Carrossel, etc. (opcional)" },
+            },
+            required: ["title"],
+        },
+    },
+    {
         name: "add_to_list",
-        description: "Adiciona um item a uma lista no Notion",
+        description: "Adiciona um item a uma lista genérica no Notion. NÃO usar para Content Calendar ou Social Media Calendar.",
         input_schema: {
             type: "object",
             properties: {
@@ -241,7 +255,7 @@ function wordOverlap(a, b) {
             overlap++;
     return overlap / Math.max(wa.size, wb.size);
 }
-function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar) {
+function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
     const lines = [];
     const now = new Date();
     const today = now.toLocaleDateString("pt-PT", {
@@ -273,6 +287,10 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
         }
         lines.push("");
     }
+    if (lastBotReplies && lastBotReplies.length > 0) {
+        lines.push(`[Última ação do bot: ${lastBotReplies.map((r) => `"${r}"`).join(" | ")}]`);
+        lines.push("");
+    }
     if (repliedToText) {
         lines.push(`[Em resposta ao bot: "${repliedToText}"]`);
         lines.push("");
@@ -289,7 +307,7 @@ function buildUserMessage(sender, text, openTasks, recentMessages, repliedToText
     lines.push(`${sender}: ${text}`);
     return lines.join("\n");
 }
-async function execCreateTask(input, sender, ctx, openTasks) {
+async function execCreateTask(input, sender, ctx, openTasks, collector) {
     const title = (typeof input.title === "string" ? input.title.trim() : "").slice(0, 80);
     if (!title)
         return;
@@ -317,11 +335,12 @@ async function execCreateTask(input, sender, ctx, openTasks) {
     let replyText = `✅ task criada: "${title}"`;
     if (duplicate)
         replyText += `\nℹ️ parecida com task existente: "${duplicate.title}"`;
+    collector.push(replyText);
     await ctx.reply(replyText, {
         reply_markup: taskUndoKeyboard(pageId),
     });
 }
-async function execCreateReminder(input, sender, ctx) {
+async function execCreateReminder(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
     const whenRaw = typeof input.when_iso === "string" ? input.when_iso : "";
     const forWho = typeof input.for === "string" ? input.for : sender;
@@ -340,9 +359,11 @@ async function execCreateReminder(input, sender, ctx) {
         origem: ctx.message?.text ?? "",
     })));
     const label = forWho === "all" ? "todas" : forWho;
-    await ctx.reply(`⏰ lembrete criado para ${label}: "${text}"`);
+    const reminderReply = `⏰ lembrete criado para ${label}: "${text}"`;
+    collector.push(reminderReply);
+    await ctx.reply(reminderReply);
 }
-async function execLogDecision(input, sender, ctx) {
+async function execLogDecision(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
     if (!text)
         return;
@@ -356,9 +377,11 @@ async function execLogDecision(input, sender, ctx) {
         estado: "Pendente implementação",
         notas: notes,
     }, ctx.message?.text ?? "");
-    await ctx.reply(`📋 decisão registada: "${text}"`);
+    const decisionReply = `📋 decisão registada: "${text}"`;
+    collector.push(decisionReply);
+    await ctx.reply(decisionReply);
 }
-async function execAddToDiscuss(input, sender, ctx) {
+async function execAddToDiscuss(input, sender, ctx, collector) {
     const tema = typeof input.tema === "string" ? input.tema.trim() : "";
     if (!tema)
         return;
@@ -375,9 +398,11 @@ async function execAddToDiscuss(input, sender, ctx) {
         resolucao: "",
         deadline,
     }, ctx.message?.text ?? "");
-    await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
+    const discussReply = `💬 adicionado à lista de discussão: "${tema}"`;
+    collector.push(discussReply);
+    await ctx.reply(discussReply);
 }
-async function execSetFocus(input, sender, ctx) {
+async function execSetFocus(input, sender, ctx, collector) {
     const foco = typeof input.foco === "string" ? input.foco.trim().slice(0, 200) : "";
     if (!foco)
         return;
@@ -385,9 +410,11 @@ async function execSetFocus(input, sender, ctx) {
         ? input.founder
         : sender;
     await notion.setFounderFocus({ founder, semana: currentWeekLabel(), focoOperacional: foco });
-    await ctx.reply(`🎯 foco de ${founder} esta semana: "${foco}"`);
+    const focusReply = `🎯 foco de ${founder} esta semana: "${foco}"`;
+    collector.push(focusReply);
+    await ctx.reply(focusReply);
 }
-async function execLogEntry(input, sender, ctx) {
+async function execLogEntry(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
     if (!text)
         return;
@@ -395,17 +422,39 @@ async function execLogEntry(input, sender, ctx) {
         ? input.tags.filter((t) => typeof t === "string").map((t) => t.trim()).slice(0, 3)
         : [];
     await notion.createLogEntry({ text, author: sender, tags, originalMessage: ctx.message?.text ?? "" });
-    await ctx.reply(`📓 registado: "${text}"`);
+    const logReply = `📓 registado: "${text}"`;
+    collector.push(logReply);
+    await ctx.reply(logReply);
 }
-async function execAddToList(input, sender, ctx) {
+async function execAddToList(input, sender, ctx, collector) {
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
         return;
     await notion.addToList(item, lista, sender, ctx.message?.text ?? "");
-    await ctx.reply(`📝 "${item}" adicionado à lista *${lista}*`);
+    const listReply = `📝 "${item}" adicionado à lista *${lista}*`;
+    collector.push(listReply);
+    await ctx.reply(listReply);
 }
-async function execCheckListItem(input, ctx) {
+async function execCreateContentCalendarEntry(input, sender, ctx, collector) {
+    const title = typeof input.title === "string" ? input.title.trim() : "";
+    if (!title)
+        return;
+    const status = typeof input.status === "string" ? input.status.trim() : "Raw Idea";
+    const publishDate = typeof input.publish_date === "string" && input.publish_date ? input.publish_date : undefined;
+    const adType = typeof input.ad_type === "string" ? input.ad_type.trim() : undefined;
+    await notion.createContentCalendarEntry({
+        title,
+        status,
+        publishDate,
+        adType,
+        originalMsg: ctx.message?.text ?? "",
+    });
+    const calReply = `📅 "${title}" adicionado ao Content Calendar`;
+    collector.push(calReply);
+    await ctx.reply(calReply);
+}
+async function execCheckListItem(input, ctx, collector) {
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
@@ -415,9 +464,11 @@ async function execCheckListItem(input, ctx) {
         await ctx.reply(`não encontrei "${item}" na lista *${lista}*`);
         return;
     }
-    await ctx.reply(`✅ "${item}" marcado como feito`);
+    const checkReply = `✅ "${item}" marcado como feito`;
+    collector.push(checkReply);
+    await ctx.reply(checkReply);
 }
-async function execUpdateTask(input, openTasks, ctx) {
+async function execUpdateTask(input, openTasks, ctx, collector) {
     const taskTitle = typeof input.task_title === "string" ? input.task_title.trim() : "";
     const field = input.field;
     const newValue = typeof input.new_value === "string" ? input.new_value.trim() : "";
@@ -458,6 +509,7 @@ async function execUpdateTask(input, openTasks, ctx) {
         await checkAndUnblockDependents(best.id, best.title);
     }
     const replyText = `✅ "${best.title}" — ${field} → ${newValue}`;
+    collector.push(replyText);
     if (oldValue === "none") {
         await ctx.reply(replyText);
     }
@@ -467,7 +519,7 @@ async function execUpdateTask(input, openTasks, ctx) {
         await ctx.reply(replyText, { reply_markup: kb });
     }
 }
-async function execCreateEntity(input, sender, ctx) {
+async function execCreateEntity(input, sender, ctx, collector) {
     const kind = ENTITY_KINDS.includes(input.kind)
         ? input.kind
         : null;
@@ -500,16 +552,19 @@ async function execCreateEntity(input, sender, ctx) {
             break;
     }
     log.info("assistant.entity_created", { kind, nome, owner, sender: sender });
-    await ctx.reply(`✅ ${kindLabel[kind]} criado: "${nome}"`);
+    const entityReply = `✅ ${kindLabel[kind]} criado: "${nome}"`;
+    collector.push(entityReply);
+    await ctx.reply(entityReply);
 }
-export async function handleAssistant(ctx, sender, text, openTasks, recentMessages, repliedToText, contentCalendar) {
+export async function handleAssistant(ctx, sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
+    const collector = [];
     let runtime;
     try {
         runtime = initRuntime();
     }
     catch (err) {
         log.error("assistant.init_failed", { err: String(err) });
-        return;
+        return collector;
     }
     const systemBlocks = [
         {
@@ -528,18 +583,19 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
             messages: [
                 {
                     role: "user",
-                    content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar),
+                    content: buildUserMessage(sender, text, openTasks, recentMessages, repliedToText, contentCalendar, lastBotReplies),
                 },
             ],
         });
     }
     catch (err) {
         log.error("assistant.api_error", { err: String(err) });
-        return;
+        return collector;
     }
     const textBlock = response.content.find((b) => b.type === "text");
     if (textBlock?.type === "text" && textBlock.text.trim()) {
         try {
+            collector.push(textBlock.text.trim());
             await ctx.reply(textBlock.text.trim());
         }
         catch (err) {
@@ -554,34 +610,37 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
         try {
             switch (block.name) {
                 case "create_task":
-                    await execCreateTask(input, sender, ctx, openTasks);
+                    await execCreateTask(input, sender, ctx, openTasks, collector);
                     break;
                 case "create_reminder":
-                    await execCreateReminder(input, sender, ctx);
+                    await execCreateReminder(input, sender, ctx, collector);
                     break;
                 case "log_decision":
-                    await execLogDecision(input, sender, ctx);
+                    await execLogDecision(input, sender, ctx, collector);
                     break;
                 case "add_to_discuss":
-                    await execAddToDiscuss(input, sender, ctx);
+                    await execAddToDiscuss(input, sender, ctx, collector);
                     break;
                 case "set_focus":
-                    await execSetFocus(input, sender, ctx);
+                    await execSetFocus(input, sender, ctx, collector);
                     break;
                 case "log_entry":
-                    await execLogEntry(input, sender, ctx);
+                    await execLogEntry(input, sender, ctx, collector);
                     break;
                 case "add_to_list":
-                    await execAddToList(input, sender, ctx);
+                    await execAddToList(input, sender, ctx, collector);
+                    break;
+                case "create_content_calendar_entry":
+                    await execCreateContentCalendarEntry(input, sender, ctx, collector);
                     break;
                 case "check_list_item":
-                    await execCheckListItem(input, ctx);
+                    await execCheckListItem(input, ctx, collector);
                     break;
                 case "update_task":
-                    await execUpdateTask(input, openTasks, ctx);
+                    await execUpdateTask(input, openTasks, ctx, collector);
                     break;
                 case "create_entity":
-                    await execCreateEntity(input, sender, ctx);
+                    await execCreateEntity(input, sender, ctx, collector);
                     break;
                 default:
                     log.warn("assistant.unknown_tool", { name: block.name });
@@ -602,4 +661,5 @@ export async function handleAssistant(ctx, sender, text, openTasks, recentMessag
         tools: toolCalls.map((b) => (b.type === "tool_use" ? b.name : "")),
         hasText: Boolean(textBlock?.type === "text" && textBlock.text.trim()),
     });
+    return collector;
 }

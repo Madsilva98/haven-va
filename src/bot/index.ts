@@ -45,6 +45,7 @@ import {
 
 const RECENT_MAX = 6;
 const recentByChat = new Map<number, { sender: FounderName; text: string }[]>();
+const lastBotRepliesByChat = new Map<number, string[]>();
 const errorLimit = new ErrorRateLimit();
 
 let botInstance: Bot | null = null;
@@ -303,7 +304,7 @@ export function buildBot(): Bot {
     }
 
     try {
-      await handleAssistant(
+      const botReplies = await handleAssistant(
         ctx,
         senderName,
         text,
@@ -311,7 +312,11 @@ export function buildBot(): Bot {
         getPriors(chatId),
         repliedToText,
         contentCalendar,
+        lastBotRepliesByChat.get(chatId),
       );
+      if (botReplies.length > 0) {
+        lastBotRepliesByChat.set(chatId, botReplies);
+      }
     } catch (err) {
       log.error("pipeline.error", { err: String(err) });
       if (errorLimit.tryNotify()) {

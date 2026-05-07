@@ -25,6 +25,7 @@ import { handleRemind } from "./remind.js";
 import { handleToDiscussCommand, handleToDiscussCallback, } from "./todiscuss.js";
 const RECENT_MAX = 6;
 const recentByChat = new Map();
+const lastBotRepliesByChat = new Map();
 const errorLimit = new ErrorRateLimit();
 let botInstance = null;
 let awaitingAuthCodeFrom = null;
@@ -272,7 +273,10 @@ export function buildBot() {
             }
         }
         try {
-            await handleAssistant(ctx, senderName, text, openTasks, getPriors(chatId), repliedToText, contentCalendar);
+            const botReplies = await handleAssistant(ctx, senderName, text, openTasks, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId));
+            if (botReplies.length > 0) {
+                lastBotRepliesByChat.set(chatId, botReplies);
+            }
         }
         catch (err) {
             log.error("pipeline.error", { err: String(err) });
