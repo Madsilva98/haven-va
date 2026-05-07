@@ -24,6 +24,7 @@ import {
   handleDashboard,
   handleHelp,
   handleHoje,
+  handleLista,
   handleStart,
   handleStatus,
   handleTask,
@@ -152,6 +153,7 @@ export function buildBot(): Bot {
     { command: "todiscuss", description: "Adicionar à lista de discussão" },
     { command: "remind",    description: "Criar lembrete" },
     { command: "week",      description: "Definir foco semanal" },
+    { command: "lista",     description: "Ver uma lista (/lista compras)" },
     { command: "status",    description: "Ver métricas do bot" },
     { command: "help",      description: "Ajuda" },
   ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
@@ -177,6 +179,7 @@ export function buildBot(): Bot {
   bot.command("todiscuss", handleToDiscussCommand);
   bot.command("hoje", handleHoje);
   bot.command("dashboard", handleDashboard);
+  bot.command("lista", handleLista);
 
   // Google Calendar auth — Madalena's private DM only.
   bot.command("auth", async (ctx) => {

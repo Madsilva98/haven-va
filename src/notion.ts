@@ -57,6 +57,7 @@ const NOTION_CONTENT_CALENDAR_DB_ID =
 const NOTION_STUDIO_LOG_DB_ID = process.env.NOTION_STUDIO_LOG_DB_ID;
 const NOTION_PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
+const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
 
 if (!NOTION_API_KEY) {
   throw new Error("notion: NOTION_API_KEY is required");
@@ -1837,6 +1838,112 @@ async function createInfluencer(nome: string, owner: OwnerValue): Promise<string
   return page.id;
 }
 
+// ----- Lists -----
+
+export interface ListItem {
+  id: string;
+  item: string;
+  lista: string;
+  feito: boolean;
+  adicionadoPor: string;
+}
+
+async function addToList(
+  item: string,
+  lista: string,
+  adicionadoPor: FounderName,
+): Promise<string> {
+  if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
+  const page = await withRetry("addToList", () =>
+    client.pages.create({
+      parent: { database_id: NOTION_LISTS_DB_ID! },
+      properties: {
+        Item: { title: [{ text: { content: item.slice(0, 100) } }] },
+        Lista: { select: { name: lista } },
+        Feito: { checkbox: false },
+        "Adicionado por": { select: { name: adicionadoPor } },
+      },
+    }),
+  );
+  log.info("notion.list_item_added", { item, lista, adicionadoPor });
+  return page.id;
+}
+
+async function checkListItem(itemTitle: string, lista: string): Promise<string | null> {
+  if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
+  const res = await withRetry("checkListItem.query", () =>
+    client.databases.query({
+      database_id: NOTION_LISTS_DB_ID!,
+      filter: {
+        and: [
+          { property: "Lista", select: { equals: lista } },
+          { property: "Feito", checkbox: { equals: false } },
+        ],
+      },
+      page_size: 50,
+    }),
+  );
+
+  // Best title match
+  let bestId: string | null = null;
+  let bestScore = 0;
+  const q = itemTitle.toLowerCase();
+  for (const row of res.results) {
+    const props = (row as { id: string; properties: Record<string, unknown> }).properties;
+    const title = readPlainText(props["Item"]).toLowerCase();
+    const exact = title === q ? 1 : 0;
+    const includes = title.includes(q) || q.includes(title) ? 0.8 : 0;
+    const wa = (() => {
+      const wa2 = new Set(q.split(/\s+/).filter(Boolean));
+      const wb = new Set(title.split(/\s+/).filter(Boolean));
+      if (!wa2.size || !wb.size) return 0;
+      let overlap = 0;
+      for (const w of wa2) if (wb.has(w)) overlap++;
+      return overlap / Math.max(wa2.size, wb.size);
+    })();
+    const score = exact || includes || wa;
+    if (score > bestScore) { bestScore = score; bestId = row.id; }
+  }
+  if (!bestId || bestScore === 0) return null;
+
+  await withRetry("checkListItem.update", () =>
+    client.pages.update({ page_id: bestId!, properties: { Feito: { checkbox: true } } }),
+  );
+  log.info("notion.list_item_checked", { itemTitle, lista, pageId: bestId });
+  return bestId;
+}
+
+async function getList(lista?: string): Promise<ListItem[]> {
+  if (!NOTION_LISTS_DB_ID) return [];
+  const filter = lista
+    ? { property: "Lista", select: { equals: lista } }
+    : undefined;
+  const res = await withRetry("getList", () =>
+    client.databases.query({
+      database_id: NOTION_LISTS_DB_ID!,
+      ...(filter ? { filter } : {}),
+      sorts: [{ timestamp: "created_time", direction: "ascending" }],
+      page_size: 100,
+    }),
+  );
+  return res.results.map((row) => {
+    const props = (row as { id: string; properties: Record<string, unknown> }).properties;
+    const feito =
+      props["Feito"] &&
+      typeof props["Feito"] === "object" &&
+      "checkbox" in (props["Feito"] as object)
+        ? (props["Feito"] as { checkbox: boolean }).checkbox
+        : false;
+    return {
+      id: row.id,
+      item: readPlainText(props["Item"]),
+      lista: readSelectName(props["Lista"]) ?? "",
+      feito,
+      adicionadoPor: readSelectName(props["Adicionado por"]) ?? "",
+    };
+  });
+}
+
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export {
   createTask,
@@ -1886,6 +1993,10 @@ export {
   createInfluencer,
   // Feature E — entity lookup
   findEntityByName,
+  // Lists
+  addToList,
+  checkListItem,
+  getList,
 };
 
 export const notion = {

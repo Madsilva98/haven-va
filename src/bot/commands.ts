@@ -127,6 +127,49 @@ export async function handleStatus(ctx: Context): Promise<void> {
   }
 }
 
+export async function handleLista(ctx: Context): Promise<void> {
+  const arg = (ctx.message?.text ?? "")
+    .replace(/^\/lista(@\w+)?\s*/i, "")
+    .trim();
+
+  try {
+    const items = await notion.getList(arg || undefined);
+
+    if (items.length === 0) {
+      const msg = arg ? `lista *${arg}* está vazia` : "não há itens em nenhuma lista";
+      await ctx.reply(msg, { parse_mode: "Markdown" });
+      return;
+    }
+
+    if (!arg) {
+      // Aggregate: show list names with pending counts
+      const counts = new Map<string, number>();
+      for (const i of items) {
+        if (!i.feito) counts.set(i.lista, (counts.get(i.lista) ?? 0) + 1);
+      }
+      const lines = ["📋 *Listas*"];
+      for (const [nome, count] of counts) {
+        lines.push(`  • ${nome} — ${count} item${count !== 1 ? "s" : ""} por fazer`);
+      }
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+      return;
+    }
+
+    const pending = items.filter((i) => !i.feito);
+    const done = items.filter((i) => i.feito);
+    const lines = [`📋 *${arg}*`];
+    for (const i of pending) lines.push(`  ☐ ${i.item}`);
+    if (done.length > 0) {
+      lines.push("");
+      for (const i of done) lines.push(`  ☑ ~${i.item}~`);
+    }
+    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+  } catch (err) {
+    log.error("commands.lista.failed", { err: String(err) });
+    await ctx.reply("erro a carregar lista — tenta outra vez");
+  }
+}
+
 export async function handleDashboard(ctx: Context): Promise<void> {
   try {
     const [focus, toDiscuss] = await Promise.all([

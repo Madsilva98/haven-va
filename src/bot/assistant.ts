@@ -119,6 +119,30 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "add_to_list",
+    description: "Adiciona um item a uma lista no Notion",
+    input_schema: {
+      type: "object",
+      properties: {
+        item: { type: "string", description: "Texto do item" },
+        lista: { type: "string", description: "Nome da lista (cria automaticamente se não existir)" },
+      },
+      required: ["item", "lista"],
+    },
+  },
+  {
+    name: "check_list_item",
+    description: "Marca um item de uma lista como feito",
+    input_schema: {
+      type: "object",
+      properties: {
+        item: { type: "string", description: "Título ou parte do título do item" },
+        lista: { type: "string", description: "Nome da lista" },
+      },
+      required: ["item", "lista"],
+    },
+  },
+  {
     name: "update_task",
     description: "Atualiza um campo de uma task existente no backlog",
     input_schema: {
@@ -402,6 +426,33 @@ async function execAddToDiscuss(
   await ctx.reply(`💬 adicionado à lista de discussão: "${tema}"`);
 }
 
+async function execAddToList(
+  input: Record<string, unknown>,
+  sender: FounderName,
+  ctx: Context,
+): Promise<void> {
+  const item = typeof input.item === "string" ? input.item.trim() : "";
+  const lista = typeof input.lista === "string" ? input.lista.trim() : "";
+  if (!item || !lista) return;
+  await notion.addToList(item, lista, sender);
+  await ctx.reply(`📝 "${item}" adicionado à lista *${lista}*`);
+}
+
+async function execCheckListItem(
+  input: Record<string, unknown>,
+  ctx: Context,
+): Promise<void> {
+  const item = typeof input.item === "string" ? input.item.trim() : "";
+  const lista = typeof input.lista === "string" ? input.lista.trim() : "";
+  if (!item || !lista) return;
+  const pageId = await notion.checkListItem(item, lista);
+  if (!pageId) {
+    await ctx.reply(`não encontrei "${item}" na lista *${lista}*`);
+    return;
+  }
+  await ctx.reply(`✅ "${item}" marcado como feito`);
+}
+
 async function execUpdateTask(
   input: Record<string, unknown>,
   openTasks: OpenTask[],
@@ -571,6 +622,12 @@ export async function handleAssistant(
           break;
         case "add_to_discuss":
           await execAddToDiscuss(input, sender, ctx);
+          break;
+        case "add_to_list":
+          await execAddToList(input, sender, ctx);
+          break;
+        case "check_list_item":
+          await execCheckListItem(input, ctx);
           break;
         case "update_task":
           await execUpdateTask(input, openTasks, ctx);
