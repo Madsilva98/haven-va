@@ -1359,19 +1359,9 @@ async function findPageInDb(db, name) {
         return null;
     return findRecordByTitle(dbId, config.titleProp, name);
 }
-async function appendToPageSection(pageId, content, section) {
-    const blocks = contentToBlocks(content);
-    if (!blocks.length)
-        return;
-    const children = blocks;
-    if (!section) {
-        await withRetry("appendToPage", () => client.blocks.children.append({ block_id: pageId, children }));
-        log.info("notion.page_content_added", { pageId, section: "root" });
-        return;
-    }
-    const queryNorm = normalizeSectionName(section);
+async function getOrCreateToggleId(pageId, sectionName) {
+    const queryNorm = normalizeSectionName(sectionName);
     const listRes = await withRetry("listPageBlocks", () => client.blocks.children.list({ block_id: pageId, page_size: 100 }));
-    let toggleId = null;
     for (const block of listRes.results) {
         if (!("type" in block))
             continue;
@@ -1383,20 +1373,73 @@ async function appendToPageSection(pageId, content, section) {
             continue;
         const blockNorm = normalizeSectionName((hData.rich_text ?? []).map((rt) => rt.plain_text ?? "").join(""));
         if (blockNorm.includes(queryNorm) || queryNorm.includes(blockNorm)) {
-            toggleId = b.id;
-            break;
+            return b.id;
         }
     }
-    if (!toggleId) {
-        const label = /^\p{Emoji}/u.test(section.trim()) ? section : `📌 ${section}`;
-        const createRes = await withRetry("createToggle", () => client.blocks.children.append({
-            block_id: pageId,
-            children: [toggleHeading(label)],
-        }));
-        toggleId = createRes.results[0].id;
+    const label = /^\p{Emoji}/u.test(sectionName.trim()) ? sectionName : `📌 ${sectionName}`;
+    const createRes = await withRetry("createToggle", () => client.blocks.children.append({
+        block_id: pageId,
+        children: [toggleHeading(label)],
+    }));
+    return createRes.results[0].id;
+}
+async function appendToPageSection(pageId, content, section) {
+    const blocks = contentToBlocks(content);
+    if (!blocks.length)
+        return;
+    const children = blocks;
+    const targetId = section ? await getOrCreateToggleId(pageId, section) : pageId;
+    await withRetry("appendToSection", () => client.blocks.children.append({ block_id: targetId, children }));
+    log.info("notion.page_content_added", { pageId, section: section ?? "root" });
+}
+const NOTION_API_BASE = "https://api.notion.com/v1";
+const NOTION_VERSION = "2022-06-28";
+async function uploadAndAttachFile(pageId, fileName, mimeType, fileBuffer, section) {
+    // Step 1 — create file upload entry
+    const createRes = await fetch(`${NOTION_API_BASE}/file_uploads`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${NOTION_API_KEY}`,
+            "Notion-Version": NOTION_VERSION,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mode: "single_part" }),
+    });
+    if (!createRes.ok) {
+        const body = await createRes.text();
+        throw new Error(`notion: file_upload create ${createRes.status}: ${body}`);
     }
-    await withRetry("appendToSection", () => client.blocks.children.append({ block_id: toggleId, children }));
-    log.info("notion.page_section_content_added", { pageId, section });
+    const { id: uploadId, upload_url: uploadUrl } = await createRes.json();
+    // Step 2 — upload file data
+    const form = new FormData();
+    form.append("file", new Blob([fileBuffer], { type: mimeType }), fileName);
+    const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+            Authorization: `Bearer ${NOTION_API_KEY}`,
+            "Notion-Version": NOTION_VERSION,
+        },
+        body: form,
+    });
+    if (!uploadRes.ok) {
+        const body = await uploadRes.text();
+        throw new Error(`notion: file_upload PUT ${uploadRes.status}: ${body}`);
+    }
+    // Step 3 — append file block
+    const fileBlock = {
+        type: "file",
+        file: {
+            type: "file_upload",
+            file_upload: { id: uploadId },
+            name: fileName,
+        },
+    };
+    const targetId = section ? await getOrCreateToggleId(pageId, section) : pageId;
+    await withRetry("appendFile", () => client.blocks.children.append({
+        block_id: targetId,
+        children: [fileBlock],
+    }));
+    log.info("notion.file_attached", { pageId, fileName, section });
 }
 async function addToList(item, lista, adicionadoPor, originalMsg) {
     if (!NOTION_LISTS_DB_ID)
@@ -1508,7 +1551,7 @@ addToList, checkListItem, getList,
 // Generic record update
 updateRecord, 
 // Page section editing
-findPageInDb, appendToPageSection, };
+findPageInDb, appendToPageSection, uploadAndAttachFile, };
 export const notion = {
     createTask,
     updateTask,
@@ -1559,4 +1602,5 @@ export const notion = {
     // Page section editing
     findPageInDb,
     appendToPageSection,
+    uploadAndAttachFile,
 };

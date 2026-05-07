@@ -27,6 +27,30 @@ const RECENT_MAX = 6;
 const recentByChat = new Map();
 const lastBotRepliesByChat = new Map();
 const errorLimit = new ErrorRateLimit();
+const pendingFileByUser = new Map();
+const PENDING_FILE_TTL_MS = 5 * 60 * 1000;
+function parseCaptionForFileTarget(text) {
+    const dbPatterns = [
+        [/\bprojeto\s+(.+?)(?:\s*[,\n]|\s+(?:na\s+)?sec[çc]|$)/i, "projects"],
+        [/\bparceiro\s+(.+?)(?:\s*[,\n]|\s+(?:na\s+)?sec[çc]|$)/i, "partners"],
+        [/\bevento\s+(.+?)(?:\s*[,\n]|\s+(?:na\s+)?sec[çc]|$)/i, "events"],
+        [/\binfluencer\s+(.+?)(?:\s*[,\n]|\s+(?:na\s+)?sec[çc]|$)/i, "influencers"],
+    ];
+    let db = null;
+    let pageName = null;
+    for (const [re, dbName] of dbPatterns) {
+        const m = text.match(re);
+        if (m?.[1]) {
+            db = dbName;
+            pageName = m[1].trim().replace(/[,\s]+$/, "");
+            break;
+        }
+    }
+    if (!db || !pageName)
+        return null;
+    const secMatch = text.match(/sec[çc][aã]o\s+(.+?)(?:\s*[,\n]|$)/i);
+    return { db, pageName, section: secMatch?.[1]?.trim() };
+}
 let botInstance = null;
 let awaitingAuthCodeFrom = null;
 let botInfoUserId = null;
@@ -192,6 +216,76 @@ export function buildBot() {
     });
     // Inline button callbacks.
     bot.on("callback_query:data", callbackRouter);
+    // File upload handler (documents + photos).
+    async function handleFileUpload(ctx, fromId, senderName, fileId, fileName, mimeType, caption) {
+        const target = caption ? parseCaptionForFileTarget(caption) : null;
+        if (!target) {
+            pendingFileByUser.set(fromId, {
+                fileId,
+                fileName,
+                mimeType,
+                expiresAt: Date.now() + PENDING_FILE_TTL_MS,
+            });
+            await ctx.reply(`📎 *${fileName}* — onde guardo?\nResponde com: \`projeto X\` ou \`parceiro Y, secção Contratos\``, { parse_mode: "Markdown" });
+            return;
+        }
+        await uploadFileToNotion(ctx, senderName, { fileId, fileName, mimeType }, target);
+    }
+    async function uploadFileToNotion(ctx, senderName, file, target) {
+        const page = await notion.findPageInDb(target.db, target.pageName);
+        if (!page) {
+            await ctx.reply(`não encontrei "${target.pageName}" em ${target.db}`);
+            return;
+        }
+        const token = process.env.TELEGRAM_BOT_TOKEN ?? "";
+        const fileInfo = await ctx.api.getFile(file.fileId);
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`;
+        const res = await fetch(fileUrl);
+        if (!res.ok)
+            throw new Error(`Telegram file download failed: ${res.status}`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        await notion.uploadAndAttachFile(page.id, file.fileName, file.mimeType, buffer, target.section);
+        const where = target.section ? `, secção "${target.section}"` : "";
+        await ctx.reply(`📎 "${file.fileName}" guardado em "${page.title}"${where}`);
+    }
+    bot.on("message:document", async (ctx) => {
+        const fromId = ctx.from?.id;
+        if (!fromId || !isFounder(fromId))
+            return;
+        const senderName = getFounderName(fromId);
+        if (!senderName)
+            return;
+        const doc = ctx.message.document;
+        const fileName = doc.file_name ?? `file_${Date.now()}`;
+        const mimeType = doc.mime_type ?? "application/octet-stream";
+        try {
+            await handleFileUpload(ctx, fromId, senderName, doc.file_id, fileName, mimeType, ctx.message.caption);
+        }
+        catch (err) {
+            log.error("file_upload.failed", { err: String(err) });
+            await ctx.reply("erro a guardar o ficheiro — tenta outra vez");
+        }
+    });
+    bot.on("message:photo", async (ctx) => {
+        const fromId = ctx.from?.id;
+        if (!fromId || !isFounder(fromId))
+            return;
+        const senderName = getFounderName(fromId);
+        if (!senderName)
+            return;
+        const photos = ctx.message.photo;
+        const photo = photos[photos.length - 1];
+        if (!photo)
+            return;
+        const fileName = `foto_${Date.now()}.jpg`;
+        try {
+            await handleFileUpload(ctx, fromId, senderName, photo.file_id, fileName, "image/jpeg", ctx.message.caption);
+        }
+        catch (err) {
+            log.error("photo_upload.failed", { err: String(err) });
+            await ctx.reply("erro a guardar a foto — tenta outra vez");
+        }
+    });
     // Text message router.
     bot.on("message:text", async (ctx) => {
         if (dedupe(ctx.update.update_id))
@@ -205,6 +299,22 @@ export function buildBot() {
         const text = ctx.message.text;
         const chatId = ctx.chat.id;
         const chatType = ctx.chat.type;
+        // 0) Pending file: user is responding with a target for a previously sent file.
+        const pending = pendingFileByUser.get(fromId);
+        if (pending && Date.now() < pending.expiresAt) {
+            const target = parseCaptionForFileTarget(text);
+            if (target) {
+                pendingFileByUser.delete(fromId);
+                try {
+                    await uploadFileToNotion(ctx, senderName, pending, target);
+                }
+                catch (err) {
+                    log.error("pending_file_upload.failed", { err: String(err) });
+                    await ctx.reply("erro a guardar o ficheiro — tenta outra vez");
+                }
+                return;
+            }
+        }
         // 1) DM-only: if mid-/week flow, route there first.
         if (chatType === "private" && isAwaitingFocusFor(fromId)) {
             try {
