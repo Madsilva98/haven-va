@@ -301,6 +301,10 @@ const TOOLS: Anthropic.Tool[] = [
           description: "Fim do evento em Europe/Lisbon, YYYY-MM-DDTHH:mm. Se não especificado, 1 hora depois do início.",
         },
         description: { type: "string", description: "Descrição do evento (opcional)" },
+        calendar_name: {
+          type: "string",
+          description: "Nome do calendário (ex: 'receção', 'founders lives'). Se omitido, usa o calendário principal.",
+        },
       },
       required: ["title", "start_iso"],
     },
@@ -790,7 +794,15 @@ async function execCreateCalendarEvent(
 
   const description = typeof input.description === "string" ? input.description : undefined;
 
-  const event = await calendar.createEvent({ title, start: startDate, end: endDate, description });
+  let calendarId: string | undefined;
+  if (typeof input.calendar_name === "string" && input.calendar_name) {
+    const cals = await calendar.listAllCalendars();
+    const q = input.calendar_name.toLowerCase();
+    const match = cals.find((c) => c.summary.toLowerCase().includes(q) || q.includes(c.summary.toLowerCase()));
+    if (match) calendarId = match.id;
+  }
+
+  const event = await calendar.createEvent({ title, start: startDate, end: endDate, description, calendarId });
   if (!event) {
     await ctx.reply("erro ao criar evento no Google Calendar");
     return "erro";
