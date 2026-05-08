@@ -305,9 +305,21 @@ export function formatDailyDM(args: DailyDMArgs): string {
     return lines.join("\n");
   }
 
-  const reds = args.tasks.filter((t) => trafficLight(t) === "red");
-  const yellows = args.tasks.filter((t) => trafficLight(t) === "yellow");
-  const greens = args.tasks.filter((t) => trafficLight(t) === "green");
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
+  const deadlineToday = args.tasks.filter((t) => t.deadline === today);
+  const remaining = args.tasks.filter((t) => t.deadline !== today);
+
+  if (deadlineToday.length > 0) {
+    lines.push("‼️ *deadline hoje*");
+    for (const t of deadlineToday) {
+      lines.push(`• ${escapeMd(t.title)}`);
+    }
+    lines.push("");
+  }
+
+  const reds = remaining.filter((t) => trafficLight(t) === "red");
+  const yellows = remaining.filter((t) => trafficLight(t) === "yellow");
+  const greens = remaining.filter((t) => trafficLight(t) === "green");
 
   const shown = [...reds, ...yellows, ...greens].slice(0, 5);
   for (const t of shown) {
