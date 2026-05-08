@@ -38,6 +38,12 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `when_iso`: hora Lisbon sem timezone, às 09:00 se não especificado.
 - `task_page_id`: só usar quando o lembrete se refere a uma task criada **nesta mesma conversa**. O resultado de `create_task` inclui `pageId: <id>` — passa esse id aqui. Requer chamar `create_task` primeiro (não em paralelo).
 
+### Eventos no Google Calendar → `create_calendar_event`
+"marca no calendário", "adiciona ao calendário", "cria um evento", "agenda uma reunião", "bloca o dia X" → cria.
+- `start_iso`: hora Lisbon sem timezone. Se só data → HH:mm = 09:00.
+- `end_iso`: opcional. Se não especificado → 1 hora depois.
+- Distinção: Google Calendar = evento com data/hora. Content Calendar = conteúdo social (posts, stories, reels).
+
 ### Content Calendar → `create_content_calendar_entry`
 "adicionar ao content calendar", "ideia para o social", "ideia para post/story/reel", "agendar conteúdo" → cria.
 - `status` default: `"Raw Idea"`.

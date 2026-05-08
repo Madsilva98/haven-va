@@ -14,6 +14,7 @@ import { InlineKeyboard, type Context } from "grammy";
 
 import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
+import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import type { ContentCalendarRow } from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
@@ -282,6 +283,26 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["db", "query"],
+    },
+  },
+  {
+    name: "create_calendar_event",
+    description: "Cria um evento no Google Calendar (calendário pessoal). Usar quando a mensagem pede para marcar, agendar ou criar um evento/reunião no calendário.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título do evento" },
+        start_iso: {
+          type: "string",
+          description: "Início do evento em Europe/Lisbon, YYYY-MM-DDTHH:mm (sem timezone)",
+        },
+        end_iso: {
+          type: "string",
+          description: "Fim do evento em Europe/Lisbon, YYYY-MM-DDTHH:mm. Se não especificado, 1 hora depois do início.",
+        },
+        description: { type: "string", description: "Descrição do evento (opcional)" },
+      },
+      required: ["title", "start_iso"],
     },
   },
   {
@@ -742,6 +763,46 @@ async function execSearchRecords(
     .join("\n");
 }
 
+async function execCreateCalendarEvent(
+  input: Record<string, unknown>,
+  ctx: Context,
+  collector: string[],
+): Promise<string> {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  const startRaw = typeof input.start_iso === "string" ? input.start_iso : "";
+  if (!title || !startRaw) return "parâmetros em falta";
+
+  if (!calendar.isAuthenticated()) {
+    await ctx.reply("Google Calendar não está autenticado. Usa /auth para configurar.");
+    return "não autenticado";
+  }
+
+  const startUtc = lisbonLocalToUtc(startRaw);
+  const startDate = new Date(startUtc);
+  if (Number.isNaN(startDate.getTime())) return "data de início inválida";
+
+  let endDate: Date;
+  if (typeof input.end_iso === "string" && input.end_iso) {
+    endDate = new Date(lisbonLocalToUtc(input.end_iso));
+  } else {
+    endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+  }
+
+  const description = typeof input.description === "string" ? input.description : undefined;
+
+  const event = await calendar.createEvent({ title, start: startDate, end: endDate, description });
+  if (!event) {
+    await ctx.reply("erro ao criar evento no Google Calendar");
+    return "erro";
+  }
+
+  const startLabel = startDate.toLocaleString("pt-PT", { timeZone: "Europe/Lisbon", dateStyle: "short", timeStyle: "short" });
+  const reply = `📅 evento criado: "${title}" — ${startLabel}`;
+  collector.push(reply);
+  await ctx.reply(reply);
+  return "ok";
+}
+
 async function execCreateEntity(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -819,6 +880,8 @@ async function dispatchTool(
       return await execUpdateRecord(input, ctx, collector);
     case "add_to_page_section":
       return await execAddToPageSection(input, ctx, collector);
+    case "create_calendar_event":
+      return await execCreateCalendarEvent(input, ctx, collector);
     case "create_entity":
       return await execCreateEntity(input, sender, ctx, collector);
     default:
