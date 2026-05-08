@@ -376,40 +376,80 @@ async function findRecordByTitle(dbId, titleProp, query) {
         page_size: 5,
     }));
     const pages = res.results.filter((r) => "properties" in r);
-    if (pages.length === 0)
-        return null;
-    const firstPage = pages[0];
-    const title = readPlainText(firstPage.properties[titleProp]);
-    return { id: firstPage.id, title };
+    if (pages.length > 0) {
+        const firstPage = pages[0];
+        return { id: firstPage.id, title: readPlainText(firstPage.properties[titleProp]) };
+    }
+    // Fallback: Notion search API is accent/case-insensitive
+    try {
+        const searchRes = await withRetry("findRecordByTitle.search", () => client.search({ query, filter: { property: "object", value: "page" }, page_size: 10 }));
+        const normalizedDbId = dbId.replace(/-/g, "");
+        for (const result of searchRes.results) {
+            if (!("parent" in result) || !("properties" in result))
+                continue;
+            const parent = result.parent;
+            if (parent.type !== "database_id" || !parent.database_id)
+                continue;
+            if (parent.database_id.replace(/-/g, "") !== normalizedDbId)
+                continue;
+            const title = readPlainText(result.properties[titleProp]);
+            return { id: result.id, title };
+        }
+    }
+    catch (err) {
+        log.warn("notion.find_fallback_failed", { query, err: String(err) });
+    }
+    return null;
 }
 async function findBacklogTask(query) {
     if (!NOTION_BACKLOG_DB_ID)
         return null;
     return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query);
 }
+async function searchRecordsInDb(dbId, titleProp, query, mapRow) {
+    const res = await withRetry("searchRecordsInDb", () => client.databases.query({
+        database_id: dbId,
+        filter: { property: titleProp, title: { contains: query } },
+        page_size: 10,
+    }));
+    const rows = res.results.filter((r) => "properties" in r);
+    if (rows.length > 0)
+        return rows.map(mapRow);
+    // Fallback: Notion search (accent/case-insensitive)
+    try {
+        const searchRes = await withRetry("searchRecordsInDb.search", () => client.search({ query, filter: { property: "object", value: "page" }, page_size: 10 }));
+        const normalizedDbId = dbId.replace(/-/g, "");
+        const fallback = [];
+        for (const result of searchRes.results) {
+            if (!("parent" in result) || !("properties" in result))
+                continue;
+            const parent = result.parent;
+            if (parent.type !== "database_id" || !parent.database_id)
+                continue;
+            if (parent.database_id.replace(/-/g, "") !== normalizedDbId)
+                continue;
+            fallback.push(mapRow({ id: result.id, properties: result.properties }));
+        }
+        return fallback;
+    }
+    catch (err) {
+        log.warn("notion.search_fallback_failed", { query, err: String(err) });
+        return [];
+    }
+}
 async function searchRecords(db, query) {
     if (db === "backlog") {
         if (!NOTION_BACKLOG_DB_ID)
             return [];
-        const res = await withRetry("searchRecords.backlog", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
-            filter: { property: "Título", title: { contains: query } },
-            page_size: 10,
+        return searchRecordsInDb(NOTION_BACKLOG_DB_ID, "Título", query, (row) => ({
+            id: row.id,
+            title: readPlainText(row.properties["Título"]),
+            owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
+            status: readSelectName(row.properties["Status"]) ?? "To do",
+            area: readSelectName(row.properties["Área"]) ?? undefined,
+            priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
+            deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
         }));
-        return res.results
-            .filter((r) => "properties" in r)
-            .map((r) => {
-            const row = r;
-            return {
-                id: row.id,
-                title: readPlainText(row.properties["Título"]),
-                owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
-                status: readSelectName(row.properties["Status"]) ?? "To do",
-                area: readSelectName(row.properties["Área"]) ?? undefined,
-                priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
-                deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
-            };
-        });
     }
     const config = RECORD_DB_CONFIGS[db];
     if (!config)
@@ -417,15 +457,7 @@ async function searchRecords(db, query) {
     const dbId = config.dbId();
     if (!dbId)
         return [];
-    const res = await withRetry("searchRecords", () => client.databases.query({
-        database_id: dbId,
-        filter: { property: config.titleProp, title: { contains: query } },
-        page_size: 10,
-    }));
-    return res.results
-        .filter((r) => "properties" in r)
-        .map((r) => {
-        const row = r;
+    return searchRecordsInDb(dbId, config.titleProp, query, (row) => {
         const title = readPlainText(row.properties[config.titleProp]);
         const statusFieldConf = Object.values(config.fields).find((f) => f.notionProp === "Status" || f.notionProp === "Estado");
         const status = statusFieldConf
