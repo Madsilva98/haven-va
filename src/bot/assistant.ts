@@ -94,6 +94,11 @@ const TOOLS: Anthropic.Tool[] = [
             "PageId da task associada (do resultado de create_task). " +
             "Só usar quando o lembrete se refere a uma task criada nesta mesma conversa.",
         },
+        recurrence: {
+          type: "string",
+          enum: ["diária", "semanal", "mensal"],
+          description: "Repetição automática. Usa quando a mensagem pedir 'todos os dias', 'toda a semana', 'todo o mês', etc.",
+        },
       },
       required: ["text", "when_iso", "for"],
     },
@@ -508,6 +513,12 @@ async function execCreateReminder(
     ? input.task_page_id
     : undefined;
 
+  const recurrenceRaw = typeof input.recurrence === "string" ? input.recurrence : undefined;
+  const recurrence =
+    recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
+      ? recurrenceRaw
+      : undefined;
+
   await Promise.all(
     targets.map((paraQuem) =>
       notion.createReminder({
@@ -515,12 +526,18 @@ async function execCreateReminder(
         paraQuem,
         quando,
         origem: ctx.message?.text ?? "",
+        recurrence,
       }, taskPageId),
     ),
   );
 
   const label = forWho === "all" ? "todas" : forWho;
-  const reminderReply = `⏰ lembrete criado para ${label}: "${text}"`;
+  const recurrenceLabel =
+    recurrence === "diária" ? " (repete todos os dias)"
+    : recurrence === "semanal" ? " (repete toda a semana)"
+    : recurrence === "mensal" ? " (repete todo o mês)"
+    : "";
+  const reminderReply = `⏰ lembrete criado para ${label}: "${text}"${recurrenceLabel}`;
   collector.push(reminderReply);
   await ctx.reply(reminderReply);
   return "ok";
@@ -938,6 +955,9 @@ export async function handleAssistant(
 
   const MAX_ITERATIONS = 5;
   const allToolNames: string[] = [];
+  // True once any action tool (non-search) has run and sent its own confirmation.
+  // Used to suppress the model's closing text in the next iteration.
+  let actionsPerformed = false;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     let response: Anthropic.Message;
@@ -954,19 +974,26 @@ export async function handleAssistant(
       break;
     }
 
-    // Send text blocks to user (except silence responses)
-    for (const block of response.content) {
-      if (block.type === "text" && block.text.trim() && !isSilenceResponse(block.text)) {
-        try {
-          collector.push(block.text.trim());
-          await ctx.reply(block.text.trim());
-        } catch (err) {
-          log.warn("assistant.reply_failed", { err: String(err) });
+    const toolCalls = response.content.filter((b) => b.type === "tool_use");
+
+    // Send text only when:
+    // - No tool calls in this response (pure informational reply), AND
+    // - No action tools have already confirmed via their own reply.
+    // This prevents both "text + tool_use in same response" and
+    // "model closes with text after action tools already replied".
+    if (toolCalls.length === 0 && !actionsPerformed) {
+      for (const block of response.content) {
+        if (block.type === "text" && block.text.trim() && !isSilenceResponse(block.text)) {
+          try {
+            collector.push(block.text.trim());
+            await ctx.reply(block.text.trim());
+          } catch (err) {
+            log.warn("assistant.reply_failed", { err: String(err) });
+          }
         }
       }
     }
 
-    const toolCalls = response.content.filter((b) => b.type === "tool_use");
     if (toolCalls.length === 0 || response.stop_reason === "end_turn") break;
 
     // Execute tools and collect results for next turn
@@ -984,6 +1011,7 @@ export async function handleAssistant(
         try { await ctx.reply("erro a executar ação — tenta outra vez"); } catch { /* ignore */ }
       }
       toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
+      if (block.name !== "search_records") actionsPerformed = true;
     }
 
     messages.push({ role: "assistant", content: response.content });

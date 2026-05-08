@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Haven VA — Guia rápido</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #faf9f7;
+      color: #1a1a1a;
+      line-height: 1.6;
+      padding: 48px 24px;
+    }
+
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 48px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      margin-top: 8px;
+      color: #555;
+      font-size: 1rem;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #888;
+      margin-top: 48px;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 28px;
+      margin-bottom: 10px;
+      color: #1a1a1a;
+    }
+
+    p {
+      color: #444;
+      margin-bottom: 12px;
+    }
+
+    /* intro box */
+    .intro {
+      background: #fff;
+      border: 1px solid #e8e5e0;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 8px;
+    }
+
+    .intro ul {
+      list-style: none;
+      margin-top: 8px;
+    }
+
+    .intro ul li {
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+      color: #444;
+    }
+
+    .intro ul li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: #b5a99a;
+    }
+
+    /* tables */
+    .section {
+      background: #fff;
+      border: 1px solid #e8e5e0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .section-header {
+      padding: 14px 20px;
+      background: #f5f3ef;
+      border-bottom: 1px solid #e8e5e0;
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-header .icon {
+      font-size: 1.1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    td {
+      padding: 11px 20px;
+      font-size: 0.9rem;
+      border-bottom: 1px solid #f0ede8;
+      vertical-align: top;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    td:first-child {
+      width: 52%;
+      color: #333;
+    }
+
+    td:last-child {
+      color: #666;
+    }
+
+    td code, p code {
+      background: #f0ede8;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.82em;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: #555;
+    }
+
+    td em {
+      font-style: normal;
+      color: #1a1a1a;
+      font-weight: 500;
+    }
+
+    /* notion table */
+    .notion-table td:first-child {
+      font-weight: 600;
+      color: #1a1a1a;
+      width: 40%;
+    }
+
+    /* fields table */
+    .fields-table td:first-child {
+      font-weight: 600;
+      width: 30%;
+    }
+
+    .tag {
+      display: inline-block;
+      background: #f0ede8;
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 0.8em;
+      color: #555;
+      margin: 1px 2px;
+    }
+
+    /* commands */
+    .command-row td:first-child code {
+      background: #1a1a1a;
+      color: #fff;
+      font-size: 0.85em;
+    }
+
+    /* tips */
+    .tips {
+      background: #fff;
+      border: 1px solid #e8e5e0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .tip {
+      padding: 12px 20px;
+      border-bottom: 1px solid #f0ede8;
+      font-size: 0.9rem;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .tip:last-child {
+      border-bottom: none;
+    }
+
+    .tip .dot {
+      width: 6px;
+      height: 6px;
+      background: #c8bfb5;
+      border-radius: 50%;
+      margin-top: 7px;
+      flex-shrink: 0;
+    }
+
+    .tip-text {
+      color: #444;
+      line-height: 1.5;
+    }
+
+    .tip-text strong {
+      color: #1a1a1a;
+      font-weight: 600;
+    }
+
+    footer {
+      margin-top: 56px;
+      font-size: 0.8rem;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Haven VA</h1>
+    <p>Guia rápido — o que podes pedir e como o bot funciona</p>
+  </header>
+
+  <h2>Como funciona</h2>
+
+  <div class="intro">
+    <ul>
+      <li>Escreves em linguagem natural no grupo ou em DM — sem comandos especiais</li>
+      <li>O bot age imediatamente e confirma o que fez</li>
+      <li>Podes corrigir logo a seguir: <em>"afinal é da Mafalda"</em>, <em>"cancela"</em>, <em>"muda para alta prioridade"</em></li>
+      <li>Não precisa de nomes exactos — <em>"metodo haven"</em> encontra <em>"Método Haven"</em></li>
+    </ul>
+  </div>
+
+  <h2>O que podes pedir</h2>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">✅</span> Tasks</div>
+    <table>
+      <tr><td><em>"temos de contactar o ginásio X"</em></td><td>Cria task no backlog</td></tr>
+      <tr><td><em>"cria task para a Mafalda: preparar proposta"</em></td><td>Task com owner definido</td></tr>
+      <tr><td><em>"deadline sexta"</em> / <em>"para amanhã"</em></td><td>Datas relativas funcionam</td></tr>
+      <tr><td><em>"marca a task X como feita"</em></td><td>Status → Feito</td></tr>
+      <tr><td><em>"passa a task X para a Bia"</em></td><td>Muda owner</td></tr>
+      <tr><td><em>"cancela a task X"</em></td><td>Status → Cancelado</td></tr>
+      <tr><td><em>"prioridade alta na task X"</em></td><td>Marca como 1. Alta + prioridade semanal automática</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">🏢</span> Projetos · Parceiros · Eventos · Influencers</div>
+    <table>
+      <tr><td><em>"novo parceiro: Studio Yoga Lisboa"</em></td><td>Cria página no Notion com secções</td></tr>
+      <tr><td><em>"novo projeto: Método Haven Online"</em></td><td>Cria projeto com estrutura completa</td></tr>
+      <tr><td><em>"novo evento: Workshop Maio"</em></td><td>Cria evento</td></tr>
+      <tr><td><em>"novo influencer: @nome"</em></td><td>Cria entrada de influencer</td></tr>
+      <tr><td><em>"no projeto X escreve na secção Contexto: ..."</em></td><td>Escreve directamente na página</td></tr>
+      <tr><td><em>"muda o status do parceiro X para Em negociação"</em></td><td>Actualiza campo</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">⏰</span> Lembretes</div>
+    <table>
+      <tr><td><em>"lembra-me amanhã às 10h de ligar ao X"</em></td><td>Lembrete — o bot avisa na hora</td></tr>
+      <tr><td><em>"avisa a Mafalda sexta às 9h de enviar proposta"</em></td><td>Lembrete para outra founder</td></tr>
+      <tr><td><em>"lembra todas de reunião segunda às 9h"</em></td><td>Lembrete para as três</td></tr>
+      <tr><td><em>"lembra-me todos os dias às 8h de X"</em></td><td>Lembrete diário — repete automaticamente</td></tr>
+      <tr><td><em>"lembra-me toda a semana às 9h de X"</em></td><td>Repete semanalmente no mesmo dia</td></tr>
+      <tr><td><em>"lembra-me todo o mês às 9h de X"</em></td><td>Repete mensalmente no mesmo dia</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">📅</span> Google Calendar</div>
+    <table>
+      <tr><td><em>"marca amanhã às 15h: reunião com parceiro X"</em></td><td>Cria evento no calendário principal</td></tr>
+      <tr><td><em>"adiciona ao calendário da receção: ..."</em></td><td>Cria evento num calendário específico</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">📱</span> Content Calendar (Social Media)</div>
+    <table>
+      <tr><td><em>"ideia para post: benefícios do pilates"</em></td><td>Adiciona ao Content Calendar</td></tr>
+      <tr><td><em>"reel para sexta sobre a nova sala"</em></td><td>Adiciona com data e tipo</td></tr>
+      <tr><td><em>"muda o status do post X para Scheduled"</em></td><td>Actualiza</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">💬</span> Decisões &amp; Discussões</div>
+    <table>
+      <tr><td><em>"decidimos avançar com o projeto X"</em></td><td>Regista em Decisions</td></tr>
+      <tr><td><em>"precisamos discutir o preço das mensalidades"</em></td><td>Adiciona a To Discuss</td></tr>
+      <tr><td><em>"para a reunião: falar sobre parceria Y"</em></td><td>Adiciona a To Discuss</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header"><span class="icon">📓</span> Studio Log</div>
+    <table>
+      <tr><td><em>"hoje tivemos reunião com a marca X"</em></td><td>Regista no Studio Log</td></tr>
+      <tr><td><em>"gravámos o primeiro reel"</em></td><td>Regista com tag gravação</td></tr>
+    </table>
+  </div>
+
+  <h2>Comandos especiais (DM com o bot)</h2>
+
+  <div class="section">
+    <table class="command-row">
+      <tr>
+        <td><code>/hoje</code></td>
+        <td>Lista as tuas tasks de hoje com semáforos de urgência 🔴🟡🟢</td>
+      </tr>
+      <tr>
+        <td><code>/week</code></td>
+        <td>Escolhe as 3 prioridades da semana e define o teu foco operacional</td>
+      </tr>
+      <tr>
+        <td><code>/dashboard</code></td>
+        <td>Dashboard semanal — foco, prioridades e tópicos de discussão</td>
+      </tr>
+      <tr>
+        <td><code>/projects</code></td>
+        <td>Projetos em aberto em que és owner, com tasks associadas</td>
+      </tr>
+      <tr>
+        <td><code>/partners</code></td>
+        <td>Parceiros em que és owner, com tasks associadas</td>
+      </tr>
+      <tr>
+        <td><code>/events</code></td>
+        <td>Eventos em que és owner, com tasks associadas</td>
+      </tr>
+      <tr>
+        <td><code>/influencers</code></td>
+        <td>Influencers em que és owner, com tasks associadas</td>
+      </tr>
+      <tr>
+        <td><code>/calendar</code></td>
+        <td>Calendário Google — hoje e próximos 2 dias</td>
+      </tr>
+      <tr>
+        <td><code>/content</code></td>
+        <td>Content Calendar — conteúdo planeado nos próximos 3 dias</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>Dashboard</h2>
+
+  <div class="intro">
+    <p>Existe uma <a href="https://www.notion.so/Haven-VA-35153de7d8bc8095b2d7c3b306b3c78a" target="_blank" style="color:#1a1a1a;font-weight:600;">dashboard central no Notion</a> com tudo numa página:</p>
+    <ul>
+      <li>Lista <em>To Discuss</em> — tópicos pendentes para a próxima reunião</li>
+      <li><em>Founder Focus</em> desta semana — foco operacional de cada founder</li>
+      <li>Listview das prioridades da semana</li>
+      <li>Gallery view dos projetos em curso</li>
+      <li>Gallery view dos eventos</li>
+    </ul>
+  </div>
+
+  <h2>Estrutura do Notion</h2>
+
+  <div class="section">
+    <table class="notion-table">
+      <tr><td>Master Backlog</td><td>Todas as tasks — Título, Owner, Área, Prioridade, Deadline, Status</td></tr>
+      <tr><td>Projects</td><td>Projetos com página própria (Contexto, Objetivos, Tasks, Decisões…)</td></tr>
+      <tr><td>Partners</td><td>Parceiros com pipeline de negociação</td></tr>
+      <tr><td>Influencers</td><td>Influencers com pipeline</td></tr>
+      <tr><td>Events Pipeline</td><td>Eventos com pipeline</td></tr>
+      <tr><td>Content Calendar</td><td>Posts / reels / stories com status de produção</td></tr>
+      <tr><td>To Discuss</td><td>Tópicos para a próxima reunião</td></tr>
+      <tr><td>Decisions</td><td>Decisões tomadas, com estado de implementação</td></tr>
+      <tr><td>Studio Log</td><td>Registo cronológico do que acontece no estúdio</td></tr>
+      <tr><td>Reminders</td><td>Lembretes geridos pelo bot (não editar manualmente)</td></tr>
+    </table>
+  </div>
+
+  <h2>Campos do backlog</h2>
+
+  <div class="section">
+    <table class="fields-table">
+      <tr>
+        <td>Status</td>
+        <td>
+          <span class="tag">To do</span>
+          <span class="tag">Em curso</span>
+          <span class="tag">Bloqueado</span>
+          <span class="tag">Feito</span>
+          <span class="tag">Cancelado</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Prioridade</td>
+        <td>
+          <span class="tag">1. Alta</span>
+          <span class="tag">2. Média</span>
+          <span class="tag">3. Baixa</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Owner</td>
+        <td>
+          <span class="tag">Madalena</span>
+          <span class="tag">Mafalda</span>
+          <span class="tag">Beatriz</span>
+          <span class="tag">Unassigned</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Área</td>
+        <td>
+          <span class="tag">Marketing</span>
+          <span class="tag">Operações</span>
+          <span class="tag">Parcerias</span>
+          <span class="tag">Influencers</span>
+          <span class="tag">Tech</span>
+          <span class="tag">Cliente</span>
+          <span class="tag">Financeiro</span>
+          <span class="tag">Outro</span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>Dicas</h2>
+
+  <div class="tips">
+    <div class="tip"><div class="dot"></div><div class="tip-text"><strong>Nomes aproximados funcionam</strong> — <em>"metodo haven"</em> encontra <em>"Método Haven"</em>, <em>"yoga"</em> encontra <em>"Yoga Studio Lisboa"</em></div></div>
+    <div class="tip"><div class="dot"></div><div class="tip-text"><strong>Follow-ups sem repetir</strong> — depois de o bot criar algo, diz <em>"afinal é urgente"</em> ou <em>"passa para a Bia"</em> e ele sabe a que se refere</div></div>
+    <div class="tip"><div class="dot"></div><div class="tip-text"><strong>Fotos e ficheiros</strong> — enviar uma imagem no grupo anexa ao projeto / página mencionada no caption; imagens aparecem embutidas no Notion</div></div>
+    <div class="tip"><div class="dot"></div><div class="tip-text"><strong>Alta prioridade = prioridade semanal automática</strong> — qualquer task marcada como 1. Alta fica automaticamente nas prioridades semanais</div></div>
+    <div class="tip"><div class="dot"></div><div class="tip-text"><strong>O bot fica em silêncio</strong> para mensagens de conversa normal — só age quando há algo concreto para fazer</div></div>
+  </div>
+
+  <footer>Haven VA · uso interno</footer>
+
+</div>
+</body>
+</html>

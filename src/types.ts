@@ -82,6 +82,8 @@ export interface InfluencerRow {
   notas: string;
 }
 
+export type ReminderRecurrence = "diária" | "semanal" | "mensal";
+
 export interface ReminderRow {
   id: string;
   texto: string;
@@ -89,6 +91,7 @@ export interface ReminderRow {
   quando: string; // ISO datetime
   origem: string; // original message
   enviado: boolean;
+  recurrence?: ReminderRecurrence;
 }
 
 // ----- Phase 5 -----

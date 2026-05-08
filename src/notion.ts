@@ -30,6 +30,7 @@ import type {
   PartnerStatus,
   InfluencerRow,
   InfluencerStatus,
+  ReminderRecurrence,
   ReminderRow,
   ToDiscussRow,
   ToDiscussUrgency,
@@ -1370,8 +1371,7 @@ async function createReminder(
     );
   }
   const properties: Record<string, unknown> = {
-    Name: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
-    Texto: richText(r.texto),
+    Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
     "Para quem": { multi_select: [{ name: r.paraQuem }] },
     Quando: { date: { start: r.quando } },
     Origem: richText(r.origem),
@@ -1379,6 +1379,9 @@ async function createReminder(
   };
   if (taskPageId) {
     properties["Da tarefa"] = { relation: [{ id: taskPageId }] };
+  }
+  if (r.recurrence) {
+    properties["Recorrência"] = { select: { name: r.recurrence } };
   }
   const page = await withRetry("createReminder", () =>
     client.pages.create({
@@ -1423,13 +1426,19 @@ async function getDueReminders(): Promise<ReminderRow[]> {
       ) {
         continue;
       }
+      const recurrenceRaw = readSelectName(props["Recorrência"]);
+      const recurrence: ReminderRecurrence | undefined =
+        recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
+          ? recurrenceRaw
+          : undefined;
       rows.push({
         id: row.id,
-        texto: readPlainText(props["Texto"]),
+        texto: readPlainText(props["Reminder"]),
         paraQuem,
         quando: readDateStart(props["Quando"]) ?? "",
         origem: readPlainText(props["Origem"]),
         enviado: readCheckbox(props["Enviado"]),
+        recurrence,
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -2138,6 +2147,86 @@ async function getList(lista?: string): Promise<ListItem[]> {
   });
 }
 
+// ----- Entity dashboards -----
+
+export interface EntitySummary {
+  id: string;
+  name: string;
+  status: string | null;
+}
+
+async function getEntitiesForOwner(
+  dbKey: "projects" | "partners" | "events" | "influencers",
+  owner: FounderName,
+): Promise<EntitySummary[]> {
+  const cfg = RECORD_DB_CONFIGS[dbKey];
+  const dbId = cfg?.dbId();
+  if (!cfg || !dbId) return [];
+
+  const ownerFieldConfig = cfg.fields["owner"];
+  const ownerType = ownerFieldConfig ? ownerFieldConfig.type : "select";
+  const ownerFilter =
+    ownerType === "multi_select"
+      ? { property: "Owner", multi_select: { contains: owner } }
+      : { property: "Owner", select: { equals: owner } };
+
+  try {
+    const res = await withRetry(`getEntitiesForOwner.${dbKey}`, () =>
+      client.databases.query({
+        database_id: dbId,
+        filter: ownerFilter as Parameters<typeof client.databases.query>[0]["filter"],
+        page_size: 20,
+      }),
+    );
+    return res.results
+      .filter((r) => "properties" in r)
+      .map((r) => {
+        const props = (r as { id: string; properties: Record<string, unknown> }).properties;
+        return {
+          id: r.id,
+          name: readPlainText(props["Name"]) || "—",
+          status: readSelectName(props["Status"]) ?? null,
+        };
+      });
+  } catch (err) {
+    log.warn("notion.getEntitiesForOwner_failed", { dbKey, err: String(err) });
+    return [];
+  }
+}
+
+async function getTasksForEntity(
+  entityField: string,
+  entityPageId: string,
+): Promise<{ title: string }[]> {
+  if (!NOTION_BACKLOG_DB_ID) return [];
+  try {
+    const res = await withRetry("getTasksForEntity", () =>
+      client.databases.query({
+        database_id: NOTION_BACKLOG_DB_ID!,
+        filter: {
+          and: [
+            { property: entityField, relation: { contains: entityPageId } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+            { property: "Status", select: { does_not_equal: "Cancelado" } },
+          ],
+        } as Parameters<typeof client.databases.query>[0]["filter"],
+        page_size: 10,
+      }),
+    );
+    return res.results
+      .filter((r) => "properties" in r)
+      .map((r) => ({
+        title:
+          readPlainText(
+            (r as { properties: Record<string, unknown> }).properties["Título"],
+          ) || "—",
+      }));
+  } catch (err) {
+    log.warn("notion.getTasksForEntity_failed", { entityField, entityPageId, err: String(err) });
+    return [];
+  }
+}
+
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export {
   createTask,
@@ -2192,6 +2281,9 @@ export {
   findPageInDb,
   appendToPageSection,
   uploadAndAttachFile,
+  // Entity dashboards
+  getEntitiesForOwner,
+  getTasksForEntity,
 };
 
 export const notion = {
@@ -2247,4 +2339,7 @@ export const notion = {
   findPageInDb,
   appendToPageSection,
   uploadAndAttachFile,
+  // Entity dashboards
+  getEntitiesForOwner,
+  getTasksForEntity,
 };

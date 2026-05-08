@@ -27,6 +27,12 @@ import {
   handleLista,
   handleStart,
   handleTask,
+  handleProjects,
+  handlePartners,
+  handleEvents,
+  handleInfluencers,
+  handleCalendar,
+  handleContent,
 } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
@@ -182,14 +188,20 @@ export function buildBot(): Bot {
 
   // Register slash commands for Telegram dropdown.
   bot.api.setMyCommands([
-    { command: "task",      description: "Criar task manualmente" },
-    { command: "hoje",      description: "Ver as minhas tasks de hoje" },
-    { command: "dashboard", description: "Dashboard semanal" },
-    { command: "todiscuss", description: "Adicionar à lista de discussão" },
-    { command: "remind",    description: "Criar lembrete" },
-    { command: "week",      description: "Definir foco semanal" },
-    { command: "lista",     description: "Ver uma lista (/lista compras)" },
-    { command: "help",      description: "Ajuda" },
+    { command: "task",        description: "Criar task manualmente" },
+    { command: "hoje",        description: "Ver as minhas tasks de hoje" },
+    { command: "dashboard",   description: "Dashboard semanal" },
+    { command: "projects",    description: "Ver os meus projetos em aberto" },
+    { command: "partners",    description: "Ver os meus parceiros" },
+    { command: "events",      description: "Ver os meus eventos" },
+    { command: "influencers", description: "Ver os meus influencers" },
+    { command: "calendar",    description: "Calendário — hoje e próximos 2 dias" },
+    { command: "content",     description: "Content Calendar — próximos 3 dias" },
+    { command: "todiscuss",   description: "Adicionar à lista de discussão" },
+    { command: "remind",      description: "Criar lembrete" },
+    { command: "week",        description: "Definir foco semanal" },
+    { command: "lista",       description: "Ver uma lista (/lista compras)" },
+    { command: "help",        description: "Ajuda" },
   ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
 
   // Slash commands (work in both group and DM).
@@ -213,6 +225,12 @@ export function buildBot(): Bot {
   bot.command("hoje", handleHoje);
   bot.command("dashboard", handleDashboard);
   bot.command("lista", handleLista);
+  bot.command("projects", handleProjects);
+  bot.command("partners", handlePartners);
+  bot.command("events", handleEvents);
+  bot.command("influencers", handleInfluencers);
+  bot.command("calendar", handleCalendar);
+  bot.command("content", handleContent);
 
   // Google Calendar auth — Madalena's private DM only.
   bot.command("auth", async (ctx) => {
