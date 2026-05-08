@@ -1389,6 +1389,16 @@ async function createReminder(
       properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
+  if (taskPageId) {
+    await withRetry("createReminder.linkTask", () =>
+      client.pages.update({
+        page_id: taskPageId,
+        properties: {
+          "Com Reminder": { relation: [{ id: page.id }] },
+        } as Parameters<typeof client.pages.update>[0]["properties"],
+      }),
+    );
+  }
   log.info("notion.reminder_created", { id: page.id, paraQuem: r.paraQuem });
   return page.id;
 }
