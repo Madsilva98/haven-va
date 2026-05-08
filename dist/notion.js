@@ -369,7 +369,8 @@ const RECORD_DB_CONFIGS = {
         },
     },
 };
-async function findRecordByTitle(dbId, titleProp, query) {
+async function findRecordByTitle(dbId, titleProp, query, dbKey) {
+    // Layer 1a: title.contains (fast, exact)
     const res = await withRetry("findRecordByTitle", () => client.databases.query({
         database_id: dbId,
         filter: { property: titleProp, title: { contains: query } },
@@ -380,7 +381,7 @@ async function findRecordByTitle(dbId, titleProp, query) {
         const firstPage = pages[0];
         return { id: firstPage.id, title: readPlainText(firstPage.properties[titleProp]) };
     }
-    // Fallback: Notion search API is accent/case-insensitive
+    // Layer 1b: Notion search API (accent/case-insensitive)
     try {
         const searchRes = await withRetry("findRecordByTitle.search", () => client.search({ query, filter: { property: "object", value: "page" }, page_size: 10 }));
         const normalizedDbId = dbId.replace(/-/g, "");
@@ -399,14 +400,63 @@ async function findRecordByTitle(dbId, titleProp, query) {
     catch (err) {
         log.warn("notion.find_fallback_failed", { query, err: String(err) });
     }
+    // Layer 2: word-level multi-search
+    const words = significantWords(query);
+    if (words.length > 0) {
+        const seen = new Set();
+        const candidates = [];
+        for (const word of words) {
+            try {
+                const wRes = await withRetry("findRecordByTitle.word", () => client.databases.query({
+                    database_id: dbId,
+                    filter: { property: titleProp, title: { contains: word } },
+                    page_size: 10,
+                }));
+                for (const r of wRes.results) {
+                    if (!("properties" in r) || seen.has(r.id))
+                        continue;
+                    seen.add(r.id);
+                    const title = readPlainText(r.properties[titleProp]);
+                    candidates.push({ id: r.id, title, score: scoreMatch(title, query) });
+                }
+            }
+            catch { /* continue */ }
+        }
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => b.score - a.score);
+            return { id: candidates[0].id, title: candidates[0].title };
+        }
+    }
+    // Layer 3: fetch-all + client-side scoring (small DBs only)
+    if (dbKey && SMALL_DBS.has(dbKey)) {
+        try {
+            const allRes = await withRetry("findRecordByTitle.fetchAll", () => client.databases.query({ database_id: dbId, page_size: 100 }));
+            let best = null;
+            for (const r of allRes.results) {
+                if (!("properties" in r))
+                    continue;
+                const title = readPlainText(r.properties[titleProp]);
+                const score = scoreMatch(title, query);
+                if (score > 0 && (!best || score > best.score)) {
+                    best = { id: r.id, title, score };
+                }
+            }
+            if (best)
+                return { id: best.id, title: best.title };
+        }
+        catch (err) {
+            log.warn("notion.find_fetchall_failed", { query, err: String(err) });
+        }
+    }
     return null;
 }
 async function findBacklogTask(query) {
     if (!NOTION_BACKLOG_DB_ID)
         return null;
-    return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query);
+    return findRecordByTitle(NOTION_BACKLOG_DB_ID, "Título", query, "backlog");
 }
-async function searchRecordsInDb(dbId, titleProp, query, mapRow) {
+async function searchRecordsInDb(dbId, titleProp, query, mapRow, dbKey) {
+    // Layer 1a: title.contains (fast, exact)
     const res = await withRetry("searchRecordsInDb", () => client.databases.query({
         database_id: dbId,
         filter: { property: titleProp, title: { contains: query } },
@@ -415,7 +465,7 @@ async function searchRecordsInDb(dbId, titleProp, query, mapRow) {
     const rows = res.results.filter((r) => "properties" in r);
     if (rows.length > 0)
         return rows.map(mapRow);
-    // Fallback: Notion search (accent/case-insensitive)
+    // Layer 1b: Notion search (accent/case-insensitive)
     try {
         const searchRes = await withRetry("searchRecordsInDb.search", () => client.search({ query, filter: { property: "object", value: "page" }, page_size: 10 }));
         const normalizedDbId = dbId.replace(/-/g, "");
@@ -430,12 +480,57 @@ async function searchRecordsInDb(dbId, titleProp, query, mapRow) {
                 continue;
             fallback.push(mapRow({ id: result.id, properties: result.properties }));
         }
-        return fallback;
+        if (fallback.length > 0)
+            return fallback;
     }
     catch (err) {
         log.warn("notion.search_fallback_failed", { query, err: String(err) });
-        return [];
     }
+    // Layer 2: word-level multi-search
+    const words = significantWords(query);
+    if (words.length > 0) {
+        const seen = new Set();
+        const wordResults = [];
+        for (const word of words) {
+            try {
+                const wRes = await withRetry("searchRecordsInDb.word", () => client.databases.query({
+                    database_id: dbId,
+                    filter: { property: titleProp, title: { contains: word } },
+                    page_size: 10,
+                }));
+                for (const r of wRes.results) {
+                    if (!("properties" in r) || seen.has(r.id))
+                        continue;
+                    seen.add(r.id);
+                    wordResults.push(mapRow({ id: r.id, properties: r.properties }));
+                }
+            }
+            catch { /* continue */ }
+        }
+        if (wordResults.length > 0) {
+            return wordResults.sort((a, b) => scoreMatch(b.title, query) - scoreMatch(a.title, query));
+        }
+    }
+    // Layer 3: fetch-all + client-side scoring (small DBs only)
+    if (dbKey && SMALL_DBS.has(dbKey)) {
+        try {
+            const allRes = await withRetry("searchRecordsInDb.fetchAll", () => client.databases.query({ database_id: dbId, page_size: 100 }));
+            const scored = allRes.results
+                .filter((r) => "properties" in r)
+                .map((r) => {
+                const row = { id: r.id, properties: r.properties };
+                const result = mapRow(row);
+                return { result, score: scoreMatch(result.title, query) };
+            })
+                .filter(({ score }) => score > 0)
+                .sort((a, b) => b.score - a.score);
+            return scored.map(({ result }) => result);
+        }
+        catch (err) {
+            log.warn("notion.fetchall_failed", { query, err: String(err) });
+        }
+    }
+    return [];
 }
 async function searchRecords(db, query) {
     if (db === "backlog") {
@@ -449,7 +544,7 @@ async function searchRecords(db, query) {
             area: readSelectName(row.properties["Área"]) ?? undefined,
             priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
             deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
-        }));
+        }), "backlog");
     }
     const config = RECORD_DB_CONFIGS[db];
     if (!config)
@@ -464,7 +559,7 @@ async function searchRecords(db, query) {
             ? (readSelectName(row.properties[statusFieldConf.notionProp]) ?? undefined)
             : undefined;
         return { id: row.id, title, status };
-    });
+    }, db);
 }
 async function updateRecord(db, itemTitle, field, newValue) {
     const config = RECORD_DB_CONFIGS[db];
@@ -476,7 +571,7 @@ async function updateRecord(db, itemTitle, field, newValue) {
     const fieldConfig = config.fields[field];
     if (!fieldConfig)
         throw new Error(`Unknown field '${field}' for db '${db}'`);
-    const found = await findRecordByTitle(dbId, config.titleProp, itemTitle);
+    const found = await findRecordByTitle(dbId, config.titleProp, itemTitle, db);
     if (!found)
         return null;
     let propValue;
@@ -1290,6 +1385,37 @@ async function getDependentTasks(prerequisiteId) {
 }
 // silence unused-helper warning for readDateTime (kept for callers)
 void readDateTime;
+// ----- fuzzy / semantic search helpers -----
+const PT_STOPWORDS = new Set([
+    "o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das",
+    "e", "em", "no", "na", "nos", "nas", "para", "já", "com", "por",
+    "ao", "à", "que", "se", "não", "mas", "ou", "ao", "às",
+]);
+const SMALL_DBS = new Set(["projects", "partners", "events", "influencers"]);
+function normalizeText(s) {
+    return s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+}
+function scoreMatch(title, query) {
+    const t = normalizeText(title);
+    const q = normalizeText(query);
+    if (t === q)
+        return 1;
+    if (t.includes(q) || q.includes(t))
+        return 0.8;
+    const tWords = new Set(t.split(/\s+/).filter((w) => w.length > 2));
+    const qWords = q.split(/\s+/).filter((w) => w.length > 2);
+    if (qWords.length === 0 || tWords.size === 0)
+        return 0;
+    const overlap = qWords.filter((w) => tWords.has(w) || [...tWords].some((tw) => tw.includes(w) || w.includes(tw))).length;
+    return overlap > 0 ? overlap / Math.max(qWords.length, tWords.size) : 0;
+}
+function significantWords(query) {
+    return query
+        .toLowerCase()
+        .split(/\s+/)
+        .map((w) => w.replace(/[^\wàáâãéêíóôõúüç]/gi, ""))
+        .filter((w) => w.length > 2 && !PT_STOPWORDS.has(w));
+}
 // ============================================================
 // Feature D — Create entities (project / event / partner / influencer)
 // ============================================================
@@ -1450,7 +1576,7 @@ async function findPageInDb(db, name) {
     const dbId = config.dbId();
     if (!dbId)
         return null;
-    return findRecordByTitle(dbId, config.titleProp, name);
+    return findRecordByTitle(dbId, config.titleProp, name, db);
 }
 async function getOrCreateToggleId(pageId, sectionName) {
     const queryNorm = normalizeSectionName(sectionName);

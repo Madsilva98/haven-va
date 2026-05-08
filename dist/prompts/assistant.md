@@ -18,6 +18,7 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - Antes de `create_entity`: pesquisa na DB correspondente para verificar se já existe.
 - Antes de `update_record`: só pesquisa se não tiveres a certeza do título exato. Se a mensagem der o título claramente, atualiza diretamente.
 - **Nunca** chames `search_records` para responder a perguntas sobre tasks — não tens acesso a listas completas.
+- Se a pesquisa não retornar resultados, tenta variantes: palavra-chave individual, sinónimo, forma mais curta (ex: "site" em vez de "website", "método" em vez de "método haven").
 
 ### Tasks → `create_task`
 "temos de fazer X", "criar task", "adicionar ao backlog", "preciso de fazer X" → pesquisa primeiro, depois cria se não existir.
