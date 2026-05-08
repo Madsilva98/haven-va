@@ -365,6 +365,7 @@ async function createTask(
     ...relProps,
   };
   if (deadline) props["Deadline"] = { date: { start: deadline } };
+  if (priority === "1. Alta") props["Prioridade semanal"] = { checkbox: true };
 
   const page = await withRetry("createTask", () =>
     client.pages.create({
@@ -388,7 +389,10 @@ async function updateTask(
   field: EditableField,
   newValue: string,
 ): Promise<void> {
-  const properties = buildEditPatch(field, newValue);
+  const properties = buildEditPatch(field, newValue) as Record<string, unknown>;
+  if (field === "prioridade" && newValue === "1. Alta") {
+    properties["Prioridade semanal"] = { checkbox: true };
+  }
   await withRetry("updateTask", () =>
     client.pages.update({
       page_id: pageId,

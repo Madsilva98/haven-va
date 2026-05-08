@@ -280,6 +280,8 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
     };
     if (deadline)
         props["Deadline"] = { date: { start: deadline } };
+    if (priority === "1. Alta")
+        props["Prioridade semanal"] = { checkbox: true };
     const page = await withRetry("createTask", () => client.pages.create({
         parent: { database_id: NOTION_BACKLOG_DB_ID },
         properties: props,
@@ -295,6 +297,9 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
 }
 async function updateTask(pageId, field, newValue) {
     const properties = buildEditPatch(field, newValue);
+    if (field === "prioridade" && newValue === "1. Alta") {
+        properties["Prioridade semanal"] = { checkbox: true };
+    }
     await withRetry("updateTask", () => client.pages.update({
         page_id: pageId,
         properties: properties,
