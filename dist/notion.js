@@ -1122,8 +1122,7 @@ async function createReminder(r, taskPageId) {
         throw new Error("NOTION_REMINDERS_DB_ID not set — Phase 3 reminder features disabled");
     }
     const properties = {
-        Name: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
-        Texto: richText(r.texto),
+        Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
         "Para quem": { multi_select: [{ name: r.paraQuem }] },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
@@ -1131,6 +1130,9 @@ async function createReminder(r, taskPageId) {
     };
     if (taskPageId) {
         properties["Da tarefa"] = { relation: [{ id: taskPageId }] };
+    }
+    if (r.recurrence) {
+        properties["Recorrência"] = { select: { name: r.recurrence } };
     }
     const page = await withRetry("createReminder", () => client.pages.create({
         parent: { database_id: NOTION_REMINDERS_DB_ID },
@@ -1167,13 +1169,18 @@ async function getDueReminders() {
                 paraQuem !== "Beatriz") {
                 continue;
             }
+            const recurrenceRaw = readSelectName(props["Recorrência"]);
+            const recurrence = recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
+                ? recurrenceRaw
+                : undefined;
             rows.push({
                 id: row.id,
-                texto: readPlainText(props["Texto"]),
+                texto: readPlainText(props["Reminder"]),
                 paraQuem,
                 quando: readDateStart(props["Quando"]) ?? "",
                 origem: readPlainText(props["Origem"]),
                 enviado: readCheckbox(props["Enviado"]),
+                recurrence,
             });
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -1757,6 +1764,64 @@ async function getList(lista) {
         };
     });
 }
+async function getEntitiesForOwner(dbKey, owner) {
+    const cfg = RECORD_DB_CONFIGS[dbKey];
+    const dbId = cfg?.dbId();
+    if (!cfg || !dbId)
+        return [];
+    const ownerFieldConfig = cfg.fields["owner"];
+    const ownerType = ownerFieldConfig ? ownerFieldConfig.type : "select";
+    const ownerFilter = ownerType === "multi_select"
+        ? { property: "Owner", multi_select: { contains: owner } }
+        : { property: "Owner", select: { equals: owner } };
+    try {
+        const res = await withRetry(`getEntitiesForOwner.${dbKey}`, () => client.databases.query({
+            database_id: dbId,
+            filter: ownerFilter,
+            page_size: 20,
+        }));
+        return res.results
+            .filter((r) => "properties" in r)
+            .map((r) => {
+            const props = r.properties;
+            return {
+                id: r.id,
+                name: readPlainText(props["Name"]) || "—",
+                status: readSelectName(props["Status"]) ?? null,
+            };
+        });
+    }
+    catch (err) {
+        log.warn("notion.getEntitiesForOwner_failed", { dbKey, err: String(err) });
+        return [];
+    }
+}
+async function getTasksForEntity(entityField, entityPageId) {
+    if (!NOTION_BACKLOG_DB_ID)
+        return [];
+    try {
+        const res = await withRetry("getTasksForEntity", () => client.databases.query({
+            database_id: NOTION_BACKLOG_DB_ID,
+            filter: {
+                and: [
+                    { property: entityField, relation: { contains: entityPageId } },
+                    { property: "Status", select: { does_not_equal: "Feito" } },
+                    { property: "Status", select: { does_not_equal: "Cancelado" } },
+                ],
+            },
+            page_size: 10,
+        }));
+        return res.results
+            .filter((r) => "properties" in r)
+            .map((r) => ({
+            title: readPlainText(r.properties["Título"]) || "—",
+        }));
+    }
+    catch (err) {
+        log.warn("notion.getTasksForEntity_failed", { entityField, entityPageId, err: String(err) });
+        return [];
+    }
+}
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archivePage, 
 // Phase 2
@@ -1778,7 +1843,9 @@ addToList, checkListItem, getList,
 // Generic record update
 updateRecord, findBacklogTask, searchRecords, 
 // Page section editing
-findPageInDb, appendToPageSection, uploadAndAttachFile, };
+findPageInDb, appendToPageSection, uploadAndAttachFile, 
+// Entity dashboards
+getEntitiesForOwner, getTasksForEntity, };
 export const notion = {
     createTask,
     updateTask,
@@ -1832,4 +1899,7 @@ export const notion = {
     findPageInDb,
     appendToPageSection,
     uploadAndAttachFile,
+    // Entity dashboards
+    getEntitiesForOwner,
+    getTasksForEntity,
 };

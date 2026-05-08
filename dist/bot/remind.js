@@ -21,6 +21,20 @@
 import { getFounderName } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import * as notion from "../notion.js";
+const RECURRENCE_PATTERNS = [
+    [/\btodos\s+os\s+dias\b|\bdiariamente\b|\btodo\s+o\s+dia\b/i, "diária"],
+    [/\btoda\s+(a\s+)?semana\b|\btodas\s+as\s+semanas\b|\bsemanalmente\b/i, "semanal"],
+    [/\btodo\s+o\s+m[eê]s\b|\btodos\s+os\s+meses\b|\bmensalmente\b/i, "mensal"],
+];
+function extractRecurrence(text) {
+    for (const [re, recurrence] of RECURRENCE_PATTERNS) {
+        if (re.test(text)) {
+            const cleaned = text.replace(re, " ").trim().replace(/\s{2,}/g, " ");
+            return { text: cleaned, recurrence };
+        }
+    }
+    return { text };
+}
 const DAY_NAMES_PT = {
     // 0 = Sunday … 6 = Saturday (matches Date.getDay())
     domingo: 0,
@@ -134,7 +148,7 @@ export function parseRemindCommand(text, sender) {
         return { parsed: false };
     const [, headRaw, rest] = match;
     const head = headRaw.normalize("NFC").toLowerCase();
-    const message = rest.trim();
+    const { text: message, recurrence } = extractRecurrence(rest.trim());
     if (message.length === 0)
         return { parsed: false };
     const now = new Date();
@@ -165,6 +179,10 @@ export function parseRemindCommand(text, sender) {
     }
     if (!target)
         return { parsed: false };
+    const recurrenceLabel = recurrence === "diária" ? " (repete todos os dias)"
+        : recurrence === "semanal" ? " (repete toda a semana)"
+            : recurrence === "mensal" ? " (repete todo o mês)"
+                : "";
     return {
         parsed: true,
         reminder: {
@@ -172,8 +190,9 @@ export function parseRemindCommand(text, sender) {
             paraQuem: sender,
             quando: isoLocal(target),
             origem: text,
+            recurrence,
         },
-        whenLabel: describeWhen(target),
+        whenLabel: `${describeWhen(target)}${recurrenceLabel}`,
     };
 }
 const USAGE_HELP = "uso: /remind <quando> <texto>\n" +
