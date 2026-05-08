@@ -957,9 +957,6 @@ async function createContentCalendarEntry(params) {
     if (params.adType) {
         properties["Ad type"] = { select: { name: params.adType } };
     }
-    if (params.originalMsg) {
-        properties["Origem"] = richText(params.originalMsg);
-    }
     const page = await withRetry("createContentCalendarEntry", () => client.pages.create({
         parent: { database_id: NOTION_CONTENT_CALENDAR_DB_ID },
         properties: properties,
@@ -1484,15 +1481,23 @@ async function uploadAndAttachFile(pageId, fileName, mimeType, fileBuffer, secti
         const body = await uploadRes.text();
         throw new Error(`notion: file_upload send ${uploadRes.status}: ${body}`);
     }
-    // Step 3 — append file block
-    const fileBlock = {
-        type: "file",
-        file: {
-            type: "file_upload",
-            file_upload: { id: uploadId },
-            name: fileName,
-        },
-    };
+    // Step 3 — append image or file block
+    const fileBlock = mimeType.startsWith("image/")
+        ? {
+            type: "image",
+            image: {
+                type: "file_upload",
+                file_upload: { id: uploadId },
+            },
+        }
+        : {
+            type: "file",
+            file: {
+                type: "file_upload",
+                file_upload: { id: uploadId },
+                name: fileName,
+            },
+        };
     const targetId = section ? await getOrCreateToggleId(pageId, section) : pageId;
     await withRetry("appendFile", () => client.blocks.children.append({
         block_id: targetId,
