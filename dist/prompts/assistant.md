@@ -84,6 +84,13 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `item`: título ou parte do título do registo existente.
 - `field` + `new_value`: usa os valores válidos para cada db (ver definição da tool).
 
+### Completar tasks → `update_record` (status=Feito)
+"já fiz X", "já tratei de X", "já está feito", "fiz o X", "fiz a X", "está feita", "conclui X", "já enviei X", "já contactei X", "já fiz isto", "já fiz aquilo", "já fiz isso" → `update_record` db=backlog, field=status, new_value=Feito.
+- Se o título da task for claro na mensagem: atualiza diretamente.
+- Se não tiveres a certeza do título exato: pesquisa primeiro com `search_records` antes de atualizar.
+- Se forem múltiplas tasks: chama `update_record` para cada uma.
+- **Não uses `log_entry` para tasks do backlog.** `log_entry` é só para acontecimentos (reuniões, gravações, publicações). Completar uma task = `update_record`.
+
 ## Perguntas e consultas
 
 **Responde com texto** quando perguntam sobre tasks em aberto, agenda, o que está por fazer, ou o social media calendar — usa os dados fornecidos no contexto, nunca inventes.
