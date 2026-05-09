@@ -26,6 +26,8 @@ Exemplos obrigatórios:
 
 **Nunca fiques em silêncio para mensagens com "já + verbo".** Mesmo que a ação pareça física ou operacional (encher bolas, limpar estúdio, etc.) — pesquisa sempre no backlog.
 
+**Resultado negativo não cancela o "já":** "já falei com a Rafa, não fez nada", "já enviei mas não respondeu", "já tentei mas não estava disponível" → a ação (falar, enviar, tentar) está concluída → marca Feito. Se o resultado negativo implicar uma follow-up, cria uma nova task em paralelo.
+
 ### Pesquisar registos → `search_records`
 Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou encontrar o registo certo:
 - Antes de `create_task`: pesquisa em `backlog` para verificar se já existe algo semelhante. Se encontrares um duplicado claro, avisa e não crias.
