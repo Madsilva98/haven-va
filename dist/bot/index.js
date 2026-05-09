@@ -19,13 +19,11 @@ import { handleCallback as handlePhase1Callback } from "./callbacks.js";
 import { handleDashboard, handleHelp, handleHoje, handleLista, handleStart, handleTask, handleProjects, handlePartners, handleEvents, handleInfluencers, handleCalendar, handleContent, } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
+import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import { handleWeek, handleWeekCallback, handleWeekTextStep, isAwaitingFocusFor, } from "./week.js";
 import { handleFocus } from "./focus.js";
 import { handleRemind } from "./remind.js";
 import { handleToDiscussCommand, handleToDiscussCallback, } from "./todiscuss.js";
-const RECENT_MAX = 6;
-const recentByChat = new Map();
-const lastBotRepliesByChat = new Map();
 const errorLimit = new ErrorRateLimit();
 const pendingFileByUser = new Map();
 const PENDING_FILE_TTL_MS = 5 * 60 * 1000;
@@ -56,17 +54,6 @@ let awaitingAuthCodeFrom = null;
 let botInfoUserId = null;
 const dedupedUpdates = new Set();
 const DEDUPE_MAX = 200;
-function pushRecent(chatId, sender, text) {
-    const arr = recentByChat.get(chatId) ?? [];
-    arr.push({ sender, text });
-    while (arr.length > RECENT_MAX)
-        arr.shift();
-    recentByChat.set(chatId, arr);
-}
-function getPriors(chatId) {
-    const arr = recentByChat.get(chatId) ?? [];
-    return arr.slice(0, -1).slice(-5);
-}
 function dedupe(updateId) {
     if (dedupedUpdates.has(updateId))
         return true;
@@ -387,8 +374,15 @@ export function buildBot() {
                 log.warn("pipeline.calendar_fetch_failed", { err: String(err) });
             }
         }
+        let openTasks = [];
         try {
-            const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId));
+            openTasks = await notion.getOpenTasksFor(senderName);
+        }
+        catch (err) {
+            log.warn("pipeline.open_tasks_fetch_failed", { err: String(err) });
+        }
+        try {
+            const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId), openTasks);
             if (botReplies.length > 0) {
                 lastBotRepliesByChat.set(chatId, botReplies);
             }

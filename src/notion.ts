@@ -361,12 +361,12 @@ async function createTask(
     Owner: { multi_select: [{ name: extraction.owner }] },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
-    Status: { select: { name: "To do" satisfies Status } },
+    Status: { select: { name: "A fazer" satisfies Status } },
     Origem: richText(originalMsg),
     ...relProps,
   };
   if (deadline) props["Deadline"] = { date: { start: deadline } };
-  if (priority === "1. Alta") props["Prioridade semanal"] = { checkbox: true };
+  if (priority === "Alta") props["Prioridade semanal"] = { checkbox: true };
 
   const page = await withRetry("createTask", () =>
     client.pages.create({
@@ -391,7 +391,7 @@ async function updateTask(
   newValue: string,
 ): Promise<void> {
   const properties = buildEditPatch(field, newValue) as Record<string, unknown>;
-  if (field === "prioridade" && newValue === "1. Alta") {
+  if (field === "prioridade" && newValue === "Alta") {
     properties["Prioridade semanal"] = { checkbox: true };
   }
   await withRetry("updateTask", () =>
@@ -778,11 +778,11 @@ async function getOpenTasks(): Promise<OpenTask[]> {
       const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
       const priorityName = readSelectName(props["Prioridade"]);
       const priority =
-        priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
+        priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
           ? (priorityName as Priority)
           : null;
       const deadline = readDateStart(props["Deadline"]);
-      const statusName = readSelectName(props["Status"]) ?? "To do";
+      const statusName = readSelectName(props["Status"]) ?? "A fazer";
       const status = statusName as Status;
 
       tasks.push({
@@ -1312,7 +1312,7 @@ async function createContentCalendarEntry(params: {
   }
   const properties: Record<string, unknown> = {
     Name: { title: [{ text: { content: params.title } }] },
-    status: { status: { name: params.status ?? "Raw Idea" } },
+    status: { status: { name: params.status ?? "raw idea" } },
   };
   if (params.publishDate) {
     properties["Posting Haven"] = { date: { start: params.publishDate } };
@@ -1345,7 +1345,7 @@ async function createLogEntry(params: {
   const properties: Record<string, unknown> = {
     Nome: { title: [{ text: { content: params.text } }] },
     Data: { date: { start: new Date().toISOString() } },
-    Owner: { select: { name: params.author } },
+    Owner: { multi_select: [{ name: params.author }] },
     Tags: {
       multi_select: params.tags.slice(0, 3).map((name) => ({ name })),
     },
@@ -1371,7 +1371,7 @@ async function createReminder(
     );
   }
   const properties: Record<string, unknown> = {
-    Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
+    Texto: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
     "Para quem": { multi_select: [{ name: r.paraQuem }] },
     Quando: { date: { start: r.quando } },
     Origem: richText(r.origem),
@@ -1481,12 +1481,14 @@ async function markReminderSent(id: string): Promise<void> {
 async function createToDiscuss(
   item: Omit<ToDiscussRow, "id" | "data" | "estado">,
   originalMsg: string,
+  entityRef?: EntityRef,
 ): Promise<string> {
   if (!NOTION_TO_DISCUSS_DB_ID) {
     throw new Error(
       "NOTION_TO_DISCUSS_DB_ID not set — Phase 5 to-discuss features disabled",
     );
   }
+  const relProps = await entityRelationProps(entityRef);
   const properties: Record<string, unknown> = {
     Tema: { title: [{ text: { content: item.tema } }] },
     "Adicionado por": { select: { name: item.adicionadoPor } },
@@ -1494,6 +1496,7 @@ async function createToDiscuss(
     Área: { select: { name: item.area } },
     Estado: { select: { name: "Pendente" satisfies ToDiscussState } },
     Origem: richText(originalMsg),
+    ...relProps,
   };
   if (item.resolucao) {
     properties["Resolução"] = richText(item.resolucao);

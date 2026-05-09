@@ -15,9 +15,9 @@ export type Area =
   | "Financeiro"
   | "Outro";
 
-export type Priority = "1. Alta" | "2. Média" | "3. Baixa";
+export type Priority = "Alta" | "Média" | "Baixa";
 
-export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
+export type Status = "A fazer" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
 
 export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area" | "title";
 

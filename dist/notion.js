@@ -274,13 +274,13 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
         Owner: { multi_select: [{ name: extraction.owner }] },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
-        Status: { select: { name: "To do" } },
+        Status: { select: { name: "A fazer" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
     if (deadline)
         props["Deadline"] = { date: { start: deadline } };
-    if (priority === "1. Alta")
+    if (priority === "Alta")
         props["Prioridade semanal"] = { checkbox: true };
     const page = await withRetry("createTask", () => client.pages.create({
         parent: { database_id: NOTION_BACKLOG_DB_ID },
@@ -297,7 +297,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
 }
 async function updateTask(pageId, field, newValue) {
     const properties = buildEditPatch(field, newValue);
-    if (field === "prioridade" && newValue === "1. Alta") {
+    if (field === "prioridade" && newValue === "Alta") {
         properties["Prioridade semanal"] = { checkbox: true };
     }
     await withRetry("updateTask", () => client.pages.update({
@@ -632,11 +632,11 @@ async function getOpenTasks() {
             const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
             const area = (readSelectName(props["Área"]) ?? "Outro");
             const priorityName = readSelectName(props["Prioridade"]);
-            const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
+            const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
-            const statusName = readSelectName(props["Status"]) ?? "To do";
+            const statusName = readSelectName(props["Status"]) ?? "A fazer";
             const status = statusName;
             tasks.push({
                 id: row.id,
@@ -1081,7 +1081,7 @@ async function createContentCalendarEntry(params) {
     }
     const properties = {
         Name: { title: [{ text: { content: params.title } }] },
-        status: { status: { name: params.status ?? "Raw Idea" } },
+        status: { status: { name: params.status ?? "raw idea" } },
     };
     if (params.publishDate) {
         properties["Posting Haven"] = { date: { start: params.publishDate } };
@@ -1102,13 +1102,13 @@ async function createLogEntry(params) {
         throw new Error("NOTION_STUDIO_LOG_DB_ID not set — Studio Log features disabled");
     }
     const properties = {
-        Texto: { title: [{ text: { content: params.text } }] },
+        Nome: { title: [{ text: { content: params.text } }] },
         Data: { date: { start: new Date().toISOString() } },
-        Autor: { select: { name: params.author } },
+        Owner: { multi_select: [{ name: params.author }] },
         Tags: {
             multi_select: params.tags.slice(0, 3).map((name) => ({ name })),
         },
-        "Mensagem original": richText(params.originalMessage),
+        Origem: richText(params.originalMessage),
     };
     const page = await withRetry("createLogEntry", () => client.pages.create({
         parent: { database_id: NOTION_STUDIO_LOG_DB_ID },
@@ -1122,7 +1122,7 @@ async function createReminder(r, taskPageId) {
         throw new Error("NOTION_REMINDERS_DB_ID not set — Phase 3 reminder features disabled");
     }
     const properties = {
-        Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
+        Texto: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
         "Para quem": { multi_select: [{ name: r.paraQuem }] },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
@@ -1211,10 +1211,11 @@ async function markReminderSent(id) {
 // ============================================================
 // Phase 5 — To Discuss / Decisions
 // ============================================================
-async function createToDiscuss(item, originalMsg) {
+async function createToDiscuss(item, originalMsg, entityRef) {
     if (!NOTION_TO_DISCUSS_DB_ID) {
         throw new Error("NOTION_TO_DISCUSS_DB_ID not set — Phase 5 to-discuss features disabled");
     }
+    const relProps = await entityRelationProps(entityRef);
     const properties = {
         Tema: { title: [{ text: { content: item.tema } }] },
         "Adicionado por": { select: { name: item.adicionadoPor } },
@@ -1222,6 +1223,7 @@ async function createToDiscuss(item, originalMsg) {
         Área: { select: { name: item.area } },
         Estado: { select: { name: "Pendente" } },
         Origem: richText(originalMsg),
+        ...relProps,
     };
     if (item.resolucao) {
         properties["Resolução"] = richText(item.resolucao);

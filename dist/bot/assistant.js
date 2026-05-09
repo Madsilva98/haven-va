@@ -23,7 +23,7 @@ const AREAS = [
     "Marketing", "Operações", "Parcerias", "Influencers",
     "Tech", "Cliente", "Financeiro", "Outro",
 ];
-const PRIORITIES = ["1. Alta", "2. Média", "3. Baixa"];
+const PRIORITIES = ["Alta", "Média", "Baixa"];
 const TO_DISCUSS_URGENCIES = [
     "Próxima reunião", "Decisão offline", "Urgente",
 ];
@@ -38,7 +38,7 @@ const TOOLS = [
                 title: { type: "string", description: "Título imperativo, pt-PT, <80 chars" },
                 owner: { type: "string", enum: OWNERS },
                 area: { type: "string", enum: AREAS },
-                priority: { type: "string", enum: PRIORITIES },
+                priority: { type: "string", enum: PRIORITIES, description: "Default: Média" },
                 deadline: { type: "string", description: "Data limite YYYY-MM-DD (opcional)" },
                 why: { type: "string", description: "Razão de negócio, <120 chars" },
                 entity_ref: {
@@ -107,6 +107,15 @@ const TOOLS = [
                 urgencia: { type: "string", enum: TO_DISCUSS_URGENCIES },
                 area: { type: "string", enum: AREAS },
                 deadline: { type: "string", description: "Data limite, YYYY-MM-DD (opcional)" },
+                entity_ref: {
+                    type: "object",
+                    description: "Ligar o tópico a uma entidade (projeto, evento, parceiro, influencer) se mencionado na mensagem",
+                    properties: {
+                        kind: { type: "string", enum: ENTITY_KINDS },
+                        nome: { type: "string" },
+                    },
+                    required: ["kind", "nome"],
+                },
             },
             required: ["tema"],
         },
@@ -134,6 +143,11 @@ const TOOLS = [
             type: "object",
             properties: {
                 text: { type: "string", description: "Descrição do acontecimento, pt-PT, <150 chars" },
+                owner: {
+                    type: "string",
+                    enum: ["Madalena", "Mafalda", "Beatriz"],
+                    description: "Quem fez a ação. Inferir do contexto — pode ser diferente de quem escreveu a mensagem. Ex: 'a Mafalda enviou um email' → owner=Mafalda.",
+                },
                 tags: {
                     type: "array",
                     items: { type: "string" },
@@ -150,7 +164,7 @@ const TOOLS = [
             type: "object",
             properties: {
                 title: { type: "string", description: "Título do conteúdo" },
-                status: { type: "string", description: "Estado: Raw Idea, Writing, Editing, Scheduled, Posted. Default: Raw Idea" },
+                status: { type: "string", description: "Estado: raw idea, ideation, ready to record, editing, ready to post, posted. Default: raw idea" },
                 publish_date: { type: "string", description: "Data de publicação YYYY-MM-DD (opcional)" },
                 ad_type: { type: "string", description: "Tipo: Post, Story, Reel, Carrossel, etc. (opcional)" },
             },
@@ -209,12 +223,13 @@ const TOOLS = [
                 new_value: {
                     type: "string",
                     description: "Novo valor. " +
-                        "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
+                        "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
                         "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
-                        "backlog prioridade: 1. alta|2. média|3. baixa. deadline: YYYY-MM-DD. " +
+                        "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
                         "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
-                        "to_discuss|decisions estado: Pendente|Resolvido (to_discuss) ou Pendente implementação|Em curso|Implementado|Arquivado (decisions). " +
-                        "content_calendar status: Raw Idea|Writing|Editing|Scheduled|Posted. " +
+                        "to_discuss estado: Pendente|Discutido|Arquivado. " +
+                        "decisions estado: Pendente implementação|Implementada. " +
+                        "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
                         "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
                         "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
                         "projects status: Ativo|Em pausa|Concluído|Cancelado.",
@@ -355,7 +370,7 @@ function lisbonLocalToUtc(lisbonNaive) {
     return (`${utc.getUTCFullYear()}-${p(utc.getUTCMonth() + 1)}-${p(utc.getUTCDate())}` +
         `T${p(utc.getUTCHours())}:${p(utc.getUTCMinutes())}:${p(utc.getUTCSeconds())}`);
 }
-function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
+function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks) {
     const lines = [];
     const now = new Date();
     const today = now.toLocaleDateString("pt-PT", {
@@ -396,6 +411,14 @@ function buildUserMessage(sender, text, recentMessages, repliedToText, contentCa
         }
         lines.push("");
     }
+    if (openTasks && openTasks.length > 0) {
+        lines.push(`Tasks de ${sender}:`);
+        for (const t of openTasks) {
+            const deadline = t.deadline ? ` | até ${t.deadline}` : "";
+            lines.push(`  - ${t.title} | ${t.status} | ${t.area}${deadline}`);
+        }
+        lines.push("");
+    }
     lines.push(`${sender}: ${text}`);
     return lines.join("\n");
 }
@@ -409,7 +432,7 @@ async function execCreateTask(input, sender, ctx, collector) {
     const area = AREAS.includes(input.area) ? input.area : "Outro";
     const priority = PRIORITIES.includes(input.priority)
         ? input.priority
-        : "2. Média";
+        : "Média";
     const why = typeof input.why === "string" ? input.why : "";
     const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
     let entityRef;
@@ -492,6 +515,15 @@ async function execAddToDiscuss(input, sender, ctx, collector) {
         : "Próxima reunião";
     const area = AREAS.includes(input.area) ? input.area : "Outro";
     const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
+    let entityRef;
+    const rawRef = input.entity_ref;
+    if (rawRef && typeof rawRef === "object" && !Array.isArray(rawRef)) {
+        const ref = rawRef;
+        const kind = ref.kind;
+        const nome = typeof ref.nome === "string" ? ref.nome.trim() : "";
+        if (ENTITY_KINDS.includes(kind) && nome)
+            entityRef = { kind, nome };
+    }
     await notion.createToDiscuss({
         tema,
         adicionadoPor: sender,
@@ -499,7 +531,7 @@ async function execAddToDiscuss(input, sender, ctx, collector) {
         area,
         resolucao: "",
         deadline,
-    }, ctx.message?.text ?? "");
+    }, ctx.message?.text ?? "", entityRef);
     const discussReply = `💬 adicionado à lista de discussão: "${tema}"`;
     collector.push(discussReply);
     await ctx.reply(discussReply);
@@ -522,10 +554,11 @@ async function execLogEntry(input, sender, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
     if (!text)
         return "parâmetros em falta";
+    const owner = FOUNDERS.includes(input.owner) ? input.owner : sender;
     const tags = Array.isArray(input.tags)
         ? input.tags.filter((t) => typeof t === "string").map((t) => t.trim()).slice(0, 3)
         : [];
-    await notion.createLogEntry({ text, author: sender, tags, originalMessage: ctx.message?.text ?? "" });
+    await notion.createLogEntry({ text, author: owner, tags, originalMessage: ctx.message?.text ?? "" });
     const logReply = `📓 registado: "${text}"`;
     collector.push(logReply);
     await ctx.reply(logReply);
@@ -771,7 +804,7 @@ async function dispatchTool(name, input, sender, ctx, collector) {
             return `tool desconhecida: ${name}`;
     }
 }
-export async function handleAssistant(ctx, sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies) {
+export async function handleAssistant(ctx, sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks) {
     const collector = [];
     let runtime;
     try {
@@ -791,7 +824,7 @@ export async function handleAssistant(ctx, sender, text, recentMessages, replied
     const messages = [
         {
             role: "user",
-            content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies),
+            content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks),
         },
     ];
     const MAX_ITERATIONS = 5;

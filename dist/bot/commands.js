@@ -56,7 +56,7 @@ export async function handleTask(ctx) {
             owner: "Unassigned",
             area: "Outro",
             why: "levantado via /task",
-        }, "2. Média", description, senderName);
+        }, "Média", description, senderName);
         await ctx.reply(`✅ task criada: "${description.slice(0, 80)}"`, {
             reply_markup: taskUndoKeyboard(pageId),
         });

@@ -25,6 +25,7 @@ import type {
   EntityKind,
   EntityRef,
   FounderName,
+  OpenTask,
   OwnerValue,
   Priority,
   ToDiscussUrgency,
@@ -39,7 +40,7 @@ const AREAS: Area[] = [
   "Marketing", "Operações", "Parcerias", "Influencers",
   "Tech", "Cliente", "Financeiro", "Outro",
 ];
-const PRIORITIES: Priority[] = ["1. Alta", "2. Média", "3. Baixa"];
+const PRIORITIES: Priority[] = ["Alta", "Média", "Baixa"];
 const TO_DISCUSS_URGENCIES: ToDiscussUrgency[] = [
   "Próxima reunião", "Decisão offline", "Urgente",
 ];
@@ -55,7 +56,7 @@ const TOOLS: Anthropic.Tool[] = [
         title: { type: "string", description: "Título imperativo, pt-PT, <80 chars" },
         owner: { type: "string", enum: OWNERS },
         area: { type: "string", enum: AREAS },
-        priority: { type: "string", enum: PRIORITIES },
+        priority: { type: "string", enum: PRIORITIES, description: "Default: Média" },
         deadline: { type: "string", description: "Data limite YYYY-MM-DD (opcional)" },
         why: { type: "string", description: "Razão de negócio, <120 chars" },
         entity_ref: {
@@ -126,6 +127,15 @@ const TOOLS: Anthropic.Tool[] = [
         urgencia: { type: "string", enum: TO_DISCUSS_URGENCIES },
         area: { type: "string", enum: AREAS },
         deadline: { type: "string", description: "Data limite, YYYY-MM-DD (opcional)" },
+        entity_ref: {
+          type: "object",
+          description: "Ligar o tópico a uma entidade (projeto, evento, parceiro, influencer) se mencionado na mensagem",
+          properties: {
+            kind: { type: "string", enum: ENTITY_KINDS },
+            nome: { type: "string" },
+          },
+          required: ["kind", "nome"],
+        },
       },
       required: ["tema"],
     },
@@ -174,7 +184,7 @@ const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         title: { type: "string", description: "Título do conteúdo" },
-        status: { type: "string", description: "Estado: Raw Idea, Writing, Editing, Scheduled, Posted. Default: Raw Idea" },
+        status: { type: "string", description: "Estado: raw idea, ideation, ready to record, editing, ready to post, posted. Default: raw idea" },
         publish_date: { type: "string", description: "Data de publicação YYYY-MM-DD (opcional)" },
         ad_type: { type: "string", description: "Tipo: Post, Story, Reel, Carrossel, etc. (opcional)" },
       },
@@ -235,12 +245,13 @@ const TOOLS: Anthropic.Tool[] = [
           type: "string",
           description:
             "Novo valor. " +
-            "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
+            "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
             "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
-            "backlog prioridade: 1. alta|2. média|3. baixa. deadline: YYYY-MM-DD. " +
+            "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
             "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
-            "to_discuss|decisions estado: Pendente|Resolvido (to_discuss) ou Pendente implementação|Em curso|Implementado|Arquivado (decisions). " +
-            "content_calendar status: Raw Idea|Writing|Editing|Scheduled|Posted. " +
+            "to_discuss estado: Pendente|Discutido|Arquivado. " +
+            "decisions estado: Pendente implementação|Implementada. " +
+            "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
             "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
             "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
             "projects status: Ativo|Em pausa|Concluído|Cancelado.",
@@ -400,6 +411,7 @@ function buildUserMessage(
   repliedToText?: string,
   contentCalendar?: ContentCalendarRow[],
   lastBotReplies?: string[],
+  openTasks?: OpenTask[],
 ): string {
   const lines: string[] = [];
 
@@ -447,6 +459,15 @@ function buildUserMessage(
     lines.push("");
   }
 
+  if (openTasks && openTasks.length > 0) {
+    lines.push(`Tasks de ${sender}:`);
+    for (const t of openTasks) {
+      const deadline = t.deadline ? ` | até ${t.deadline}` : "";
+      lines.push(`  - ${t.title} | ${t.status} | ${t.area}${deadline}`);
+    }
+    lines.push("");
+  }
+
   lines.push(`${sender}: ${text}`);
   return lines.join("\n");
 }
@@ -465,7 +486,7 @@ async function execCreateTask(
   const area = AREAS.includes(input.area as Area) ? (input.area as Area) : "Outro";
   const priority = PRIORITIES.includes(input.priority as Priority)
     ? (input.priority as Priority)
-    : "2. Média";
+    : "Média";
   const why = typeof input.why === "string" ? input.why : "";
   const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
 
@@ -586,6 +607,15 @@ async function execAddToDiscuss(
   const area = AREAS.includes(input.area as Area) ? (input.area as Area) : "Outro";
   const deadline = typeof input.deadline === "string" && input.deadline ? input.deadline : undefined;
 
+  let entityRef: EntityRef | undefined;
+  const rawRef = input.entity_ref;
+  if (rawRef && typeof rawRef === "object" && !Array.isArray(rawRef)) {
+    const ref = rawRef as Record<string, unknown>;
+    const kind = ref.kind as EntityKind;
+    const nome = typeof ref.nome === "string" ? ref.nome.trim() : "";
+    if (ENTITY_KINDS.includes(kind) && nome) entityRef = { kind, nome };
+  }
+
   await notion.createToDiscuss({
     tema,
     adicionadoPor: sender,
@@ -593,7 +623,7 @@ async function execAddToDiscuss(
     area,
     resolucao: "",
     deadline,
-  }, ctx.message?.text ?? "");
+  }, ctx.message?.text ?? "", entityRef);
   const discussReply = `💬 adicionado à lista de discussão: "${tema}"`;
   collector.push(discussReply);
   await ctx.reply(discussReply);
@@ -933,6 +963,7 @@ export async function handleAssistant(
   repliedToText?: string,
   contentCalendar?: ContentCalendarRow[],
   lastBotReplies?: string[],
+  openTasks?: OpenTask[],
 ): Promise<string[]> {
   const collector: string[] = [];
 
@@ -955,7 +986,7 @@ export async function handleAssistant(
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
-      content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies),
+      content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks),
     },
   ];
 

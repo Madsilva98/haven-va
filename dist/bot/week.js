@@ -21,9 +21,9 @@ import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
 import * as notion from "../notion.js";
 const PRIORITY_RANK = {
-    "1. Alta": 0,
-    "2. Média": 1,
-    "3. Baixa": 2,
+    "Alta": 0,
+    "Média": 1,
+    "Baixa": 2,
 };
 const MAX_TASKS_SHOWN = 7;
 const MAX_PICKS = 3;

@@ -12,6 +12,7 @@ import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import * as notion from "../notion.js";
 import { handleAssistant } from "./assistant.js";
+import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
 import {
   handleWeek,
@@ -92,6 +93,9 @@ export async function handleDM(ctx: Context): Promise<boolean> {
 
   if (text.trim().length < 4) return true;
 
+  const chatId = ctx.chat.id;
+  pushRecent(chatId, senderName, text);
+
   const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
   let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
   if (calendarKeywords.test(text)) {
@@ -102,8 +106,27 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     }
   }
 
+  let openTasks: import("../types.js").OpenTask[] = [];
   try {
-    await handleAssistant(ctx, senderName, text, [], undefined, contentCalendar);
+    openTasks = await notion.getOpenTasksFor(senderName);
+  } catch (err) {
+    log.warn("dm.open_tasks_fetch_failed", { err: String(err) });
+  }
+
+  try {
+    const botReplies = await handleAssistant(
+      ctx,
+      senderName,
+      text,
+      getPriors(chatId),
+      undefined,
+      contentCalendar,
+      lastBotRepliesByChat.get(chatId),
+      openTasks,
+    );
+    if (botReplies.length > 0) {
+      lastBotRepliesByChat.set(chatId, botReplies);
+    }
   } catch (err) {
     log.error("dm.assistant_failed", { err: String(err) });
     await safeReply(ctx);

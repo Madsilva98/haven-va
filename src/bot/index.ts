@@ -36,6 +36,7 @@ import {
 } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
+import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import {
   handleWeek,
   handleWeekCallback,
@@ -49,9 +50,6 @@ import {
   handleToDiscussCallback,
 } from "./todiscuss.js";
 
-const RECENT_MAX = 6;
-const recentByChat = new Map<number, { sender: FounderName; text: string }[]>();
-const lastBotRepliesByChat = new Map<number, string[]>();
 const errorLimit = new ErrorRateLimit();
 
 interface PendingFile {
@@ -95,17 +93,6 @@ let botInfoUserId: number | null = null;
 const dedupedUpdates = new Set<number>();
 const DEDUPE_MAX = 200;
 
-function pushRecent(chatId: number, sender: FounderName, text: string): void {
-  const arr = recentByChat.get(chatId) ?? [];
-  arr.push({ sender, text });
-  while (arr.length > RECENT_MAX) arr.shift();
-  recentByChat.set(chatId, arr);
-}
-
-function getPriors(chatId: number): { sender: FounderName; text: string }[] {
-  const arr = recentByChat.get(chatId) ?? [];
-  return arr.slice(0, -1).slice(-5);
-}
 
 function dedupe(updateId: number): boolean {
   if (dedupedUpdates.has(updateId)) return true;
@@ -447,6 +434,13 @@ export function buildBot(): Bot {
       }
     }
 
+    let openTasks: import("../types.js").OpenTask[] = [];
+    try {
+      openTasks = await notion.getOpenTasksFor(senderName);
+    } catch (err) {
+      log.warn("pipeline.open_tasks_fetch_failed", { err: String(err) });
+    }
+
     try {
       const botReplies = await handleAssistant(
         ctx,
@@ -456,6 +450,7 @@ export function buildBot(): Bot {
         repliedToText,
         contentCalendar,
         lastBotRepliesByChat.get(chatId),
+        openTasks,
       );
       if (botReplies.length > 0) {
         lastBotRepliesByChat.set(chatId, botReplies);
