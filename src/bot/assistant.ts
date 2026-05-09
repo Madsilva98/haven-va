@@ -616,6 +616,7 @@ async function execAddToDiscuss(
     if (ENTITY_KINDS.includes(kind) && nome) entityRef = { kind, nome };
   }
 
+  log.info("assistant.add_to_discuss", { tema, entityRef: entityRef ?? null });
   await notion.createToDiscuss({
     tema,
     adicionadoPor: sender,
@@ -624,7 +625,8 @@ async function execAddToDiscuss(
     resolucao: "",
     deadline,
   }, ctx.message?.text ?? "", entityRef);
-  const discussReply = `💬 adicionado à lista de discussão: "${tema}"`;
+  const linkedSuffix = entityRef ? ` (ligado a ${entityRef.nome})` : "";
+  const discussReply = `💬 adicionado à lista de discussão: "${tema}"${linkedSuffix}`;
   collector.push(discussReply);
   await ctx.reply(discussReply);
   return "ok";

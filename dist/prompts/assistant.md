@@ -68,7 +68,7 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 "precisamos discutir", "para a reunião", "falar sobre", "to discuss" → cria.
 - `urgencia` default: `"Próxima reunião"`.
 - `tema`: só o tópico em si, sem frases de contexto. Exemplo: "precisamos de falar de reformer vs proficiency no contexto do projeto método haven" → `tema: "reformer athletic vs proficiency"`. Remove sempre "no contexto do/da", "em relação ao projeto/parceiro", "sobre o projeto X", "relativamente a Y".
-- `entity_ref`: usa quando a mensagem mencionar "no projeto X", "no evento Y", "do parceiro Z" — liga o tópico a essa entidade.
+- `entity_ref`: usa quando a mensagem mencionar "no projeto X", "no evento Y", "do parceiro Z" — liga o tópico a essa entidade. Exemplo: "no projeto Método Haven, adiciona à discussão X" → `entity_ref: {kind: "projeto", nome: "Método Haven"}`.
 - Se houver vários tópicos na mesma mensagem: cria um `add_to_discuss` por tópico.
 
 ### Foco semanal → `set_focus`

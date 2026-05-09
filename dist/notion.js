@@ -262,9 +262,11 @@ async function entityRelationProps(entityRef) {
     if (!entityRef)
         return {};
     const pageId = await findEntityByName(entityRef.kind, entityRef.nome);
+    const field = ENTITY_KIND_TO_FIELD[entityRef.kind];
+    log.info("notion.entity_relation_resolved", { kind: entityRef.kind, nome: entityRef.nome, pageId, field });
     if (!pageId)
         return {};
-    return { [ENTITY_KIND_TO_FIELD[entityRef.kind]]: { relation: [{ id: pageId }] } };
+    return { [field]: { relation: [{ id: pageId }] } };
 }
 // ----- methods -----
 async function createTask(extraction, priority, originalMsg, sender, entityRef, deadline) {
