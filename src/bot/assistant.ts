@@ -153,6 +153,11 @@ const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         text: { type: "string", description: "Descrição do acontecimento, pt-PT, <150 chars" },
+        owner: {
+          type: "string",
+          enum: ["Madalena", "Mafalda", "Beatriz"],
+          description: "Quem fez a ação. Inferir do contexto — pode ser diferente de quem escreveu a mensagem. Ex: 'a Mafalda enviou um email' → owner=Mafalda.",
+        },
         tags: {
           type: "array",
           items: { type: "string" },
@@ -622,10 +627,11 @@ async function execLogEntry(
 ): Promise<string> {
   const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
   if (!text) return "parâmetros em falta";
+  const owner = FOUNDERS.includes(input.owner as FounderName) ? (input.owner as FounderName) : sender;
   const tags = Array.isArray(input.tags)
     ? (input.tags as unknown[]).filter((t) => typeof t === "string").map((t) => (t as string).trim()).slice(0, 3)
     : [];
-  await notion.createLogEntry({ text, author: sender, tags, originalMessage: ctx.message?.text ?? "" });
+  await notion.createLogEntry({ text, author: owner, tags, originalMessage: ctx.message?.text ?? "" });
   const logReply = `📓 registado: "${text}"`;
   collector.push(logReply);
   await ctx.reply(logReply);

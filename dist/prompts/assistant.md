@@ -64,6 +64,7 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 
 ### Studio Log → `log_entry`
 "gravamos", "tivemos reunião com X", "publicámos", "fizemos X hoje", "aconteceu X", "correu bem/mal" → regista o que aconteceu.
+- `owner`: quem fez a ação — infere do contexto, pode ser diferente de quem escreve. "a Mafalda enviou um email" → owner=Mafalda. Se incerto → sender.
 - tags: infere pelo contexto (máx 3). Ex: gravação, reunião, parceria, publicação, aula, evento.
 - Distinção: `log_entry` = acontecimento/evento. `log_decision` = decisão tomada ("decidimos X").
 

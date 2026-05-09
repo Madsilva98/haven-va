@@ -1343,13 +1343,13 @@ async function createLogEntry(params: {
     );
   }
   const properties: Record<string, unknown> = {
-    Texto: { title: [{ text: { content: params.text } }] },
+    Nome: { title: [{ text: { content: params.text } }] },
     Data: { date: { start: new Date().toISOString() } },
-    Autor: { select: { name: params.author } },
+    Owner: { select: { name: params.author } },
     Tags: {
       multi_select: params.tags.slice(0, 3).map((name) => ({ name })),
     },
-    "Mensagem original": richText(params.originalMessage),
+    Origem: richText(params.originalMessage),
   };
   const page = await withRetry("createLogEntry", () =>
     client.pages.create({
