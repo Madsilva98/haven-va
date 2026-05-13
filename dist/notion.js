@@ -219,7 +219,7 @@ function buildEditPatch(field, newValue) {
         case "status":
             return { [property]: { select: { name: newValue } } };
         case "owner":
-            return { [property]: { multi_select: [{ name: newValue }] } };
+            return { [property]: { select: { name: newValue } } };
         case "prioridade":
         case "area":
             return { [property]: { select: { name: newValue } } };
@@ -273,7 +273,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
     const relProps = await entityRelationProps(entityRef);
     const props = {
         "Título": { title: [{ text: { content: extraction.title } }] },
-        Owner: { multi_select: [{ name: extraction.owner }] },
+        Owner: { select: { name: extraction.owner } },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
         Status: { select: { name: "A fazer" } },
@@ -541,7 +541,7 @@ async function searchRecords(db, query) {
         return searchRecordsInDb(NOTION_BACKLOG_DB_ID, "Título", query, (row) => ({
             id: row.id,
             title: readPlainText(row.properties["Título"]),
-            owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
+            owner: readSelectName(row.properties["Owner"]) ?? "Unassigned",
             status: readSelectName(row.properties["Status"]) ?? "To do",
             area: readSelectName(row.properties["Área"]) ?? undefined,
             priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
@@ -631,7 +631,7 @@ async function getOpenTasks() {
                 continue;
             const props = row.properties;
             const title = readPlainText(props["Título"]);
-            const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
+            const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
             const area = (readSelectName(props["Área"]) ?? "Outro");
             const priorityName = readSelectName(props["Prioridade"]);
             const priority = priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
@@ -662,7 +662,7 @@ async function getOpenTasks() {
 function rowToOpenTask(row) {
     const props = row.properties;
     const title = readPlainText(props["Título"]);
-    const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned");
+    const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
     const priorityName = readSelectName(props["Prioridade"]);
     const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"

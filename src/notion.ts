@@ -293,7 +293,7 @@ function buildEditPatch(field: EditableField, newValue: string): Record<string, 
     case "status":
       return { [property]: { select: { name: newValue } } };
     case "owner":
-      return { [property]: { multi_select: [{ name: newValue }] } };
+      return { [property]: { select: { name: newValue } } };
     case "prioridade":
     case "area":
       return { [property]: { select: { name: newValue } } };
@@ -360,7 +360,7 @@ async function createTask(
 
   const props: Record<string, unknown> = {
     "Título": { title: [{ text: { content: extraction.title } }] },
-    Owner: { multi_select: [{ name: extraction.owner }] },
+    Owner: { select: { name: extraction.owner } },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
     Status: { select: { name: "A fazer" satisfies Status } },
@@ -679,7 +679,7 @@ async function searchRecords(db: string, query: string): Promise<SearchResult[]>
     return searchRecordsInDb(NOTION_BACKLOG_DB_ID, "Título", query, (row) => ({
       id: row.id,
       title: readPlainText(row.properties["Título"]),
-      owner: readMultiSelectFirst(row.properties["Owner"]) ?? "Unassigned",
+      owner: readSelectName(row.properties["Owner"]) ?? "Unassigned",
       status: readSelectName(row.properties["Status"]) ?? "To do",
       area: readSelectName(row.properties["Área"]) ?? undefined,
       priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
@@ -776,7 +776,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
       const title = readPlainText(props["Título"]);
-      const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned") as OwnerValue;
+      const owner = (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue;
       const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
       const priorityName = readSelectName(props["Prioridade"]);
       const priority =
@@ -814,7 +814,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
 function rowToOpenTask(row: { id: string; properties: Record<string, unknown> }): OpenTask {
   const props = row.properties;
   const title = readPlainText(props["Título"]);
-  const owner = (readMultiSelectFirst(props["Owner"]) ?? "Unassigned") as OwnerValue;
+  const owner = (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue;
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priorityName = readSelectName(props["Prioridade"]);
   const priority =
