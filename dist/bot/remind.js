@@ -179,10 +179,7 @@ export function parseRemindCommand(text, sender) {
     }
     if (!target)
         return { parsed: false };
-    const recurrenceLabel = recurrence === "diária" ? " (repete todos os dias)"
-        : recurrence === "semanal" ? " (repete toda a semana)"
-            : recurrence === "mensal" ? " (repete todo o mês)"
-                : "";
+    const recurrenceLabel = recurrence ? ` (repete: ${recurrence})` : "";
     return {
         parsed: true,
         reminder: {

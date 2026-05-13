@@ -97,8 +97,7 @@ const TOOLS: Anthropic.Tool[] = [
         },
         recurrence: {
           type: "string",
-          enum: ["diária", "semanal", "mensal"],
-          description: "Repetição automática. Usa quando a mensagem pedir 'todos os dias', 'toda a semana', 'todo o mês', etc.",
+          description: "Repetição automática. Ex: 'diária', 'semanal', 'mensal', 'a cada 2 semanas'. Usa quando a mensagem pedir repetição.",
         },
       },
       required: ["text", "when_iso", "for"],
@@ -539,11 +538,7 @@ async function execCreateReminder(
     ? input.task_page_id
     : undefined;
 
-  const recurrenceRaw = typeof input.recurrence === "string" ? input.recurrence : undefined;
-  const recurrence =
-    recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
-      ? recurrenceRaw
-      : undefined;
+  const recurrence = typeof input.recurrence === "string" ? input.recurrence : undefined;
 
   await Promise.all(
     targets.map((paraQuem) =>
@@ -558,11 +553,7 @@ async function execCreateReminder(
   );
 
   const label = forWho === "all" ? "todas" : forWho;
-  const recurrenceLabel =
-    recurrence === "diária" ? " (repete todos os dias)"
-    : recurrence === "semanal" ? " (repete toda a semana)"
-    : recurrence === "mensal" ? " (repete todo o mês)"
-    : "";
+  const recurrenceLabel = recurrence ? ` (repete: ${recurrence})` : "";
   const reminderReply = `⏰ lembrete criado para ${label}: "${text}"${recurrenceLabel}`;
   collector.push(reminderReply);
   await ctx.reply(reminderReply);
@@ -904,7 +895,7 @@ async function execCreateEntity(
       await notion.createPartner(nome, owner, ctx.message?.text ?? "");
       break;
     case "influencer":
-      await notion.createInfluencer(nome, owner);
+      await notion.createInfluencer(nome, owner, ctx.message?.text ?? "");
       break;
   }
 

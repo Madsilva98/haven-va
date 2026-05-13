@@ -1146,6 +1146,7 @@ async function getInfluencersStale(
         ultimoContacto: readDateStart(props["Último contacto"]),
         proximoPasso: readPlainText(props["Próximo passo"]),
         notas: readPlainText(props["Notas"]),
+        origem: readPlainText(props["Origem"]),
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -1373,7 +1374,7 @@ async function createReminder(
     );
   }
   const properties: Record<string, unknown> = {
-    Texto: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
+    Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
     "Para quem": { multi_select: [{ name: r.paraQuem }] },
     Quando: { date: { start: r.quando } },
     Origem: richText(r.origem),
@@ -1439,10 +1440,7 @@ async function getDueReminders(): Promise<ReminderRow[]> {
         continue;
       }
       const recurrenceRaw = readSelectName(props["Recorrência"]);
-      const recurrence: ReminderRecurrence | undefined =
-        recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
-          ? recurrenceRaw
-          : undefined;
+      const recurrence: ReminderRecurrence | undefined = recurrenceRaw ?? undefined;
       rows.push({
         id: row.id,
         texto: readPlainText(props["Reminder"]),
@@ -1662,6 +1660,7 @@ async function getRecentDecisions(n: number): Promise<DecisionRow[]> {
       data: readDateStart(props["Data"]),
       estado,
       notas: readPlainText(props["Notas"]),
+      origem: readPlainText(props["Origem"]),
     });
   }
   log.debug("notion.recent_decisions_fetched", { count: rows.length });
@@ -1864,7 +1863,7 @@ async function createPartner(nome: string, owner: OwnerValue, originalMsg: strin
   return page.id;
 }
 
-async function createInfluencer(nome: string, owner: OwnerValue): Promise<string> {
+async function createInfluencer(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
   }
@@ -1875,6 +1874,7 @@ async function createInfluencer(nome: string, owner: OwnerValue): Promise<string
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
         Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
+        Origem: richText(originalMsg),
       },
     }),
   );

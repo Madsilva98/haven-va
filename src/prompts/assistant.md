@@ -50,7 +50,7 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `for`: nome mencionado ou `all`; se incerto → sender.
 - `when_iso`: hora Lisbon sem timezone, às 09:00 se não especificado.
 - `task_page_id`: só usar quando o lembrete se refere a uma task criada **nesta mesma conversa**. O resultado de `create_task` inclui `pageId: <id>` — passa esse id aqui. Requer chamar `create_task` primeiro (não em paralelo).
-- `recurrence`: usa quando a mensagem pedir repetição — "todos os dias", "toda a semana", "todo o mês", "diariamente", "semanalmente", "mensalmente" → `"diária"` / `"semanal"` / `"mensal"`.
+- `recurrence`: usa quando a mensagem pedir repetição. Valores comuns: `"diária"`, `"semanal"`, `"mensal"`. Aceita qualquer string — ex: `"a cada 2 semanas"`, `"a cada 3 dias"`. Cria automaticamente a opção no Notion.
 
 ### Eventos no Google Calendar → `create_calendar_event`
 "marca no calendário", "adiciona ao calendário", "cria um evento", "agenda uma reunião", "bloca o dia X" → cria.

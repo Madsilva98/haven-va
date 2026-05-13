@@ -946,6 +946,7 @@ async function getInfluencersStale(category) {
                 ultimoContacto: readDateStart(props["Último contacto"]),
                 proximoPasso: readPlainText(props["Próximo passo"]),
                 notas: readPlainText(props["Notas"]),
+                origem: readPlainText(props["Origem"]),
             });
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -1124,7 +1125,7 @@ async function createReminder(r, taskPageId) {
         throw new Error("NOTION_REMINDERS_DB_ID not set — Phase 3 reminder features disabled");
     }
     const properties = {
-        Texto: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
+        Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
         "Para quem": { multi_select: [{ name: r.paraQuem }] },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
@@ -1180,9 +1181,7 @@ async function getDueReminders() {
                 continue;
             }
             const recurrenceRaw = readSelectName(props["Recorrência"]);
-            const recurrence = recurrenceRaw === "diária" || recurrenceRaw === "semanal" || recurrenceRaw === "mensal"
-                ? recurrenceRaw
-                : undefined;
+            const recurrence = recurrenceRaw ?? undefined;
             rows.push({
                 id: row.id,
                 texto: readPlainText(props["Reminder"]),
@@ -1361,6 +1360,7 @@ async function getRecentDecisions(n) {
             data: readDateStart(props["Data"]),
             estado,
             notas: readPlainText(props["Notas"]),
+            origem: readPlainText(props["Origem"]),
         });
     }
     log.debug("notion.recent_decisions_fetched", { count: rows.length });
@@ -1530,7 +1530,7 @@ async function createPartner(nome, owner, originalMsg) {
     log.info("notion.partner_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function createInfluencer(nome, owner) {
+async function createInfluencer(nome, owner, originalMsg) {
     if (!NOTION_INFLUENCER_DB_ID) {
         throw new Error("NOTION_INFLUENCER_DB_ID not set");
     }
@@ -1540,6 +1540,7 @@ async function createInfluencer(nome, owner) {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
             Status: { select: { name: "A contactar" } },
+            Origem: richText(originalMsg),
         },
     }));
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({

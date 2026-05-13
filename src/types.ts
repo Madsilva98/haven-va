@@ -80,9 +80,10 @@ export interface InfluencerRow {
   ultimoContacto: string | null;
   proximoPasso: string;
   notas: string;
+  origem?: string;
 }
 
-export type ReminderRecurrence = "diária" | "semanal" | "mensal";
+export type ReminderRecurrence = string;
 
 export interface ReminderRow {
   id: string;
@@ -123,6 +124,7 @@ export interface DecisionRow {
   data: string | null;
   estado: "Pendente implementação" | "Implementada";
   notas: string;
+  origem?: string;
 }
 
 export interface NewTaskExtraction {
