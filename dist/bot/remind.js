@@ -66,17 +66,9 @@ function stripCommand(text) {
 function pad2(n) {
     return n < 10 ? `0${n}` : String(n);
 }
-function isoLocal(date) {
-    // Returns "YYYY-MM-DDTHH:mm:ss" with no Z — Notion accepts naive datetimes
-    // and we do all scheduling in Lisbon wall-clock for now (Phase 4 will
-    // swap to TZ-aware logic).
-    const y = date.getFullYear();
-    const m = pad2(date.getMonth() + 1);
-    const d = pad2(date.getDate());
-    const hh = pad2(date.getHours());
-    const mm = pad2(date.getMinutes());
-    const ss = pad2(date.getSeconds());
-    return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
+function utcNoZ(date) {
+    return (`${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}` +
+        `T${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`);
 }
 function lisbonOffsetMs(d) {
     // Returns Europe/Lisbon offset relative to UTC in ms (positive = ahead of UTC).
@@ -185,7 +177,7 @@ export function parseRemindCommand(text, sender) {
         reminder: {
             texto: message,
             paraQuem: sender,
-            quando: isoLocal(target),
+            quando: utcNoZ(target),
             origem: text,
             recurrence,
         },

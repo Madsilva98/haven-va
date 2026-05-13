@@ -364,21 +364,15 @@ function initRuntime() {
     return { client: anthropicClient, systemPrompt: systemPromptText, model: modelId };
 }
 function lisbonLocalToUtc(lisbonNaive) {
-    // Treat input as Lisbon wall-clock time (no timezone suffix).
-    // Parse as UTC, then subtract the Lisbon offset to get the true UTC time.
-    const asUtc = new Date(lisbonNaive.includes("Z") || /[+-]\d{2}:/.test(lisbonNaive)
-        ? lisbonNaive
-        : lisbonNaive + "Z");
-    if (Number.isNaN(asUtc.getTime()))
+    // ISO datetime without timezone → V8 parses as local time (TZ=Europe/Lisbon).
+    // If already timezone-aware (Z or +HH:mm), new Date() handles it correctly.
+    // Either way, getUTC* gives the correct UTC components.
+    const d = new Date(lisbonNaive);
+    if (Number.isNaN(d.getTime()))
         return lisbonNaive;
-    // Compute offset: how many ms ahead Lisbon is relative to UTC at this point
-    const lisbonStr = asUtc.toLocaleString("en-US", { timeZone: "Europe/Lisbon" });
-    const lisbonParsed = new Date(lisbonStr);
-    const offsetMs = lisbonParsed.getTime() - asUtc.getTime();
-    const utc = new Date(asUtc.getTime() - offsetMs);
     const p = (n) => String(n).padStart(2, "0");
-    return (`${utc.getUTCFullYear()}-${p(utc.getUTCMonth() + 1)}-${p(utc.getUTCDate())}` +
-        `T${p(utc.getUTCHours())}:${p(utc.getUTCMinutes())}:${p(utc.getUTCSeconds())}`);
+    return (`${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
+        `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`);
 }
 function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks) {
     const lines = [];
