@@ -1422,7 +1422,8 @@ async function getDueReminders(): Promise<ReminderRow[]> {
         filter: {
           and: [
             { property: "Enviado", checkbox: { equals: false } },
-            { property: "Quando", date: { on_or_before: now } },
+            { property: "Feito",   checkbox: { equals: false } },
+            { property: "Quando",  date: { on_or_before: now } },
           ],
         },
         start_cursor: cursor,
@@ -1448,6 +1449,7 @@ async function getDueReminders(): Promise<ReminderRow[]> {
         quando: readDateStart(props["Quando"]) ?? "",
         origem: readPlainText(props["Origem"]),
         enviado: readCheckbox(props["Enviado"]),
+        feito: readCheckbox(props["Feito"]),
         recurrence,
       });
     }
@@ -1472,6 +1474,32 @@ async function markReminderSent(id: string): Promise<void> {
     }),
   );
   log.info("notion.reminder_marked_sent", { id });
+}
+
+async function cancelReminder(text: string): Promise<string | null> {
+  if (!NOTION_REMINDERS_DB_ID) return null;
+  const res = await withRetry("cancelReminder", () =>
+    client.databases.query({
+      database_id: NOTION_REMINDERS_DB_ID,
+      filter: {
+        and: [
+          { property: "Reminder", title: { contains: text } },
+          { property: "Enviado",  checkbox: { equals: false } },
+          { property: "Feito",    checkbox: { equals: false } },
+        ],
+      },
+      page_size: 1,
+    }),
+  );
+  const row = res.results[0];
+  if (!row || !("properties" in row)) return null;
+  const props = row.properties as Record<string, unknown>;
+  const title = readPlainText(props["Reminder"]);
+  await withRetry("cancelReminder.archive", () =>
+    client.pages.update({ page_id: row.id, archived: true }),
+  );
+  log.info("notion.reminder_cancelled", { id: row.id, text: title });
+  return title;
 }
 
 // ============================================================
@@ -2266,6 +2294,7 @@ export {
   createReminder,
   getDueReminders,
   markReminderSent,
+  cancelReminder,
   // Phase 5
   createToDiscuss,
   getToDiscussPending,
@@ -2324,6 +2353,7 @@ export const notion = {
   createReminder,
   getDueReminders,
   markReminderSent,
+  cancelReminder,
   // Phase 5
   createToDiscuss,
   getToDiscussPending,

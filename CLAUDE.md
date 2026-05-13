@@ -14,8 +14,9 @@ npm run dev         # node --watch dist/server.js (requires prior build)
 
 Deploy (NAS Synology 192.168.1.11):
 ```bash
-git pull && sudo docker build -t haven-va . && docker compose up -d
+git pull && sudo docker compose build --no-cache && sudo docker compose up -d
 ```
+Note: compose uses `build: .` without `image:`, so the image is named `haven-va-haven-va` — always use `docker compose build`, never `docker build -t haven-va .`.
 
 Setup scripts (one-shot, idempotent):
 ```bash

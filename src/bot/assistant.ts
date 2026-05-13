@@ -104,6 +104,17 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "cancel_reminder",
+    description: "Cancela um lembrete pendente — arquiva-o para que não dispare",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Texto (ou parte) do lembrete a cancelar" },
+      },
+      required: ["text"],
+    },
+  },
+  {
     name: "log_decision",
     description: "Regista uma decisão no Notion",
     input_schema: {
@@ -560,6 +571,25 @@ async function execCreateReminder(
   return "ok";
 }
 
+async function execCancelReminder(
+  input: Record<string, unknown>,
+  ctx: Context,
+  collector: string[],
+): Promise<string> {
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) return "texto em falta";
+  const title = await notion.cancelReminder(text);
+  if (!title) {
+    const msg = `não encontrei nenhum lembrete pendente com "${text}"`;
+    await ctx.reply(msg);
+    return msg;
+  }
+  const reply = `🗑️ lembrete cancelado: "${title}"`;
+  collector.push(reply);
+  await ctx.reply(reply);
+  return "ok";
+}
+
 async function execLogDecision(
   input: Record<string, unknown>,
   sender: FounderName,
@@ -920,6 +950,8 @@ async function dispatchTool(
       return await execCreateTask(input, sender, ctx, collector);
     case "create_reminder":
       return await execCreateReminder(input, sender, ctx, collector);
+    case "cancel_reminder":
+      return await execCancelReminder(input, ctx, collector);
     case "log_decision":
       return await execLogDecision(input, sender, ctx, collector);
     case "add_to_discuss":

@@ -48,7 +48,7 @@ export async function run() {
         }
         try {
             await notion.markReminderSent(r.id);
-            if (r.recurrence) {
+            if (r.recurrence && !r.feito) {
                 const nextWhen = nextOccurrence(r.quando, r.recurrence);
                 await notion.createReminder({
                     texto: r.texto,

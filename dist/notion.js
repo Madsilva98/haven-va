@@ -1165,6 +1165,7 @@ async function getDueReminders() {
             filter: {
                 and: [
                     { property: "Enviado", checkbox: { equals: false } },
+                    { property: "Feito", checkbox: { equals: false } },
                     { property: "Quando", date: { on_or_before: now } },
                 ],
             },
@@ -1189,6 +1190,7 @@ async function getDueReminders() {
                 quando: readDateStart(props["Quando"]) ?? "",
                 origem: readPlainText(props["Origem"]),
                 enviado: readCheckbox(props["Enviado"]),
+                feito: readCheckbox(props["Feito"]),
                 recurrence,
             });
         }
@@ -1208,6 +1210,29 @@ async function markReminderSent(id) {
         },
     }));
     log.info("notion.reminder_marked_sent", { id });
+}
+async function cancelReminder(text) {
+    if (!NOTION_REMINDERS_DB_ID)
+        return null;
+    const res = await withRetry("cancelReminder", () => client.databases.query({
+        database_id: NOTION_REMINDERS_DB_ID,
+        filter: {
+            and: [
+                { property: "Reminder", title: { contains: text } },
+                { property: "Enviado", checkbox: { equals: false } },
+                { property: "Feito", checkbox: { equals: false } },
+            ],
+        },
+        page_size: 1,
+    }));
+    const row = res.results[0];
+    if (!row || !("properties" in row))
+        return null;
+    const props = row.properties;
+    const title = readPlainText(props["Reminder"]);
+    await withRetry("cancelReminder.archive", () => client.pages.update({ page_id: row.id, archived: true }));
+    log.info("notion.reminder_cancelled", { id: row.id, text: title });
+    return title;
 }
 // ============================================================
 // Phase 5 — To Discuss / Decisions
@@ -1840,7 +1865,7 @@ export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archive
 // Phase 2
 getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getCompletedSince, getOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
 // Phase 3
-getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createContentCalendarEntry, createReminder, getDueReminders, markReminderSent, 
+getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createContentCalendarEntry, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Phase 1 redesign — Studio Log
@@ -1882,6 +1907,7 @@ export const notion = {
     createReminder,
     getDueReminders,
     markReminderSent,
+    cancelReminder,
     // Phase 5
     createToDiscuss,
     getToDiscussPending,

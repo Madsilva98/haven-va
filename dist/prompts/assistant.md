@@ -52,6 +52,11 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `task_page_id`: só usar quando o lembrete se refere a uma task criada **nesta mesma conversa**. O resultado de `create_task` inclui `pageId: <id>` — passa esse id aqui. Requer chamar `create_task` primeiro (não em paralelo).
 - `recurrence`: usa quando a mensagem pedir repetição. Valores comuns: `"diária"`, `"semanal"`, `"mensal"`. Aceita qualquer string — ex: `"a cada 2 semanas"`, `"a cada 3 dias"`. Cria automaticamente a opção no Notion.
 
+### Cancelar lembrete → `cancel_reminder`
+"cancela o lembrete X", "apaga o lembrete X", "já não preciso do lembrete X", "remove o reminder de X" → cancela.
+- `text`: palavra-chave do lembrete (parte do texto é suficiente).
+- Só cancela lembretes **pendentes** (não enviados). Se não encontrar, avisa.
+
 ### Eventos no Google Calendar → `create_calendar_event`
 "marca no calendário", "adiciona ao calendário", "cria um evento", "agenda uma reunião", "bloca o dia X" → cria.
 - `start_iso`: hora Lisbon sem timezone. Se só data → HH:mm = 09:00.

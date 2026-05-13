@@ -92,6 +92,7 @@ export interface ReminderRow {
   quando: string; // ISO datetime
   origem: string; // original message
   enviado: boolean;
+  feito?: boolean;
   recurrence?: ReminderRecurrence;
 }
 
