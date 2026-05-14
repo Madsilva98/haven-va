@@ -2117,25 +2117,46 @@ async function addToList(
 
 async function checkListItem(itemTitle: string, lista: string): Promise<string | null> {
   if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
-  const res = await withRetry("checkListItem.query", () =>
-    client.databases.query({
-      database_id: NOTION_LISTS_DB_ID!,
-      filter: {
-        and: [
-          { property: "Lista", select: { equals: lista } },
-          { property: "Fechada", checkbox: { equals: false } },
-        ],
-      },
-      page_size: 50,
-    }),
-  );
+
+  type Row = { id: string; properties: Record<string, unknown> };
+  let rows: Row[];
+
+  try {
+    const res = await withRetry("checkListItem.query", () =>
+      client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        filter: {
+          and: [
+            { property: "Lista", select: { equals: lista } },
+            { property: "Fechada", checkbox: { equals: false } },
+          ],
+        },
+        page_size: 50,
+      }),
+    );
+    rows = res.results as Row[];
+  } catch {
+    // select option not found (400 validation_error) — fetch all open items and match lista in JS
+    const res = await withRetry("checkListItem.queryAll", () =>
+      client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        filter: { property: "Fechada", checkbox: { equals: false } },
+        page_size: 100,
+      }),
+    );
+    const listaQ = lista.toLowerCase();
+    rows = (res.results as Row[]).filter((row) => {
+      const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
+      return val.includes(listaQ) || listaQ.includes(val);
+    });
+  }
 
   // Best title match
   let bestId: string | null = null;
   let bestScore = 0;
   const q = itemTitle.toLowerCase();
-  for (const row of res.results) {
-    const props = (row as { id: string; properties: Record<string, unknown> }).properties;
+  for (const row of rows) {
+    const props = row.properties;
     const title = readPlainText(props["Item"]).toLowerCase();
     const exact = title === q ? 1 : 0;
     const includes = title.includes(q) || q.includes(title) ? 0.8 : 0;
@@ -2156,6 +2177,69 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
     client.pages.update({ page_id: bestId!, properties: { Fechada: { checkbox: true } } }),
   );
   log.info("notion.list_item_checked", { itemTitle, lista, pageId: bestId });
+  return bestId;
+}
+
+async function deleteListItem(itemTitle: string, lista: string): Promise<string | null> {
+  if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
+
+  type Row = { id: string; properties: Record<string, unknown> };
+  let rows: Row[];
+
+  try {
+    const res = await withRetry("deleteListItem.query", () =>
+      client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        filter: {
+          and: [
+            { property: "Lista", select: { equals: lista } },
+            { property: "Fechada", checkbox: { equals: false } },
+          ],
+        },
+        page_size: 50,
+      }),
+    );
+    rows = res.results as Row[];
+  } catch {
+    const res = await withRetry("deleteListItem.queryAll", () =>
+      client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        filter: { property: "Fechada", checkbox: { equals: false } },
+        page_size: 100,
+      }),
+    );
+    const listaQ = lista.toLowerCase();
+    rows = (res.results as Row[]).filter((row) => {
+      const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
+      return val.includes(listaQ) || listaQ.includes(val);
+    });
+  }
+
+  let bestId: string | null = null;
+  let bestScore = 0;
+  const q = itemTitle.toLowerCase();
+  for (const row of rows) {
+    const props = row.properties;
+    const title = readPlainText(props["Item"]).toLowerCase();
+    const exact = title === q ? 1 : 0;
+    const includes = title.includes(q) || q.includes(title) ? 0.8 : 0;
+    const wa = (() => {
+      const wa2 = new Set(q.split(/\s+/).filter(Boolean));
+      const wb = new Set(title.split(/\s+/).filter(Boolean));
+      if (!wa2.size || !wb.size) return 0;
+      let overlap = 0;
+      for (const w of wa2) if (wb.has(w)) overlap++;
+      return overlap / Math.max(wa2.size, wb.size);
+    })();
+    const score = exact || includes || wa;
+    if (score > bestScore) { bestScore = score; bestId = row.id; }
+  }
+  if (!bestId || bestScore === 0) return null;
+
+  await withRetry("deleteListItem.archive", () =>
+    client.pages.update({ page_id: bestId!, archived: true }),
+  );
+  log.info("notion.list_item_deleted", { itemTitle, lista, pageId: bestId });
   return bestId;
 }
 
@@ -2316,6 +2400,7 @@ export {
   // Lists
   addToList,
   checkListItem,
+  deleteListItem,
   getList,
   // Generic record update
   updateRecord,
@@ -2375,6 +2460,7 @@ export const notion = {
   // Lists
   addToList,
   checkListItem,
+  deleteListItem,
   getList,
   // Generic record update
   updateRecord,
