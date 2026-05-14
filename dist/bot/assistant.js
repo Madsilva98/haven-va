@@ -386,7 +386,7 @@ function lisbonLocalToUtc(lisbonNaive) {
     return (`${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
         `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}Z`);
 }
-function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars) {
+function buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars, availableLists) {
     const lines = [];
     const now = new Date();
     const today = now.toLocaleDateString("pt-PT", {
@@ -437,6 +437,10 @@ function buildUserMessage(sender, text, recentMessages, repliedToText, contentCa
     }
     if (availableCalendars && availableCalendars.length > 0) {
         lines.push(`Calendários Google disponíveis: ${availableCalendars.map((c) => c.summary).join(", ")}`);
+        lines.push("");
+    }
+    if (availableLists && availableLists.length > 0) {
+        lines.push(`Listas disponíveis: ${availableLists.join(", ")}`);
         lines.push("");
     }
     lines.push(`${sender}: ${text}`);
@@ -886,10 +890,11 @@ export async function handleAssistant(ctx, sender, text, recentMessages, replied
     const availableCalendars = calendar.isAuthenticated()
         ? await calendar.listAllCalendars().catch(() => [])
         : [];
+    const availableLists = await notion.getListNames().catch(() => []);
     const messages = [
         {
             role: "user",
-            content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars),
+            content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars, availableLists),
         },
     ];
     const MAX_ITERATIONS = 5;

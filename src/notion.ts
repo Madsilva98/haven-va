@@ -2115,6 +2115,36 @@ async function addToList(
   return page.id;
 }
 
+function matchesListName(val: string, q: string): boolean {
+  if (val === q || val.includes(q) || q.includes(val)) return true;
+  const minLen = Math.min(val.length, q.length);
+  if (minLen >= 4) {
+    let i = 0;
+    while (i < minLen && val[i] === q[i]) i++;
+    if (i >= 4) return true;
+  }
+  return false;
+}
+
+let _listNamesCache: { names: string[]; ts: number } | null = null;
+
+async function getListNames(): Promise<string[]> {
+  if (!NOTION_LISTS_DB_ID) return [];
+  const now = Date.now();
+  if (_listNamesCache && now - _listNamesCache.ts < 24 * 60 * 60 * 1000) return _listNamesCache.names;
+  try {
+    const db = await client.databases.retrieve({ database_id: NOTION_LISTS_DB_ID });
+    const listaProp = (db.properties as Record<string, unknown>)["Lista"] as
+      | { select?: { options?: { name: string }[] } }
+      | undefined;
+    const names = listaProp?.select?.options?.map((o) => o.name) ?? [];
+    _listNamesCache = { names, ts: now };
+    return names;
+  } catch {
+    return [];
+  }
+}
+
 async function checkListItem(itemTitle: string, lista: string): Promise<string | null> {
   if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
 
@@ -2145,7 +2175,7 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
     const listaQ = lista.toLowerCase();
     rows = (res.results as Row[]).filter((row) => {
       const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-      return val.includes(listaQ) || listaQ.includes(val);
+      return matchesListName(val, listaQ);
     });
   }
 
@@ -2207,7 +2237,7 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
     const listaQ = lista.toLowerCase();
     rows = (res.results as Row[]).filter((row) => {
       const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-      return val.includes(listaQ) || listaQ.includes(val);
+      return matchesListName(val, listaQ);
     });
   }
 
@@ -2266,7 +2296,7 @@ async function getList(lista?: string): Promise<ListItem[]> {
       const q = lista.toLowerCase();
       rows = (res.results as Row[]).filter((row) => {
         const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-        return val.includes(q) || q.includes(val);
+        return matchesListName(val, q);
       });
     }
   } else {
@@ -2439,6 +2469,7 @@ export {
   checkListItem,
   deleteListItem,
   getList,
+  getListNames,
   // Generic record update
   updateRecord,
   findBacklogTask,
@@ -2499,6 +2530,7 @@ export const notion = {
   checkListItem,
   deleteListItem,
   getList,
+  getListNames,
   // Generic record update
   updateRecord,
   findBacklogTask,

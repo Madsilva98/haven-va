@@ -1729,6 +1729,37 @@ async function addToList(item, lista, adicionadoPor, originalMsg) {
     log.info("notion.list_item_added", { item, lista, adicionadoPor });
     return page.id;
 }
+function matchesListName(val, q) {
+    if (val === q || val.includes(q) || q.includes(val))
+        return true;
+    const minLen = Math.min(val.length, q.length);
+    if (minLen >= 4) {
+        let i = 0;
+        while (i < minLen && val[i] === q[i])
+            i++;
+        if (i >= 4)
+            return true;
+    }
+    return false;
+}
+let _listNamesCache = null;
+async function getListNames() {
+    if (!NOTION_LISTS_DB_ID)
+        return [];
+    const now = Date.now();
+    if (_listNamesCache && now - _listNamesCache.ts < 24 * 60 * 60 * 1000)
+        return _listNamesCache.names;
+    try {
+        const db = await client.databases.retrieve({ database_id: NOTION_LISTS_DB_ID });
+        const listaProp = db.properties["Lista"];
+        const names = listaProp?.select?.options?.map((o) => o.name) ?? [];
+        _listNamesCache = { names, ts: now };
+        return names;
+    }
+    catch {
+        return [];
+    }
+}
 async function checkListItem(itemTitle, lista) {
     if (!NOTION_LISTS_DB_ID)
         throw new Error("NOTION_LISTS_DB_ID not set");
@@ -1756,7 +1787,7 @@ async function checkListItem(itemTitle, lista) {
         const listaQ = lista.toLowerCase();
         rows = res.results.filter((row) => {
             const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-            return val.includes(listaQ) || listaQ.includes(val);
+            return matchesListName(val, listaQ);
         });
     }
     // Best title match
@@ -1817,7 +1848,7 @@ async function deleteListItem(itemTitle, lista) {
         const listaQ = lista.toLowerCase();
         rows = res.results.filter((row) => {
             const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-            return val.includes(listaQ) || listaQ.includes(val);
+            return matchesListName(val, listaQ);
         });
     }
     let bestId = null;
@@ -1875,7 +1906,7 @@ async function getList(lista) {
             const q = lista.toLowerCase();
             rows = res.results.filter((row) => {
                 const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
-                return val.includes(q) || q.includes(val);
+                return matchesListName(val, q);
             });
         }
     }
@@ -1991,7 +2022,7 @@ createProject, createEvent, createPartner, createInfluencer,
 // Feature E — entity lookup
 findEntityByName, 
 // Lists
-addToList, checkListItem, deleteListItem, getList, 
+addToList, checkListItem, deleteListItem, getList, getListNames, 
 // Generic record update
 updateRecord, findBacklogTask, searchRecords, 
 // Page section editing
@@ -2045,6 +2076,7 @@ export const notion = {
     checkListItem,
     deleteListItem,
     getList,
+    getListNames,
     // Generic record update
     updateRecord,
     findBacklogTask,
