@@ -2122,18 +2122,16 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
   let rows: Row[];
 
   try {
-    const res = await withRetry("checkListItem.query", () =>
-      client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
-        filter: {
-          and: [
-            { property: "Lista", select: { equals: lista } },
-            { property: "Fechada", checkbox: { equals: false } },
-          ],
-        },
-        page_size: 50,
-      }),
-    );
+    const res = await client.databases.query({
+      database_id: NOTION_LISTS_DB_ID!,
+      filter: {
+        and: [
+          { property: "Lista", select: { equals: lista } },
+          { property: "Fechada", checkbox: { equals: false } },
+        ],
+      },
+      page_size: 50,
+    });
     rows = res.results as Row[];
   } catch {
     // select option not found (400 validation_error) — fetch all open items and match lista in JS
@@ -2187,18 +2185,16 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
   let rows: Row[];
 
   try {
-    const res = await withRetry("deleteListItem.query", () =>
-      client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
-        filter: {
-          and: [
-            { property: "Lista", select: { equals: lista } },
-            { property: "Fechada", checkbox: { equals: false } },
-          ],
-        },
-        page_size: 50,
-      }),
-    );
+    const res = await client.databases.query({
+      database_id: NOTION_LISTS_DB_ID!,
+      filter: {
+        and: [
+          { property: "Lista", select: { equals: lista } },
+          { property: "Fechada", checkbox: { equals: false } },
+        ],
+      },
+      page_size: 50,
+    });
     rows = res.results as Row[];
   } catch {
     const res = await withRetry("deleteListItem.queryAll", () =>
@@ -2251,14 +2247,12 @@ async function getList(lista?: string): Promise<ListItem[]> {
 
   if (lista) {
     try {
-      const res = await withRetry("getList", () =>
-        client.databases.query({
-          database_id: NOTION_LISTS_DB_ID!,
-          filter: { property: "Lista", select: { equals: lista } },
-          sorts: [{ timestamp: "created_time", direction: "ascending" }],
-          page_size: 100,
-        }),
-      );
+      const res = await client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        filter: { property: "Lista", select: { equals: lista } },
+        sorts: [{ timestamp: "created_time", direction: "ascending" }],
+        page_size: 100,
+      });
       rows = res.results as Row[];
     } catch {
       // select option not found — fetch all and filter in JS
@@ -2334,13 +2328,11 @@ async function getEntitiesForOwner(
   });
 
   try {
-    const res = await withRetry(`getEntitiesForOwner.${dbKey}`, () =>
-      client.databases.query({
-        database_id: dbId,
-        filter: ownerFilter as Parameters<typeof client.databases.query>[0]["filter"],
-        page_size: 20,
-      }),
-    );
+    const res = await client.databases.query({
+      database_id: dbId,
+      filter: ownerFilter as Parameters<typeof client.databases.query>[0]["filter"],
+      page_size: 20,
+    });
     return res.results
       .filter((r) => "properties" in r)
       .map((r) => mapRow({ id: r.id, properties: (r as { properties: Record<string, unknown> }).properties }));

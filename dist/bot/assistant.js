@@ -748,6 +748,7 @@ async function execCreateCalendarEvent(input, ctx, collector) {
     }
     const startUtc = lisbonLocalToUtc(startRaw);
     const startDate = new Date(startUtc);
+    log.info("assistant.calendar_event_times", { startRaw, startUtc, startIso: startDate.toISOString() });
     if (Number.isNaN(startDate.getTime()))
         return "data de início inválida";
     let endDate;

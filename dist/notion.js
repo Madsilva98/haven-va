@@ -1734,7 +1734,7 @@ async function checkListItem(itemTitle, lista) {
         throw new Error("NOTION_LISTS_DB_ID not set");
     let rows;
     try {
-        const res = await withRetry("checkListItem.query", () => client.databases.query({
+        const res = await client.databases.query({
             database_id: NOTION_LISTS_DB_ID,
             filter: {
                 and: [
@@ -1743,7 +1743,7 @@ async function checkListItem(itemTitle, lista) {
                 ],
             },
             page_size: 50,
-        }));
+        });
         rows = res.results;
     }
     catch {
@@ -1796,7 +1796,7 @@ async function deleteListItem(itemTitle, lista) {
         throw new Error("NOTION_LISTS_DB_ID not set");
     let rows;
     try {
-        const res = await withRetry("deleteListItem.query", () => client.databases.query({
+        const res = await client.databases.query({
             database_id: NOTION_LISTS_DB_ID,
             filter: {
                 and: [
@@ -1805,7 +1805,7 @@ async function deleteListItem(itemTitle, lista) {
                 ],
             },
             page_size: 50,
-        }));
+        });
         rows = res.results;
     }
     catch {
@@ -1857,12 +1857,12 @@ async function getList(lista) {
     let rows;
     if (lista) {
         try {
-            const res = await withRetry("getList", () => client.databases.query({
+            const res = await client.databases.query({
                 database_id: NOTION_LISTS_DB_ID,
                 filter: { property: "Lista", select: { equals: lista } },
                 sorts: [{ timestamp: "created_time", direction: "ascending" }],
                 page_size: 100,
-            }));
+            });
             rows = res.results;
         }
         catch {
@@ -1919,11 +1919,11 @@ async function getEntitiesForOwner(dbKey, owner) {
         status: readSelectName(r.properties["Status"]) ?? null,
     });
     try {
-        const res = await withRetry(`getEntitiesForOwner.${dbKey}`, () => client.databases.query({
+        const res = await client.databases.query({
             database_id: dbId,
             filter: ownerFilter,
             page_size: 20,
-        }));
+        });
         return res.results
             .filter((r) => "properties" in r)
             .map((r) => mapRow({ id: r.id, properties: r.properties }));
