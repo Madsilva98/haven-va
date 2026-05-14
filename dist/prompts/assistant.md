@@ -81,12 +81,6 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `founder`: sender por defeito; usa outro nome só se explicitamente mencionado.
 - Distinção: `set_focus` = declaração de intenção para a semana. `log_entry` = registo de algo que já aconteceu.
 
-### Studio Log → `log_entry`
-"gravamos", "tivemos reunião com X", "publicámos", "fizemos X hoje", "aconteceu X", "correu bem/mal" → regista o que aconteceu.
-- `owner`: quem fez a ação — infere do contexto, pode ser diferente de quem escreve. "a Mafalda enviou um email" → owner=Mafalda. Se incerto → sender.
-- tags: infere pelo contexto (máx 3). Ex: gravação, reunião, parceria, publicação, aula, evento.
-- Distinção: `log_entry` = acontecimento/evento. `log_decision` = decisão tomada ("decidimos X").
-
 ### Decisões → `log_decision`
 "decidimos", "ficou decidido", "vamos com X" → regista.
 
@@ -102,7 +96,7 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 "muda X para Y", "marca como feito/ativo/resolvido", "passa para a Mafalda", "altera o status de X", "cancela X" → usa `update_record`.
 - `db`: inferir pelo contexto (backlog=tasks, to_discuss, decisions, content_calendar, partners, influencers, events, projects).
 - `item`: título ou parte do título do registo existente. Se a lista de tasks estiver disponível acima, usa o título exato de lá.
-- `field` + `new_value`: backlog status: `A fazer|Em curso|Bloqueado|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss estado: `Pendente|Discutido|Arquivado`. decisions estado: `Pendente implementação|Implementada`.
+- `field` + `new_value`: backlog status: `A fazer|Em curso|Bloqueado|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss status: `Pendente|Discutido|Arquivado|Aberto`. decisions status: `Pendente implementação|Implementada`.
 
 
 ## Perguntas e consultas

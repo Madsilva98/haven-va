@@ -147,27 +147,6 @@ const TOOLS = [
         },
     },
     {
-        name: "log_entry",
-        description: "Regista um acontecimento no Studio Log (eventos, reuniões, gravações, publicações — o que aconteceu, não decisões)",
-        input_schema: {
-            type: "object",
-            properties: {
-                text: { type: "string", description: "Descrição do acontecimento, pt-PT, <150 chars" },
-                owner: {
-                    type: "string",
-                    enum: ["Madalena", "Mafalda", "Beatriz"],
-                    description: "Quem fez a ação. Inferir do contexto — pode ser diferente de quem escreveu a mensagem. Ex: 'a Mafalda enviou um email' → owner=Mafalda.",
-                },
-                tags: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Tags relevantes, máx 3. Ex: gravação, reunião, parceria, publicação, aula, evento",
-                },
-            },
-            required: ["text"],
-        },
-    },
-    {
         name: "create_content_calendar_entry",
         description: "Adiciona uma entrada ao Content Calendar (Social Media Calendar). NUNCA usar add_to_list para conteúdo social.",
         input_schema: {
@@ -236,8 +215,8 @@ const TOOLS = [
                     type: "string",
                     description: "Campo a editar. " +
                         "backlog: status|owner|deadline|prioridade|area|title. " +
-                        "to_discuss: urgencia|estado|area|resolucao. " +
-                        "decisions: estado|area|notas. " +
+                        "to_discuss: urgencia|status|area|resolucao. " +
+                        "decisions: status|area|notas. " +
                         "content_calendar: status|publish_date|ad_type. " +
                         "partners|influencers: status|owner. " +
                         "events|projects: status|owner.",
@@ -249,8 +228,8 @@ const TOOLS = [
                         "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
                         "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
                         "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
-                        "to_discuss estado: Pendente|Discutido|Arquivado. " +
-                        "decisions estado: Pendente implementação|Implementada. " +
+                        "to_discuss status: Pendente|Discutido|Arquivado|Aberto. " +
+                        "decisions status: Pendente implementação|Implementada. " +
                         "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
                         "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
                         "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
@@ -585,20 +564,6 @@ async function execSetFocus(input, sender, ctx, collector) {
     await ctx.reply(focusReply);
     return "ok";
 }
-async function execLogEntry(input, sender, ctx, collector) {
-    const text = typeof input.text === "string" ? input.text.trim().slice(0, 150) : "";
-    if (!text)
-        return "parâmetros em falta";
-    const owner = FOUNDERS.includes(input.owner) ? input.owner : sender;
-    const tags = Array.isArray(input.tags)
-        ? input.tags.filter((t) => typeof t === "string").map((t) => t.trim()).slice(0, 3)
-        : [];
-    await notion.createLogEntry({ text, author: owner, tags, originalMessage: ctx.message?.text ?? "" });
-    const logReply = `📓 registado: "${text}"`;
-    collector.push(logReply);
-    await ctx.reply(logReply);
-    return "ok";
-}
 async function execAddToList(input, sender, ctx, collector) {
     const item = typeof input.item === "string" ? input.item.trim() : "";
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
@@ -847,8 +812,6 @@ async function dispatchTool(name, input, sender, ctx, collector) {
             return await execAddToDiscuss(input, sender, ctx, collector);
         case "set_focus":
             return await execSetFocus(input, sender, ctx, collector);
-        case "log_entry":
-            return await execLogEntry(input, sender, ctx, collector);
         case "add_to_list":
             return await execAddToList(input, sender, ctx, collector);
         case "create_content_calendar_entry":

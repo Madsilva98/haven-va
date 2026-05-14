@@ -24,7 +24,6 @@ const NOTION_REMINDERS_DB_ID = process.env.NOTION_REMINDERS_DB_ID;
 const NOTION_TO_DISCUSS_DB_ID = process.env.NOTION_TO_DISCUSS_DB_ID;
 const NOTION_DECISIONS_DB_ID = process.env.NOTION_DECISIONS_DB_ID;
 const NOTION_CONTENT_CALENDAR_DB_ID = process.env.NOTION_CONTENT_CALENDAR_DB_ID;
-const NOTION_STUDIO_LOG_DB_ID = process.env.NOTION_STUDIO_LOG_DB_ID;
 const NOTION_PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
@@ -217,7 +216,7 @@ function buildEditPatch(field, newValue) {
     const property = FIELD_TO_PROPERTY[field];
     switch (field) {
         case "status":
-            return { [property]: { select: { name: newValue } } };
+            return { [property]: { status: { name: newValue } } };
         case "owner":
             return { [property]: { select: { name: newValue } } };
         case "prioridade":
@@ -276,7 +275,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
         Owner: { select: { name: extraction.owner } },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
-        Status: { select: { name: "A fazer" } },
+        Status: { status: { name: "A fazer" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
@@ -315,7 +314,7 @@ const RECORD_DB_CONFIGS = {
         titleProp: "Tema",
         fields: {
             urgencia: { notionProp: "Urgência", type: "select" },
-            estado: { notionProp: "Estado", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             area: { notionProp: "Área", type: "select" },
             resolucao: { notionProp: "Resolução", type: "rich_text" },
         },
@@ -324,7 +323,7 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_DECISIONS_DB_ID,
         titleProp: "Decisão",
         fields: {
-            estado: { notionProp: "Estado", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             area: { notionProp: "Área", type: "select" },
             notas: { notionProp: "Notas", type: "rich_text" },
         },
@@ -342,7 +341,7 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_PARTNER_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             owner: { notionProp: "Owner", type: "select" },
         },
     },
@@ -350,7 +349,7 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_INFLUENCER_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             owner: { notionProp: "Owner", type: "select" },
         },
     },
@@ -358,7 +357,7 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_EVENT_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             owner: { notionProp: "Owner", type: "multi_select" },
         },
     },
@@ -366,7 +365,7 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_PROJECTS_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "select" },
+            status: { notionProp: "Status", type: "status" },
             owner: { notionProp: "Owner", type: "multi_select" },
         },
     },
@@ -542,7 +541,7 @@ async function searchRecords(db, query) {
             id: row.id,
             title: readPlainText(row.properties["Título"]),
             owner: readSelectName(row.properties["Owner"]) ?? "Unassigned",
-            status: readSelectName(row.properties["Status"]) ?? "To do",
+            status: readStatusName(row.properties["Status"]) ?? "To do",
             area: readSelectName(row.properties["Área"]) ?? undefined,
             priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
             deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
@@ -556,9 +555,9 @@ async function searchRecords(db, query) {
         return [];
     return searchRecordsInDb(dbId, config.titleProp, query, (row) => {
         const title = readPlainText(row.properties[config.titleProp]);
-        const statusFieldConf = Object.values(config.fields).find((f) => f.notionProp === "Status" || f.notionProp === "Estado");
+        const statusFieldConf = Object.values(config.fields).find((f) => f.notionProp === "Status" || f.notionProp === "status");
         const status = statusFieldConf
-            ? (readSelectName(row.properties[statusFieldConf.notionProp]) ?? undefined)
+            ? (readStatusName(row.properties[statusFieldConf.notionProp]) ?? readSelectName(row.properties[statusFieldConf.notionProp]) ?? undefined)
             : undefined;
         return { id: row.id, title, status };
     }, db);
@@ -620,8 +619,8 @@ async function getOpenTasks() {
             database_id: NOTION_BACKLOG_DB_ID,
             filter: {
                 and: [
-                    { property: "Status", select: { does_not_equal: "Feito" } },
-                    { property: "Status", select: { does_not_equal: "Cancelado" } },
+                    { property: "Status", status: { does_not_equal: "Feito" } },
+                    { property: "Status", status: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -638,7 +637,7 @@ async function getOpenTasks() {
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
-            const statusName = readSelectName(props["Status"]) ?? "A fazer";
+            const statusName = readStatusName(props["Status"]) ?? "A fazer";
             const status = statusName;
             tasks.push({
                 id: row.id,
@@ -669,7 +668,7 @@ function rowToOpenTask(row) {
         ? priorityName
         : null;
     const deadline = readDateStart(props["Deadline"]);
-    const statusName = readSelectName(props["Status"]) ?? "To do";
+    const statusName = readStatusName(props["Status"]) ?? "To do";
     return {
         id: row.id,
         title,
@@ -699,8 +698,8 @@ async function getWeeklyPriorities(week) {
             filter: {
                 and: [
                     { property: "Prioridade semanal", checkbox: { equals: true } },
-                    { property: "Status", select: { does_not_equal: "Feito" } },
-                    { property: "Status", select: { does_not_equal: "Cancelado" } },
+                    { property: "Status", status: { does_not_equal: "Feito" } },
+                    { property: "Status", status: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -743,7 +742,7 @@ async function getCompletedSince(date) {
             database_id: NOTION_BACKLOG_DB_ID,
             filter: {
                 and: [
-                    { property: "Status", select: { equals: "Feito" } },
+                    { property: "Status", status: { equals: "Feito" } },
                     {
                         timestamp: "last_edited_time",
                         last_edited_time: { on_or_after: date },
@@ -779,8 +778,8 @@ async function getOverdueTasks() {
             filter: {
                 and: [
                     { property: "Deadline", date: { before: today } },
-                    { property: "Status", select: { does_not_equal: "Feito" } },
-                    { property: "Status", select: { does_not_equal: "Cancelado" } },
+                    { property: "Status", status: { does_not_equal: "Feito" } },
+                    { property: "Status", status: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -865,11 +864,11 @@ async function getPartnersStale(category) {
     const statusFilter = category === "no_response"
         ? {
             or: [
-                { property: "Status", select: { equals: "Contactado" } },
-                { property: "Status", select: { equals: "A aguardar resposta" } },
+                { property: "Status", status: { equals: "Contactado" } },
+                { property: "Status", status: { equals: "A aguardar resposta" } },
             ],
         }
-        : { property: "Status", select: { equals: "Em negociação" } };
+        : { property: "Status", status: { equals: "Em negociação" } };
     const rows = [];
     let cursor;
     do {
@@ -888,7 +887,7 @@ async function getPartnersStale(category) {
                 continue;
             const props = row.properties;
             const cat = readSelectName(props["Categoria"]);
-            const status = readSelectName(props["Status"]);
+            const status = readStatusName(props["Status"]);
             rows.push({
                 id: row.id,
                 nome: readPlainText(props["Name"]),
@@ -917,8 +916,8 @@ async function getInfluencersStale(category) {
     // Influencer does not have a literal "A aguardar resposta" status; map
     // "no_response" → Contactado (no reply), "no_progress" → Em conversa stalled.
     const statusFilter = category === "no_response"
-        ? { property: "Status", select: { equals: "Contactado" } }
-        : { property: "Status", select: { equals: "Em conversa" } };
+        ? { property: "Status", status: { equals: "Contactado" } }
+        : { property: "Status", status: { equals: "Em conversa" } };
     const rows = [];
     let cursor;
     do {
@@ -936,7 +935,7 @@ async function getInfluencersStale(category) {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            const status = readSelectName(props["Status"]);
+            const status = readStatusName(props["Status"]);
             rows.push({
                 id: row.id,
                 nome: readPlainText(props["Name"]),
@@ -1099,27 +1098,6 @@ async function createContentCalendarEntry(params) {
     log.info("notion.content_calendar_entry_created", { title: params.title });
     return page.id;
 }
-// ── Studio Log (Phase 1 redesign) ────────────────────────────────────────────
-async function createLogEntry(params) {
-    if (!NOTION_STUDIO_LOG_DB_ID) {
-        throw new Error("NOTION_STUDIO_LOG_DB_ID not set — Studio Log features disabled");
-    }
-    const properties = {
-        Nome: { title: [{ text: { content: params.text } }] },
-        Data: { date: { start: new Date().toISOString() } },
-        Owner: { multi_select: [{ name: params.author }] },
-        Tags: {
-            multi_select: params.tags.slice(0, 3).map((name) => ({ name })),
-        },
-        Origem: richText(params.originalMessage),
-    };
-    const page = await withRetry("createLogEntry", () => client.pages.create({
-        parent: { database_id: NOTION_STUDIO_LOG_DB_ID },
-        properties: properties,
-    }));
-    log.info("notion.log_entry_created", { id: page.id, author: params.author });
-    return page.id;
-}
 async function createReminder(r, taskPageId) {
     if (!NOTION_REMINDERS_DB_ID) {
         throw new Error("NOTION_REMINDERS_DB_ID not set — Phase 3 reminder features disabled");
@@ -1247,7 +1225,7 @@ async function createToDiscuss(item, originalMsg, entityRef) {
         "Adicionado por": { select: { name: item.adicionadoPor } },
         Urgência: { select: { name: item.urgencia } },
         Área: { select: { name: item.area } },
-        Estado: { select: { name: "Pendente" } },
+        Status: { status: { name: "Pendente" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
@@ -1277,8 +1255,8 @@ async function getToDiscussPending() {
         const res = await withRetry("getToDiscussPending", () => client.databases.query({
             database_id: NOTION_TO_DISCUSS_DB_ID,
             filter: {
-                property: "Estado",
-                select: { equals: "Pendente" },
+                property: "Status",
+                status: { equals: "Pendente" },
             },
             start_cursor: cursor,
         }));
@@ -1298,10 +1276,11 @@ async function getToDiscussPending() {
                 urgenciaName === "Urgente"
                 ? urgenciaName
                 : "Próxima reunião";
-            const estadoName = readSelectName(props["Estado"]);
+            const estadoName = readStatusName(props["Status"]);
             const estado = estadoName === "Pendente" ||
                 estadoName === "Discutido" ||
-                estadoName === "Arquivado"
+                estadoName === "Arquivado" ||
+                estadoName === "Aberto"
                 ? estadoName
                 : "Pendente";
             const deadline = readDateStart(props["Deadline"]) ?? undefined;
@@ -1329,7 +1308,7 @@ async function setToDiscussResolved(id, resolucao) {
     await withRetry("setToDiscussResolved", () => client.pages.update({
         page_id: id,
         properties: {
-            Estado: { select: { name: "Discutido" } },
+            Status: { status: { name: "Discutido" } },
             "Resolução": richText(resolucao),
         },
     }));
@@ -1345,7 +1324,7 @@ async function createDecision(d, originalMsg) {
         "Tomada por": {
             multi_select: d.tomadaPor.map((name) => ({ name })),
         },
-        Estado: { select: { name: d.estado } },
+        Status: { status: { name: d.estado } },
         Origem: richText(originalMsg),
     };
     if (d.notas) {
@@ -1373,7 +1352,7 @@ async function getRecentDecisions(n) {
             continue;
         const props = row.properties;
         const tomadaPorNames = readMultiSelectNames(props["Tomada por"]).filter((name) => name === "Madalena" || name === "Mafalda" || name === "Beatriz");
-        const estadoName = readSelectName(props["Estado"]);
+        const estadoName = readStatusName(props["Status"]);
         const estado = estadoName === "Implementada"
             ? "Implementada"
             : "Pendente implementação";
@@ -1408,7 +1387,7 @@ async function getDependentTasks(prerequisiteId) {
         filter: {
             and: [
                 { property: "Depende de", relation: { contains: prerequisiteId } },
-                { property: "Status", select: { equals: "Bloqueado" } },
+                { property: "Status", status: { equals: "Bloqueado" } },
             ],
         },
     }));
@@ -1508,7 +1487,7 @@ async function createEvent(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { multi_select: [{ name: owner }] },
-            Status: { select: { name: "Ideia" } },
+            Status: { status: { name: "Ideia" } },
             Origem: richText(originalMsg),
         },
     }));
@@ -1536,7 +1515,7 @@ async function createPartner(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { select: { name: "A contactar" } },
+            Status: { status: { name: "A contactar" } },
             Origem: richText(originalMsg),
         },
     }));
@@ -1564,7 +1543,7 @@ async function createInfluencer(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { select: { name: "A contactar" } },
+            Status: { status: { name: "A contactar" } },
             Origem: richText(originalMsg),
         },
     }));
@@ -1947,7 +1926,7 @@ async function getEntitiesForOwner(dbKey, owner) {
     const mapRow = (r) => ({
         id: r.id,
         name: readPlainText(r.properties["Name"]) || "—",
-        status: readSelectName(r.properties["Status"]) ?? null,
+        status: readStatusName(r.properties["Status"]) ?? null,
     });
     try {
         const res = await client.databases.query({
@@ -1988,8 +1967,8 @@ async function getTasksForEntity(entityField, entityPageId) {
             filter: {
                 and: [
                     { property: entityField, relation: { contains: entityPageId } },
-                    { property: "Status", select: { does_not_equal: "Feito" } },
-                    { property: "Status", select: { does_not_equal: "Cancelado" } },
+                    { property: "Status", status: { does_not_equal: "Feito" } },
+                    { property: "Status", status: { does_not_equal: "Cancelado" } },
                 ],
             },
             page_size: 10,
@@ -2013,8 +1992,6 @@ getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getCompletedSince, getO
 getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createContentCalendarEntry, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
-// Phase 1 redesign — Studio Log
-createLogEntry, 
 // Dependencies
 setTaskDependency, getDependentTasks, 
 // Feature D — entities
@@ -2059,8 +2036,6 @@ export const notion = {
     setToDiscussResolved,
     createDecision,
     getRecentDecisions,
-    // Phase 1 redesign — Studio Log
-    createLogEntry,
     // Dependencies
     setTaskDependency,
     getDependentTasks,

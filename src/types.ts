@@ -103,7 +103,7 @@ export type ToDiscussUrgency =
   | "Decisão offline"
   | "Urgente";
 
-export type ToDiscussState = "Pendente" | "Discutido" | "Arquivado";
+export type ToDiscussState = "Pendente" | "Discutido" | "Arquivado" | "Aberto";
 
 export interface ToDiscussRow {
   id: string;
