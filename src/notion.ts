@@ -2327,6 +2327,12 @@ async function getEntitiesForOwner(
       ? { property: "Owner", multi_select: { contains: owner } }
       : { property: "Owner", select: { equals: owner } };
 
+  const mapRow = (r: { id: string; properties: Record<string, unknown> }): EntitySummary => ({
+    id: r.id,
+    name: readPlainText(r.properties["Name"]) || "—",
+    status: readSelectName(r.properties["Status"]) ?? null,
+  });
+
   try {
     const res = await withRetry(`getEntitiesForOwner.${dbKey}`, () =>
       client.databases.query({
@@ -2337,17 +2343,26 @@ async function getEntitiesForOwner(
     );
     return res.results
       .filter((r) => "properties" in r)
-      .map((r) => {
-        const props = (r as { id: string; properties: Record<string, unknown> }).properties;
-        return {
-          id: r.id,
-          name: readPlainText(props["Name"]) || "—",
-          status: readSelectName(props["Status"]) ?? null,
-        };
-      });
-  } catch (err) {
-    log.warn("notion.getEntitiesForOwner_failed", { dbKey, err: String(err) });
-    return [];
+      .map((r) => mapRow({ id: r.id, properties: (r as { properties: Record<string, unknown> }).properties }));
+  } catch {
+    // select/multi_select option not found — fetch all and filter in JS
+    try {
+      const res = await withRetry(`getEntitiesForOwner.${dbKey}.fallback`, () =>
+        client.databases.query({ database_id: dbId, page_size: 100 }),
+      );
+      const ownerLower = owner.toLowerCase();
+      return res.results
+        .filter((r) => "properties" in r)
+        .filter((r) => {
+          const props = (r as { properties: Record<string, unknown> }).properties;
+          const val = (readSelectName(props["Owner"]) ?? readMultiSelectNames(props["Owner"]).join(",")).toLowerCase();
+          return val.includes(ownerLower);
+        })
+        .map((r) => mapRow({ id: r.id, properties: (r as { properties: Record<string, unknown> }).properties }));
+    } catch (err) {
+      log.warn("notion.getEntitiesForOwner_failed", { dbKey, err: String(err) });
+      return [];
+    }
   }
 }
 
