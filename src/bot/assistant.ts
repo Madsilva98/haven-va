@@ -215,7 +215,19 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "check_list_item",
-    description: "Marca um item de uma lista como feito",
+    description: "Marca um item de uma lista como feito (item comprado, tarefa concluída, etc.). Usar quando a pessoa diz 'já fiz', 'já comprei', 'feito', 'marcar como feito'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        item: { type: "string", description: "Título ou parte do título do item" },
+        lista: { type: "string", description: "Nome da lista" },
+      },
+      required: ["item", "lista"],
+    },
+  },
+  {
+    name: "delete_list_item",
+    description: "Apaga (remove permanentemente) um item de uma lista. Usar quando a pessoa diz 'apaga', 'remove', 'tira', 'já não preciso', 'cancela' — não quando quer marcar como feito.",
     input_schema: {
       type: "object",
       properties: {
@@ -334,7 +346,7 @@ const TOOLS: Anthropic.Tool[] = [
         description: { type: "string", description: "Descrição do evento (opcional)" },
         calendar_name: {
           type: "string",
-          description: "Nome do calendário (ex: 'receção', 'founders lives'). Se omitido, usa o calendário principal.",
+          description: "Nome do calendário a usar. Escolhe o nome mais próximo da lista 'Calendários Google disponíveis' no contexto. Se omitido, usa o calendário principal.",
         },
       },
       required: ["title", "start_iso"],
@@ -401,7 +413,7 @@ function lisbonLocalToUtc(lisbonNaive: string): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return (
     `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
-    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}Z`
   );
 }
 
@@ -413,6 +425,7 @@ function buildUserMessage(
   contentCalendar?: ContentCalendarRow[],
   lastBotReplies?: string[],
   openTasks?: OpenTask[],
+  availableCalendars?: { id: string; summary: string }[],
 ): string {
   const lines: string[] = [];
 
@@ -466,6 +479,11 @@ function buildUserMessage(
       const deadline = t.deadline ? ` | até ${t.deadline}` : "";
       lines.push(`  - ${t.title} | ${t.status} | ${t.area}${deadline}`);
     }
+    lines.push("");
+  }
+
+  if (availableCalendars && availableCalendars.length > 0) {
+    lines.push(`Calendários Google disponíveis: ${availableCalendars.map((c) => c.summary).join(", ")}`);
     lines.push("");
   }
 
@@ -741,6 +759,25 @@ async function execCheckListItem(
   return "ok";
 }
 
+async function execDeleteListItem(
+  input: Record<string, unknown>,
+  ctx: Context,
+  collector: string[],
+): Promise<string> {
+  const item = typeof input.item === "string" ? input.item.trim() : "";
+  const lista = typeof input.lista === "string" ? input.lista.trim() : "";
+  if (!item || !lista) return "parâmetros em falta";
+  const pageId = await notion.deleteListItem(item, lista);
+  if (!pageId) {
+    await ctx.reply(`não encontrei "${item}" na lista *${lista}*`);
+    return `não encontrado: ${item}`;
+  }
+  const reply = `🗑️ "${item}" removido da lista`;
+  collector.push(reply);
+  await ctx.reply(reply);
+  return "ok";
+}
+
 async function execUpdateRecord(
   input: Record<string, unknown>,
   ctx: Context,
@@ -864,9 +901,22 @@ async function execCreateCalendarEvent(
   let calendarId: string | undefined;
   if (typeof input.calendar_name === "string" && input.calendar_name) {
     const cals = await calendar.listAllCalendars();
-    const q = input.calendar_name.toLowerCase();
-    const match = cals.find((c) => c.summary.toLowerCase().includes(q) || q.includes(c.summary.toLowerCase()));
-    if (match) calendarId = match.id;
+    const normalize = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ").trim();
+    const q = normalize(input.calendar_name);
+    const qWords = q.split(/\s+/).filter(Boolean);
+    const match =
+      cals.find((c) => normalize(c.summary) === q) ??
+      cals.find((c) => normalize(c.summary).includes(q) || q.includes(normalize(c.summary))) ??
+      cals.find((c) => {
+        const cWords = normalize(c.summary).split(/\s+/).filter(Boolean);
+        return qWords.some((w) => cWords.includes(w));
+      });
+    if (match) {
+      calendarId = match.id;
+    } else {
+      log.warn("assistant.calendar_not_found", { query: input.calendar_name, available: cals.map((c) => c.summary) });
+    }
   }
 
   const event = await calendar.createEvent({ title, start: startDate, end: endDate, description, calendarId });
@@ -957,6 +1007,8 @@ async function dispatchTool(
       return await execCreateContentCalendarEntry(input, sender, ctx, collector);
     case "check_list_item":
       return await execCheckListItem(input, ctx, collector);
+    case "delete_list_item":
+      return await execDeleteListItem(input, ctx, collector);
     case "update_record":
       return await execUpdateRecord(input, ctx, collector);
     case "add_to_page_section":
@@ -999,10 +1051,14 @@ export async function handleAssistant(
     },
   ];
 
+  const availableCalendars = calendar.isAuthenticated()
+    ? await calendar.listAllCalendars().catch(() => [])
+    : [];
+
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
-      content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks),
+      content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars),
     },
   ];
 
