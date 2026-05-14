@@ -2245,19 +2245,49 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
 
 async function getList(lista?: string): Promise<ListItem[]> {
   if (!NOTION_LISTS_DB_ID) return [];
-  const filter = lista
-    ? { property: "Lista", select: { equals: lista } }
-    : undefined;
-  const res = await withRetry("getList", () =>
-    client.databases.query({
-      database_id: NOTION_LISTS_DB_ID!,
-      ...(filter ? { filter } : {}),
-      sorts: [{ timestamp: "created_time", direction: "ascending" }],
-      page_size: 100,
-    }),
-  );
-  return res.results.map((row) => {
-    const props = (row as { id: string; properties: Record<string, unknown> }).properties;
+
+  type Row = { id: string; properties: Record<string, unknown> };
+  let rows: Row[];
+
+  if (lista) {
+    try {
+      const res = await withRetry("getList", () =>
+        client.databases.query({
+          database_id: NOTION_LISTS_DB_ID!,
+          filter: { property: "Lista", select: { equals: lista } },
+          sorts: [{ timestamp: "created_time", direction: "ascending" }],
+          page_size: 100,
+        }),
+      );
+      rows = res.results as Row[];
+    } catch {
+      // select option not found — fetch all and filter in JS
+      const res = await withRetry("getList.fallback", () =>
+        client.databases.query({
+          database_id: NOTION_LISTS_DB_ID!,
+          sorts: [{ timestamp: "created_time", direction: "ascending" }],
+          page_size: 100,
+        }),
+      );
+      const q = lista.toLowerCase();
+      rows = (res.results as Row[]).filter((row) => {
+        const val = (readSelectName(row.properties["Lista"]) ?? "").toLowerCase();
+        return val.includes(q) || q.includes(val);
+      });
+    }
+  } else {
+    const res = await withRetry("getList", () =>
+      client.databases.query({
+        database_id: NOTION_LISTS_DB_ID!,
+        sorts: [{ timestamp: "created_time", direction: "ascending" }],
+        page_size: 100,
+      }),
+    );
+    rows = res.results as Row[];
+  }
+
+  return rows.map((row) => {
+    const props = row.properties;
     const feito =
       props["Fechada"] &&
       typeof props["Fechada"] === "object" &&
