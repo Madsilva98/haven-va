@@ -7,8 +7,15 @@ import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runWeekendBrief } from "./crons/weekend-brief.js";
 import { log } from "./lib/log.js";
+import * as notion from "./notion.js";
 
 const TZ = process.env.TZ ?? "Europe/Lisbon";
+
+// Resolve data_source_id for every configured Notion DB before anything
+// else can fire. Missing resolution = every cron + every assistant call
+// throws at runtime. See docs/knowledge-base/notion-api-gotchas.md
+// "multi-source breaking trap".
+await notion.initialize();
 
 const tasks = [
   cron.schedule(
