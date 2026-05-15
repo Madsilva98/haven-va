@@ -92,6 +92,16 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `content`: o texto. Usa `- item` para bullets, texto normal para parágrafo. O modelo decide o formato.
 - Se a secção não existir, é criada automaticamente.
 
+### Planear o dia / a semana → `update_record` + `create_task`
+
+"hoje planeio fazer X", "quero fazer X hoje", "planeio X para hoje" → para cada item mencionado:
+- Procura no backlog (usa `search_records` se o título não for exato). Se encontrar: `update_record` db=backlog, field=deadline, new_value=<data de hoje YYYY-MM-DD>.
+- Se não encontrar: `create_task` com deadline=<data de hoje>.
+
+"esta semana planeio fazer X", "esta semana quero fazer X" → mesma lógica mas deadline=<sexta-feira desta semana YYYY-MM-DD>. Calcula a data a partir do dia atual fornecido no contexto.
+
+Não perguntes — age com o que tens. Se forem vários itens, trata cada um separadamente.
+
 ### Editar registos → `update_record`
 "muda X para Y", "marca como feito/ativo/resolvido", "passa para a Mafalda", "altera o status de X", "cancela X" → usa `update_record`.
 - `db`: inferir pelo contexto (backlog=tasks, to_discuss, decisions, content_calendar, partners, influencers, events, projects).

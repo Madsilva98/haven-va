@@ -251,17 +251,8 @@ export type TrafficLight = "red" | "yellow" | "green";
 
 export function trafficLight(task: OpenTask): TrafficLight {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
-  if (task.priority === "Alta" || task.deadline === today) return "red";
-  if (task.deadline) {
-    const daysUntil = Math.ceil(
-      (new Date(task.deadline).getTime() - new Date(today).getTime()) /
-        (1000 * 60 * 60 * 24),
-    );
-    if (daysUntil < 0) return "red";
-    if (task.priority === "Média" || daysUntil <= 3) return "yellow";
-  } else if (task.priority === "Média") {
-    return "yellow";
-  }
+  if (task.deadline && task.deadline <= today) return "red";
+  if (task.priority === "Alta") return "yellow";
   return "green";
 }
 
@@ -305,28 +296,35 @@ export function formatDailyDM(args: DailyDMArgs): string {
     return lines.join("\n");
   }
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
-  const deadlineToday = args.tasks.filter((t) => t.deadline === today);
-  const remaining = args.tasks.filter((t) => t.deadline !== today);
+  const reds = args.tasks.filter((t) => trafficLight(t) === "red");
+  const yellows = args.tasks.filter((t) => trafficLight(t) === "yellow");
+  const medias = args.tasks.filter(
+    (t) => trafficLight(t) === "green" && t.priority === "Média",
+  );
 
-  if (deadlineToday.length > 0) {
-    lines.push("‼️ *deadline hoje*");
-    for (const t of deadlineToday) {
-      lines.push(`• ${escapeMd(t.title)}`);
+  if (reds.length > 0) {
+    lines.push("🔴 *atrasadas / hoje*");
+    for (const t of reds) {
+      const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
+      lines.push(`• ${escapeMd(t.title)}${deadline}`);
     }
     lines.push("");
   }
 
-  const reds = remaining.filter((t) => trafficLight(t) === "red");
-  const yellows = remaining.filter((t) => trafficLight(t) === "yellow");
-  const greens = remaining.filter((t) => trafficLight(t) === "green");
+  if (yellows.length > 0) {
+    lines.push("🟡 *alta prioridade*");
+    for (const t of yellows) {
+      const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
+      lines.push(`• ${escapeMd(t.title)}${deadline}`);
+    }
+    lines.push("");
+  }
 
-  const shown = [...reds, ...yellows, ...greens].slice(0, 5);
-  for (const t of shown) {
-    if (trafficLight(t) === "green") {
-      lines.push(`🟢 ${escapeMd("Se sobrar tempo:")} ${escapeMd(t.title)}`);
-    } else {
-      lines.push(fmtTrafficTask(t));
+  if (medias.length > 0) {
+    lines.push("*média prioridade*");
+    for (const t of medias) {
+      const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
+      lines.push(`• ${escapeMd(t.title)}${deadline}`);
     }
   }
 
