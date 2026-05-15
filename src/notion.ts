@@ -837,16 +837,25 @@ async function getOpenTasks(): Promise<OpenTask[]> {
 // Phase 2 — Weekly cycle
 // ============================================================
 
+// Defensive: the Backlog "Prioridade" select has historically used both
+// numbered and bare forms ("1. Alta" / "Alta"). Map either shape to the
+// canonical Priority enum so readers don't silently see null when the DB
+// option string drifts. See docs/knowledge-base/notion-api-gotchas.md.
+function normalizePriority(raw: string | null): Priority | null {
+  if (!raw) return null;
+  const stripped = raw.replace(/^\d+\.\s*/, "").trim();
+  if (stripped === "Alta" || stripped === "Média" || stripped === "Baixa") {
+    return stripped as Priority;
+  }
+  return null;
+}
+
 function rowToOpenTask(row: { id: string; properties: Record<string, unknown> }): OpenTask {
   const props = row.properties;
   const title = readPlainText(props["Título"]);
   const owner = (readSelectName(props["Owner"]) ?? "Unassigned") as OwnerValue;
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
-  const priorityName = readSelectName(props["Prioridade"]);
-  const priority =
-    priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
-      ? (priorityName as Priority)
-      : null;
+  const priority = normalizePriority(readSelectName(props["Prioridade"]));
   const deadline = readDateStart(props["Deadline"]);
   const statusName = readStatusName(props["Status"]) ?? "To do";
   return {
