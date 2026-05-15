@@ -61,17 +61,48 @@ export async function initialize() {
     ]);
 }
 // ----- retry helper -----
+// Default backoff schedule for transient failures. 429s override the
+// scheduled delay with the value from the server's Retry-After header.
 const RETRY_DELAYS_MS = [500, 2000, 8000];
+// Cap on how long we'll wait if Retry-After is unreasonable (e.g. server
+// returns a 5-minute wait — better to fail and surface the error than
+// hang the bot's reply for that long).
+const MAX_RETRY_AFTER_MS = 30_000;
 function isRetriable(err) {
     if (err instanceof APIResponseError) {
         if (err.status === 429)
             return true;
+        if (err.status === 409)
+            return true; // conflict_error: concurrent write — safe to retry
         if (err.status >= 500 && err.status < 600)
             return true;
         return false;
     }
     // Network or unknown errors → retry once
     return true;
+}
+/**
+ * Parse a Retry-After header value. The Notion API returns it as
+ * seconds. Returns ms, capped at MAX_RETRY_AFTER_MS. Returns null if
+ * the header is missing or malformed.
+ */
+function retryAfterMs(err) {
+    if (!(err instanceof APIResponseError))
+        return null;
+    // The SDK exposes the underlying Response via err.headers on v5.
+    // We probe defensively in case the field shape shifts across versions.
+    const headers = err.headers;
+    if (!headers)
+        return null;
+    const raw = typeof headers.get === "function"
+        ? headers.get("retry-after")
+        : headers["retry-after"];
+    if (!raw)
+        return null;
+    const secs = Number(raw);
+    if (!Number.isFinite(secs) || secs <= 0)
+        return null;
+    return Math.min(Math.ceil(secs * 1000), MAX_RETRY_AFTER_MS);
 }
 async function withRetry(label, fn) {
     let lastErr;
@@ -92,11 +123,15 @@ async function withRetry(label, fn) {
                 });
                 throw err;
             }
-            const delay = RETRY_DELAYS_MS[attempt];
+            // On 429, prefer the server-supplied Retry-After header. Otherwise
+            // fall back to the fixed backoff schedule.
+            const hinted = retryAfterMs(err);
+            const delay = hinted ?? RETRY_DELAYS_MS[attempt];
             log.warn("notion.retry", {
                 label,
                 attempt: attempt + 1,
                 delayMs: delay,
+                delaySource: hinted ? "retry_after" : "fixed",
                 status: err instanceof APIResponseError ? err.status : undefined,
             });
             await new Promise((resolve) => setTimeout(resolve, delay));
@@ -684,15 +719,25 @@ async function getOpenTasks() {
 // ============================================================
 // Phase 2 — Weekly cycle
 // ============================================================
+// Defensive: the Backlog "Prioridade" select has historically used both
+// numbered and bare forms ("1. Alta" / "Alta"). Map either shape to the
+// canonical Priority enum so readers don't silently see null when the DB
+// option string drifts. See docs/knowledge-base/notion-api-gotchas.md.
+function normalizePriority(raw) {
+    if (!raw)
+        return null;
+    const stripped = raw.replace(/^\d+\.\s*/, "").trim();
+    if (stripped === "Alta" || stripped === "Média" || stripped === "Baixa") {
+        return stripped;
+    }
+    return null;
+}
 function rowToOpenTask(row) {
     const props = row.properties;
     const title = readPlainText(props["Título"]);
     const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
-    const priorityName = readSelectName(props["Prioridade"]);
-    const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
-        ? priorityName
-        : null;
+    const priority = normalizePriority(readSelectName(props["Prioridade"]));
     const deadline = readDateStart(props["Deadline"]);
     const statusName = readStatusName(props["Status"]) ?? "To do";
     return {
@@ -1065,6 +1110,12 @@ async function getContentCalendarAlerts() {
         return empty;
     }
 }
+// Cap on rows passed back to the assistant. The full content calendar
+// can have 100+ historical rows that bloat Haiku's context without
+// adding signal. Within ±CONTENT_CAL_WINDOW_DAYS of today, capped at
+// CONTENT_CAL_MAX_ROWS, sorted by publishDate ascending (closest first).
+const CONTENT_CAL_WINDOW_DAYS = 30;
+const CONTENT_CAL_MAX_ROWS = 20;
 async function getContentCalendarRows() {
     if (!NOTION_CONTENT_CALENDAR_DB_ID)
         return [];
@@ -1094,7 +1145,34 @@ async function getContentCalendarRows() {
             }
             cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
         } while (cursor);
-        return rows;
+        // Filter to ±CONTENT_CAL_WINDOW_DAYS, then sort by date ascending,
+        // then cap at CONTENT_CAL_MAX_ROWS. Rows without a publishDate are
+        // treated as "future drafts" and kept at the end so they don't get
+        // culled before scheduled content.
+        const now = Date.now();
+        const windowMs = CONTENT_CAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+        const minTs = now - windowMs;
+        const maxTs = now + windowMs;
+        const filtered = rows.filter((r) => {
+            if (!r.publishDate)
+                return true;
+            const t = Date.parse(r.publishDate);
+            if (!Number.isFinite(t))
+                return true;
+            return t >= minTs && t <= maxTs;
+        });
+        filtered.sort((a, b) => {
+            const ta = a.publishDate ? Date.parse(a.publishDate) : Number.POSITIVE_INFINITY;
+            const tb = b.publishDate ? Date.parse(b.publishDate) : Number.POSITIVE_INFINITY;
+            return ta - tb;
+        });
+        const capped = filtered.slice(0, CONTENT_CAL_MAX_ROWS);
+        log.debug("notion.content_calendar_capped", {
+            total: rows.length,
+            afterWindow: filtered.length,
+            returned: capped.length,
+        });
+        return capped;
     }
     catch (err) {
         log.warn("notion.content_calendar_rows_failed", {
