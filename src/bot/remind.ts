@@ -36,6 +36,7 @@ const RECURRENCE_PATTERNS: Array<[RegExp, ReminderRecurrence]> = [
   [/\btodos\s+os\s+dias\b|\bdiariamente\b|\btodo\s+o\s+dia\b/i, "diária"],
   [/\btoda\s+(a\s+)?semana\b|\btodas\s+as\s+semanas\b|\bsemanalmente\b/i, "semanal"],
   [/\btodo\s+o\s+m[eê]s\b|\btodos\s+os\s+meses\b|\bmensalmente\b/i, "mensal"],
+  [/\btodos\s+os\s+anos\b|\banualmente\b|\btodo\s+o\s+ano\b|\bno\s+anivers[áa]rio\b/i, "anual"],
 ];
 
 function extractRecurrence(text: string): { text: string; recurrence?: ReminderRecurrence } {

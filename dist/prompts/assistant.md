@@ -56,7 +56,9 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 - `for`: nome mencionado ou `all`; se incerto → sender.
 - `when_iso`: hora Lisbon sem timezone, às 09:00 se não especificado.
 - `task_page_id`: só usar quando o lembrete se refere a uma task criada **nesta mesma conversa**. O resultado de `create_task` inclui `pageId: <id>` — passa esse id aqui. Requer chamar `create_task` primeiro (não em paralelo).
-- `recurrence`: usa quando a mensagem pedir repetição. Valores comuns: `"diária"`, `"semanal"`, `"mensal"`. Aceita qualquer string — ex: `"a cada 2 semanas"`, `"a cada 3 dias"`. Cria automaticamente a opção no Notion.
+- `recurrence`: usa quando a mensagem pedir repetição. Valores aceites (apenas estes): `"diária"`, `"semanal"`, `"mensal"`, `"anual"`.
+  - **`"anual"` para aniversários**: "lembra-me todos os anos do aniversário da Madalena", "no dia 15 de março todos os anos", "anualmente no dia X" → `recurrence: "anual"`.
+  - Outras periodicidades como "a cada 2 semanas" ou "a cada 3 dias" não são suportadas pelo cron — escolhe a mais próxima ou explica que vais criar reminders separados.
 
 ### Cancelar lembrete → `cancel_reminder`
 "cancela o lembrete X", "apaga o lembrete X", "já não preciso do lembrete X", "remove o reminder de X" → cancela.

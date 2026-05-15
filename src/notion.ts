@@ -14,6 +14,7 @@
 
 import { Client, APIResponseError } from "@notionhq/client";
 import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
+import { isValidRecurrence } from "./types.js";
 import type {
   EditableField,
   EntityKind,
@@ -1512,7 +1513,15 @@ async function getDueReminders(): Promise<ReminderRow[]> {
         continue;
       }
       const recurrenceRaw = readSelectName(props["Recorrência"]);
-      const recurrence: ReminderRecurrence | undefined = recurrenceRaw ?? undefined;
+      let recurrence: ReminderRecurrence | undefined;
+      if (recurrenceRaw == null) {
+        recurrence = undefined;
+      } else if (isValidRecurrence(recurrenceRaw)) {
+        recurrence = recurrenceRaw;
+      } else {
+        log.warn("notion.unknown_recurrence", { id: row.id, value: recurrenceRaw });
+        recurrence = undefined;
+      }
       rows.push({
         id: row.id,
         texto: readPlainText(props["Reminder"]),
