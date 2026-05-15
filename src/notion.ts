@@ -13,6 +13,7 @@
  */
 
 import { Client, APIResponseError } from "@notionhq/client";
+import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
 import type {
   EditableField,
   EntityKind,
@@ -63,7 +64,33 @@ if (!NOTION_BACKLOG_DB_ID) {
   throw new Error("notion: NOTION_BACKLOG_DB_ID is required");
 }
 
-const client = new Client({ auth: NOTION_API_KEY });
+const client = new Client({
+  auth: NOTION_API_KEY,
+  notionVersion: "2025-09-03",
+});
+
+/**
+ * Resolve data_source_id for every configured Notion database. Must be
+ * called once at server startup before any query/create that touches a
+ * data source. Throws if any database has zero or multiple data sources
+ * (the multi-source breaking trap — see
+ * docs/knowledge-base/notion-api-gotchas.md).
+ */
+export async function initialize(): Promise<void> {
+  await initializeDataSources(client, [
+    NOTION_BACKLOG_DB_ID,
+    NOTION_FOUNDER_FOCUS_DB_ID,
+    NOTION_PARTNER_DB_ID,
+    NOTION_INFLUENCER_DB_ID,
+    NOTION_REMINDERS_DB_ID,
+    NOTION_TO_DISCUSS_DB_ID,
+    NOTION_DECISIONS_DB_ID,
+    NOTION_CONTENT_CALENDAR_DB_ID,
+    NOTION_PROJECTS_DB_ID,
+    NOTION_EVENT_DB_ID,
+    NOTION_LISTS_DB_ID,
+  ]);
+}
 
 // ----- retry helper -----
 
@@ -323,8 +350,8 @@ async function findEntityByName(kind: EntityKind, nome: string): Promise<string 
   if (!dbId) return null;
   try {
     const res = await withRetry("findEntityByName", () =>
-      client.databases.query({
-        database_id: dbId,
+      client.dataSources.query({
+        data_source_id: dsId(dbId),
         filter: { property: "Name", title: { contains: nome } },
         page_size: 1,
       }),
@@ -371,7 +398,7 @@ async function createTask(
 
   const page = await withRetry("createTask", () =>
     client.pages.create({
-      parent: { database_id: NOTION_BACKLOG_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_BACKLOG_DB_ID!) },
       properties: props as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -485,8 +512,8 @@ async function findRecordByTitle(
 ): Promise<{ id: string; title: string } | null> {
   // Layer 1a: title.contains (fast, exact)
   const res = await withRetry("findRecordByTitle", () =>
-    client.databases.query({
-      database_id: dbId,
+    client.dataSources.query({
+      data_source_id: dsId(dbId),
       filter: { property: titleProp, title: { contains: query } },
       page_size: 5,
     }),
@@ -526,8 +553,8 @@ async function findRecordByTitle(
     for (const word of words) {
       try {
         const wRes = await withRetry("findRecordByTitle.word", () =>
-          client.databases.query({
-            database_id: dbId,
+          client.dataSources.query({
+            data_source_id: dsId(dbId),
             filter: { property: titleProp, title: { contains: word } },
             page_size: 10,
           }),
@@ -550,7 +577,7 @@ async function findRecordByTitle(
   if (dbKey && SMALL_DBS.has(dbKey)) {
     try {
       const allRes = await withRetry("findRecordByTitle.fetchAll", () =>
-        client.databases.query({ database_id: dbId, page_size: 100 }),
+        client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }),
       );
       let best: { id: string; title: string; score: number } | null = null;
       for (const r of allRes.results) {
@@ -594,8 +621,8 @@ async function searchRecordsInDb(
 ): Promise<SearchResult[]> {
   // Layer 1a: title.contains (fast, exact)
   const res = await withRetry("searchRecordsInDb", () =>
-    client.databases.query({
-      database_id: dbId,
+    client.dataSources.query({
+      data_source_id: dsId(dbId),
       filter: { property: titleProp, title: { contains: query } },
       page_size: 10,
     }),
@@ -630,8 +657,8 @@ async function searchRecordsInDb(
     for (const word of words) {
       try {
         const wRes = await withRetry("searchRecordsInDb.word", () =>
-          client.databases.query({
-            database_id: dbId,
+          client.dataSources.query({
+            data_source_id: dsId(dbId),
             filter: { property: titleProp, title: { contains: word } },
             page_size: 10,
           }),
@@ -652,7 +679,7 @@ async function searchRecordsInDb(
   if (dbKey && SMALL_DBS.has(dbKey)) {
     try {
       const allRes = await withRetry("searchRecordsInDb.fetchAll", () =>
-        client.databases.query({ database_id: dbId, page_size: 100 }),
+        client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }),
       );
       const scored = allRes.results
         .filter((r) => "properties" in r)
@@ -759,8 +786,8 @@ async function getOpenTasks(): Promise<OpenTask[]> {
 
   do {
     const res = await withRetry("getOpenTasks", () =>
-      client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
             { property: "Status", status: { does_not_equal: "Feito" } },
@@ -852,8 +879,8 @@ async function getWeeklyPriorities(week: string): Promise<OpenTask[]> {
   let cursor: string | undefined;
   do {
     const res = await withRetry("getWeeklyPriorities", () =>
-      client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
             { property: "Prioridade semanal", checkbox: { equals: true } },
@@ -904,8 +931,8 @@ async function getCompletedSince(date: string): Promise<OpenTask[]> {
   let cursor: string | undefined;
   do {
     const res = await withRetry("getCompletedSince", () =>
-      client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
             { property: "Status", status: { equals: "Feito" } },
@@ -943,8 +970,8 @@ async function getOverdueTasks(): Promise<OpenTask[]> {
   let cursor: string | undefined;
   do {
     const res = await withRetry("getOverdueTasks", () =>
-      client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
             { property: "Deadline", date: { before: today } },
@@ -978,7 +1005,7 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
   // Always create — latest entry per founder is the active focus.
   await withRetry("setFounderFocus", () =>
     client.pages.create({
-      parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!) },
       properties: {
         Name: { title: [{ text: { content: entry.focoOperacional.slice(0, 80) } }] },
         Founder: { select: { name: entry.founder } },
@@ -993,8 +1020,8 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
 async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]> {
   if (!NOTION_FOUNDER_FOCUS_DB_ID) return [];
   const res = await withRetry("getFounderFocusForWeek", () =>
-    client.databases.query({
-      database_id: NOTION_FOUNDER_FOCUS_DB_ID!,
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
       filter: { property: "Semana", formula: { string: { equals: week } } },
       sorts: [{ timestamp: "created_time", direction: "descending" }],
     }),
@@ -1060,8 +1087,8 @@ async function getPartnersStale(
   let cursor: string | undefined;
   do {
     const res = await withRetry("getPartnersStale", () =>
-      client.databases.query({
-        database_id: NOTION_PARTNER_DB_ID,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_PARTNER_DB_ID),
         filter: {
           and: [
             statusFilter,
@@ -1121,8 +1148,8 @@ async function getInfluencersStale(
   let cursor: string | undefined;
   do {
     const res = await withRetry("getInfluencersStale", () =>
-      client.databases.query({
-        database_id: NOTION_INFLUENCER_DB_ID,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_INFLUENCER_DB_ID),
         filter: {
           and: [
             statusFilter,
@@ -1172,8 +1199,8 @@ async function getContentCalendarAlerts(): Promise<{
     let cursor: string | undefined;
     do {
       const res = await withRetry("getContentCalendarAlerts", () =>
-        client.databases.query({
-          database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+        client.dataSources.query({
+          data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
           start_cursor: cursor,
         }),
       );
@@ -1267,8 +1294,8 @@ async function getContentCalendarRows(): Promise<ContentCalendarRow[]> {
     let cursor: string | undefined;
     do {
       const res = await withRetry("getContentCalendarRows", () =>
-        client.databases.query({
-          database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+        client.dataSources.query({
+          data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
           start_cursor: cursor,
         }),
       );
@@ -1324,7 +1351,7 @@ async function createContentCalendarEntry(params: {
   }
   const page = await withRetry("createContentCalendarEntry", () =>
     client.pages.create({
-      parent: { database_id: NOTION_CONTENT_CALENDAR_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID!) },
       properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -1356,7 +1383,7 @@ async function createReminder(
   }
   const page = await withRetry("createReminder", () =>
     client.pages.create({
-      parent: { database_id: NOTION_REMINDERS_DB_ID },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_REMINDERS_DB_ID) },
       properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -1385,8 +1412,8 @@ async function getDueReminders(): Promise<ReminderRow[]> {
   let cursor: string | undefined;
   do {
     const res = await withRetry("getDueReminders", () =>
-      client.databases.query({
-        database_id: NOTION_REMINDERS_DB_ID,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_REMINDERS_DB_ID),
         filter: {
           and: [
             { property: "Enviado", checkbox: { equals: false } },
@@ -1447,8 +1474,8 @@ async function markReminderSent(id: string): Promise<void> {
 async function cancelReminder(text: string): Promise<string | null> {
   if (!NOTION_REMINDERS_DB_ID) return null;
   const res = await withRetry("cancelReminder", () =>
-    client.databases.query({
-      database_id: NOTION_REMINDERS_DB_ID,
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_REMINDERS_DB_ID),
       filter: {
         and: [
           { property: "Reminder", title: { contains: text } },
@@ -1502,7 +1529,7 @@ async function createToDiscuss(
   }
   const page = await withRetry("createToDiscuss", () =>
     client.pages.create({
-      parent: { database_id: NOTION_TO_DISCUSS_DB_ID },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_TO_DISCUSS_DB_ID) },
       properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -1523,8 +1550,8 @@ async function getToDiscussPending(): Promise<ToDiscussRow[]> {
   let cursor: string | undefined;
   do {
     const res = await withRetry("getToDiscussPending", () =>
-      client.databases.query({
-        database_id: NOTION_TO_DISCUSS_DB_ID,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_TO_DISCUSS_DB_ID),
         filter: {
           property: "Status",
           status: { equals: "Pendente" },
@@ -1615,7 +1642,7 @@ async function createDecision(d: Omit<DecisionRow, "id">, originalMsg: string): 
   }
   const page = await withRetry("createDecision", () =>
     client.pages.create({
-      parent: { database_id: NOTION_DECISIONS_DB_ID },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_DECISIONS_DB_ID) },
       properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
@@ -1630,8 +1657,8 @@ async function getRecentDecisions(n: number): Promise<DecisionRow[]> {
     );
   }
   const res = await withRetry("getRecentDecisions", () =>
-    client.databases.query({
-      database_id: NOTION_DECISIONS_DB_ID,
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_DECISIONS_DB_ID),
       sorts: [{ property: "Data", direction: "descending" }],
       page_size: Math.min(Math.max(n, 1), 100),
     }),
@@ -1682,8 +1709,8 @@ async function setTaskDependency(
 async function getDependentTasks(prerequisiteId: string): Promise<OpenTask[]> {
   if (!NOTION_BACKLOG_DB_ID) return [];
   const res = await withRetry("getDependentTasks", () =>
-    client.databases.query({
-      database_id: NOTION_BACKLOG_DB_ID!,
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
       filter: {
         and: [
           { property: "Depende de", relation: { contains: prerequisiteId } },
@@ -1768,7 +1795,7 @@ async function createProject(nome: string, owner: OwnerValue, originalMsg: strin
   }
   const page = await withRetry("createProject", () =>
     client.pages.create({
-      parent: { database_id: NOTION_PROJECTS_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_PROJECTS_DB_ID!) },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { multi_select: [{ name: owner }] },
@@ -1800,7 +1827,7 @@ async function createEvent(nome: string, owner: OwnerValue, originalMsg: string)
   }
   const page = await withRetry("createEvent", () =>
     client.pages.create({
-      parent: { database_id: NOTION_EVENT_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_EVENT_DB_ID!) },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { multi_select: [{ name: owner }] },
@@ -1833,7 +1860,7 @@ async function createPartner(nome: string, owner: OwnerValue, originalMsg: strin
   }
   const page = await withRetry("createPartner", () =>
     client.pages.create({
-      parent: { database_id: NOTION_PARTNER_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_PARTNER_DB_ID!) },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
@@ -1866,7 +1893,7 @@ async function createInfluencer(nome: string, owner: OwnerValue, originalMsg: st
   }
   const page = await withRetry("createInfluencer", () =>
     client.pages.create({
-      parent: { database_id: NOTION_INFLUENCER_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_INFLUENCER_DB_ID!) },
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
@@ -1983,7 +2010,7 @@ async function appendToPageSection(
 }
 
 const NOTION_API_BASE = "https://api.notion.com/v1";
-const NOTION_VERSION = "2022-06-28";
+const NOTION_VERSION = "2025-09-03";
 
 async function uploadAndAttachFile(
   pageId: string,
@@ -2070,7 +2097,7 @@ async function addToList(
   if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
   const page = await withRetry("addToList", () =>
     client.pages.create({
-      parent: { database_id: NOTION_LISTS_DB_ID! },
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_LISTS_DB_ID!) },
       properties: {
         Item: { title: [{ text: { content: item.slice(0, 100) } }] },
         Lista: { select: { name: lista } },
@@ -2102,7 +2129,7 @@ async function getListNames(): Promise<string[]> {
   const now = Date.now();
   if (_listNamesCache && now - _listNamesCache.ts < 24 * 60 * 60 * 1000) return _listNamesCache.names;
   try {
-    const db = await client.databases.retrieve({ database_id: NOTION_LISTS_DB_ID });
+    const db = await client.dataSources.retrieve({ data_source_id: dsId(NOTION_LISTS_DB_ID) });
     const listaProp = (db.properties as Record<string, unknown>)["Lista"] as
       | { select?: { options?: { name: string }[] } }
       | undefined;
@@ -2121,8 +2148,8 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
   let rows: Row[];
 
   try {
-    const res = await client.databases.query({
-      database_id: NOTION_LISTS_DB_ID!,
+    const res = await client.dataSources.query({
+      data_source_id: dsId(NOTION_LISTS_DB_ID!),
       filter: {
         and: [
           { property: "Lista", select: { equals: lista } },
@@ -2135,8 +2162,8 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
   } catch {
     // select option not found (400 validation_error) — fetch all open items and match lista in JS
     const res = await withRetry("checkListItem.queryAll", () =>
-      client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_LISTS_DB_ID!),
         filter: { property: "Fechada", checkbox: { equals: false } },
         page_size: 100,
       }),
@@ -2184,8 +2211,8 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
   let rows: Row[];
 
   try {
-    const res = await client.databases.query({
-      database_id: NOTION_LISTS_DB_ID!,
+    const res = await client.dataSources.query({
+      data_source_id: dsId(NOTION_LISTS_DB_ID!),
       filter: {
         and: [
           { property: "Lista", select: { equals: lista } },
@@ -2197,8 +2224,8 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
     rows = res.results as Row[];
   } catch {
     const res = await withRetry("deleteListItem.queryAll", () =>
-      client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_LISTS_DB_ID!),
         filter: { property: "Fechada", checkbox: { equals: false } },
         page_size: 100,
       }),
@@ -2246,8 +2273,8 @@ async function getList(lista?: string): Promise<ListItem[]> {
 
   if (lista) {
     try {
-      const res = await client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
+      const res = await client.dataSources.query({
+        data_source_id: dsId(NOTION_LISTS_DB_ID!),
         filter: { property: "Lista", select: { equals: lista } },
         sorts: [{ timestamp: "created_time", direction: "ascending" }],
         page_size: 100,
@@ -2256,8 +2283,8 @@ async function getList(lista?: string): Promise<ListItem[]> {
     } catch {
       // select option not found — fetch all and filter in JS
       const res = await withRetry("getList.fallback", () =>
-        client.databases.query({
-          database_id: NOTION_LISTS_DB_ID!,
+        client.dataSources.query({
+          data_source_id: dsId(NOTION_LISTS_DB_ID!),
           sorts: [{ timestamp: "created_time", direction: "ascending" }],
           page_size: 100,
         }),
@@ -2270,8 +2297,8 @@ async function getList(lista?: string): Promise<ListItem[]> {
     }
   } else {
     const res = await withRetry("getList", () =>
-      client.databases.query({
-        database_id: NOTION_LISTS_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_LISTS_DB_ID!),
         sorts: [{ timestamp: "created_time", direction: "ascending" }],
         page_size: 100,
       }),
@@ -2327,9 +2354,9 @@ async function getEntitiesForOwner(
   });
 
   try {
-    const res = await client.databases.query({
-      database_id: dbId,
-      filter: ownerFilter as Parameters<typeof client.databases.query>[0]["filter"],
+    const res = await client.dataSources.query({
+      data_source_id: dsId(dbId),
+      filter: ownerFilter as Parameters<typeof client.dataSources.query>[0]["filter"],
       page_size: 20,
     });
     return res.results
@@ -2339,7 +2366,7 @@ async function getEntitiesForOwner(
     // select/multi_select option not found — fetch all and filter in JS
     try {
       const res = await withRetry(`getEntitiesForOwner.${dbKey}.fallback`, () =>
-        client.databases.query({ database_id: dbId, page_size: 100 }),
+        client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }),
       );
       const ownerLower = owner.toLowerCase();
       return res.results
@@ -2364,15 +2391,15 @@ async function getTasksForEntity(
   if (!NOTION_BACKLOG_DB_ID) return [];
   try {
     const res = await withRetry("getTasksForEntity", () =>
-      client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID!,
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
             { property: entityField, relation: { contains: entityPageId } },
             { property: "Status", status: { does_not_equal: "Feito" } },
             { property: "Status", status: { does_not_equal: "Cancelado" } },
           ],
-        } as Parameters<typeof client.databases.query>[0]["filter"],
+        } as Parameters<typeof client.dataSources.query>[0]["filter"],
         page_size: 10,
       }),
     );
