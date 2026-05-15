@@ -12,6 +12,7 @@
  *   after writes.
  */
 import { Client, APIResponseError } from "@notionhq/client";
+import { isValidRecurrence } from "./types.js";
 import { log } from "./lib/log.js";
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
@@ -1160,7 +1161,17 @@ async function getDueReminders() {
                 continue;
             }
             const recurrenceRaw = readSelectName(props["Recorrência"]);
-            const recurrence = recurrenceRaw ?? undefined;
+            let recurrence;
+            if (recurrenceRaw == null) {
+                recurrence = undefined;
+            }
+            else if (isValidRecurrence(recurrenceRaw)) {
+                recurrence = recurrenceRaw;
+            }
+            else {
+                log.warn("notion.unknown_recurrence", { id: row.id, value: recurrenceRaw });
+                recurrence = undefined;
+            }
             rows.push({
                 id: row.id,
                 texto: readPlainText(props["Reminder"]),

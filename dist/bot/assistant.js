@@ -15,6 +15,7 @@ import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import { checkAndUnblockDependents } from "./dependencies.js";
+import { isValidRecurrence } from "../types.js";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 1500;
 const OWNERS = ["Madalena", "Mafalda", "Beatriz", "Unassigned"];
@@ -469,7 +470,14 @@ async function execCreateReminder(input, sender, ctx, collector) {
     const taskPageId = typeof input.task_page_id === "string" && input.task_page_id
         ? input.task_page_id
         : undefined;
-    const recurrence = typeof input.recurrence === "string" ? input.recurrence : undefined;
+    // Reject unknown recurrence values from the LLM tool input. Without this,
+    // a typo or hallucination ("anual", "yearly") would persist to Notion and
+    // later wedge the reminders cron (see lib/recurrence.ts).
+    const recurrenceInput = typeof input.recurrence === "string" ? input.recurrence : undefined;
+    const recurrence = isValidRecurrence(recurrenceInput) ? recurrenceInput : undefined;
+    if (recurrenceInput && !recurrence) {
+        log.warn("assistant.invalid_recurrence_dropped", { value: recurrenceInput });
+    }
     await Promise.all(targets.map((paraQuem) => notion.createReminder({
         texto: text,
         paraQuem,
