@@ -1037,11 +1037,23 @@ export async function handleAssistant(
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     let response: Anthropic.Message;
     try {
+      // Anthropic prompt caching: marking the last tool with
+      // cache_control caches the entire tools block (~3000 tokens of
+      // JSON schema) at the 5-min ephemeral tier. Cuts input cost on
+      // every cache hit from $1/MTok to $0.10/MTok — roughly half of
+      // total per-message input cost since the tools block is large
+      // and stable. See docs/knowledge-base/cost-and-latency-2026-05-15.md
+      // optimization #1.
+      const toolsWithCache: Anthropic.Tool[] = TOOLS.map((t, i) =>
+        i === TOOLS.length - 1
+          ? { ...t, cache_control: { type: "ephemeral" } }
+          : t,
+      );
       response = await runtime.client.messages.create({
         model: runtime.model,
         max_tokens: MAX_TOKENS,
         system: systemBlocks,
-        tools: TOOLS,
+        tools: toolsWithCache,
         messages,
       });
     } catch (err) {
