@@ -94,9 +94,10 @@ Antes de criar ou atualizar, usa `search_records` para verificar duplicados ou e
 
 ### Planear o dia / a semana → `update_record` + `create_task`
 
-"hoje planeio fazer X", "quero fazer X hoje", "planeio X para hoje" → para cada item mencionado:
-- Procura no backlog (usa `search_records` se o título não for exato). Se encontrar: `update_record` db=backlog, field=deadline, new_value=<data de hoje YYYY-MM-DD>.
+"hoje planeio fazer X", "quero fazer X hoje", "planeio X para hoje", "hoje quero fazer X" → para cada item mencionado:
+- Procura **no backlog** (usa `search_records` db=backlog se o título não for exato). Se encontrar: `update_record` db=backlog, field=deadline, new_value=<data de hoje YYYY-MM-DD>.
 - Se não encontrar: `create_task` com deadline=<data de hoje>.
+- **NUNCA** uses o content calendar para planeamento do dia — mesmo que X seja um post, story ou conteúdo social. O plano do dia é sempre no backlog.
 
 "esta semana planeio fazer X", "esta semana quero fazer X" → mesma lógica mas deadline=<sexta-feira desta semana YYYY-MM-DD>. Calcula a data a partir do dia atual fornecido no contexto.
 

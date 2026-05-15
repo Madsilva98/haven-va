@@ -424,7 +424,7 @@ export function buildBot(): Bot {
     if (text.trim().length < 4) return;
     if (hasNonTextMedia) return;
 
-    const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+    const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
     let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
     if (calendarKeywords.test(text)) {
       try {

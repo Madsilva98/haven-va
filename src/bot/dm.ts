@@ -96,7 +96,7 @@ export async function handleDM(ctx: Context): Promise<boolean> {
   const chatId = ctx.chat.id;
   pushRecent(chatId, senderName, text);
 
-  const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+  const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
   let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
   if (calendarKeywords.test(text)) {
     try {
