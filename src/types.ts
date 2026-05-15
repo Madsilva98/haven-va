@@ -83,7 +83,13 @@ export interface InfluencerRow {
   origem?: string;
 }
 
-export type ReminderRecurrence = string;
+export type ReminderRecurrence = "diária" | "semanal" | "mensal";
+
+export const RECURRENCE_VALUES: readonly ReminderRecurrence[] = ["diária", "semanal", "mensal"];
+
+export function isValidRecurrence(value: unknown): value is ReminderRecurrence {
+  return typeof value === "string" && (RECURRENCE_VALUES as readonly string[]).includes(value);
+}
 
 export interface ReminderRow {
   id: string;

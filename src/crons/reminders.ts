@@ -1,18 +1,9 @@
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
+import { nextOccurrence } from "../lib/recurrence.js";
 import { sendDM } from "../lib/telegram.js";
 import { formatReminderMessage } from "../messages/pipeline.js";
 import * as notion from "../notion.js";
-import type { ReminderRecurrence } from "../types.js";
-
-function nextOccurrence(whenIso: string, recurrence: ReminderRecurrence): string {
-  const d = new Date(whenIso);
-  if (recurrence === "diária") d.setDate(d.getDate() + 1);
-  else if (recurrence === "semanal") d.setDate(d.getDate() + 7);
-  else if (recurrence === "mensal") d.setMonth(d.getMonth() + 1);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
 
 export async function run(): Promise<void> {
   let due: Awaited<ReturnType<typeof notion.getDueReminders>> = [];
