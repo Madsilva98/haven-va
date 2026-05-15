@@ -1330,6 +1330,13 @@ export interface ContentCalendarRow {
   owner: string | null;
 }
 
+// Cap on rows passed back to the assistant. The full content calendar
+// can have 100+ historical rows that bloat Haiku's context without
+// adding signal. Within ±CONTENT_CAL_WINDOW_DAYS of today, capped at
+// CONTENT_CAL_MAX_ROWS, sorted by publishDate ascending (closest first).
+const CONTENT_CAL_WINDOW_DAYS = 30;
+const CONTENT_CAL_MAX_ROWS = 20;
+
 async function getContentCalendarRows(): Promise<ContentCalendarRow[]> {
   if (!NOTION_CONTENT_CALENDAR_DB_ID) return [];
   try {
@@ -1363,7 +1370,33 @@ async function getContentCalendarRows(): Promise<ContentCalendarRow[]> {
       }
       cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
-    return rows;
+
+    // Filter to ±CONTENT_CAL_WINDOW_DAYS, then sort by date ascending,
+    // then cap at CONTENT_CAL_MAX_ROWS. Rows without a publishDate are
+    // treated as "future drafts" and kept at the end so they don't get
+    // culled before scheduled content.
+    const now = Date.now();
+    const windowMs = CONTENT_CAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const minTs = now - windowMs;
+    const maxTs = now + windowMs;
+    const filtered = rows.filter((r) => {
+      if (!r.publishDate) return true;
+      const t = Date.parse(r.publishDate);
+      if (!Number.isFinite(t)) return true;
+      return t >= minTs && t <= maxTs;
+    });
+    filtered.sort((a, b) => {
+      const ta = a.publishDate ? Date.parse(a.publishDate) : Number.POSITIVE_INFINITY;
+      const tb = b.publishDate ? Date.parse(b.publishDate) : Number.POSITIVE_INFINITY;
+      return ta - tb;
+    });
+    const capped = filtered.slice(0, CONTENT_CAL_MAX_ROWS);
+    log.debug("notion.content_calendar_capped", {
+      total: rows.length,
+      afterWindow: filtered.length,
+      returned: capped.length,
+    });
+    return capped;
   } catch (err) {
     log.warn("notion.content_calendar_rows_failed", {
       message: err instanceof Error ? err.message : String(err),
