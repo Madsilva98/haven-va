@@ -83,7 +83,7 @@ export async function handleDM(ctx) {
         return true;
     const chatId = ctx.chat.id;
     pushRecent(chatId, senderName, text);
-    const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+    const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
     let contentCalendar;
     if (calendarKeywords.test(text)) {
         try {

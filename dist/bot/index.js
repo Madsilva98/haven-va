@@ -364,7 +364,7 @@ export function buildBot() {
             return;
         if (hasNonTextMedia)
             return;
-        const calendarKeywords = /calendar|calend|social media|content|story|stories|post|reel|conteúdo|publicaç/i;
+        const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
         let contentCalendar;
         if (calendarKeywords.test(text)) {
             try {
