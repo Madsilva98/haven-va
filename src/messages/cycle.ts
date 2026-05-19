@@ -326,6 +326,17 @@ export function formatDailyDM(args: DailyDMArgs): string {
       const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
       lines.push(`• ${escapeMd(t.title)}${deadline}`);
     }
+    lines.push("");
+  }
+
+  const emCurso = args.tasks.filter(
+    (t) => t.status === "Em curso" && trafficLight(t) === "green" && t.priority !== "Média",
+  );
+  if (emCurso.length > 0) {
+    lines.push("*em curso*");
+    for (const t of emCurso) {
+      lines.push(`• ${escapeMd(t.title)}`);
+    }
   }
 
   return lines.join("\n");
