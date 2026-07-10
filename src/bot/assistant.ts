@@ -357,9 +357,21 @@ const SILENCE_PHRASES = [
   "não vou responder",
 ];
 
+const EMOJI_ONLY_RE = /^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\s]+$/u;
+const ZERO_WIDTH_ONLY_RE = /^[​-‏⁠﻿\s]*$/;
+
 function isSilenceResponse(text: string): boolean {
-  const lower = text.toLowerCase();
-  return SILENCE_PHRASES.some((p) => lower.includes(p));
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  if (SILENCE_PHRASES.some((p) => lower.includes(p))) return true;
+  if (ZERO_WIDTH_ONLY_RE.test(trimmed)) return true;
+  if (EMOJI_ONLY_RE.test(trimmed)) return true;
+  // Model sometimes narrates the silence decision instead of truly producing no text,
+  // e.g. "[Silêncio]", "(silêncio — cumprimento puro.)" — strip a single wrapping
+  // bracket/paren pair and check if what remains starts with "silêncio".
+  const unwrapped = trimmed.replace(/^[\[(]+/, "").replace(/[\])]+$/, "").trim().toLowerCase();
+  if (/^sil[eê]ncio\b/.test(unwrapped)) return true;
+  return false;
 }
 
 let anthropicClient: Anthropic | null = null;
