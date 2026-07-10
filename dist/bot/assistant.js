@@ -224,16 +224,17 @@ const TOOLS = [
                 new_value: {
                     type: "string",
                     description: "Novo valor. " +
-                        "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
+                        "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
                         "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
                         "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
                         "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
                         "to_discuss status: Pendente|Discutido|Arquivado|Aberto. " +
                         "decisions status: Pendente implementação|Implementada. " +
                         "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
-                        "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
+                        "partners status: On hold|A contactar|Contactado|A aguardar resposta|Em negociação|Fechado|Arquivado. " +
+                        "influencers status: A identificar|A contactar|Contactado|Em conversa|Proposta enviada|Fechado|Arquivado. " +
                         "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
-                        "projects status: Ativo|Em pausa|Concluído|Cancelado.",
+                        "projects status: Not started|In progress|Done.",
                 },
             },
             required: ["db", "item", "field", "new_value"],

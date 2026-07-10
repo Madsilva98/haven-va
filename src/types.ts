@@ -17,7 +17,7 @@ export type Area =
 
 export type Priority = "Alta" | "Média" | "Baixa";
 
-export type Status = "A fazer" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
+export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
 
 export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area" | "title";
 
@@ -42,6 +42,7 @@ export interface WeeklyPriority {
 // ----- Phase 3 -----
 
 export type PartnerStatus =
+  | "On hold"
   | "A contactar"
   | "Contactado"
   | "A aguardar resposta"

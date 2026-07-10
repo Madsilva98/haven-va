@@ -107,7 +107,7 @@ Não perguntes — age com o que tens. Se forem vários itens, trata cada um sep
 "muda X para Y", "marca como feito/ativo/resolvido", "passa para a Mafalda", "altera o status de X", "cancela X" → usa `update_record`.
 - `db`: inferir pelo contexto (backlog=tasks, to_discuss, decisions, content_calendar, partners, influencers, events, projects).
 - `item`: título ou parte do título do registo existente. Se a lista de tasks estiver disponível acima, usa o título exato de lá.
-- `field` + `new_value`: backlog status: `A fazer|Em curso|Bloqueado|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss status: `Pendente|Discutido|Arquivado|Aberto`. decisions status: `Pendente implementação|Implementada`.
+- `field` + `new_value`: backlog status: `To do|Em curso|Bloqueado|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss status: `Pendente|Discutido|Arquivado|Aberto`. decisions status: `Pendente implementação|Implementada`.
 
 
 ## Perguntas e consultas
@@ -133,8 +133,8 @@ A data/hora atual em Europe/Lisbon é fornecida no user message. Resolve datas r
 Quando vês `[Última ação do bot: "..."]`, é o que o bot fez na mensagem anterior. Usa isto para interpretar follow-ups:
 - "é uma tarefa da mafalda" → `update_record` db=backlog, o item da última ação, field=owner, value=Mafalda
 - "apaga" / "cancela" → `update_record` db=backlog, field=status, value=Cancelado
-- Status backlog: `A fazer` | `Em curso` | `Bloqueado` | `Feito` | `Cancelado`
-- Prioridade backlog: `1. alta` | `2. média` | `3. baixa`
+- Status backlog: `To do` | `Em curso` | `Bloqueado` | `Feito` | `Cancelado`
+- Prioridade backlog: `Alta` | `Média` | `Baixa`
 - "muda para X" / "afinal é Y" → `update_record` com o campo relevante e a db certa
 
 Quando vês `[Em resposta ao bot: "..."]`, usa esse texto para identificar o assunto — se o bot perguntou "qual task?" e a resposta é "teste 2", age sobre "teste 2".

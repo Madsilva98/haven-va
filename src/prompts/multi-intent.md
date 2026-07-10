@@ -325,7 +325,7 @@ Output:
 
 Open tasks:
 ```
-- abc-123 | "contactar Sport Zone para parceria" | owner=Madalena | area=Parcerias | status=A fazer
+- abc-123 | "contactar Sport Zone para parceria" | owner=Madalena | area=Parcerias | status=To do
 ```
 
 Message (sender: Madalena): `marca a sport zone como contactada`
