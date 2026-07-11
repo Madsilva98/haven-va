@@ -4,15 +4,19 @@ import { sendDM } from "../lib/telegram.js";
 import { formatReminderMessage } from "../messages/pipeline.js";
 import * as notion from "../notion.js";
 function nextOccurrence(whenIso, recurrence) {
+    // UTC-only arithmetic + toISOString(): keeps the stored value an
+    // unambiguous absolute UTC instant, matching every other writer of
+    // Quando. Building this from local getters (getHours, no "Z") used to
+    // relabel Lisbon wall-clock as UTC, delaying every 2nd+ recurring fire
+    // by the DST offset.
     const d = new Date(whenIso);
     if (recurrence === "diária")
-        d.setDate(d.getDate() + 1);
+        d.setUTCDate(d.getUTCDate() + 1);
     else if (recurrence === "semanal")
-        d.setDate(d.getDate() + 7);
+        d.setUTCDate(d.getUTCDate() + 7);
     else if (recurrence === "mensal")
-        d.setMonth(d.getMonth() + 1);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        d.setUTCMonth(d.getUTCMonth() + 1);
+    return d.toISOString();
 }
 export async function run() {
     let due = [];

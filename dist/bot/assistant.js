@@ -11,6 +11,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
 import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
+import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
@@ -460,7 +461,7 @@ async function execCreateReminder(input, sender, ctx, collector) {
     const forWho = typeof input.for === "string" ? input.for : sender;
     if (!text || !whenRaw)
         return "parâmetros em falta";
-    const quando = lisbonLocalToUtc(whenRaw);
+    const quando = lisbonNaiveToUtcIso(whenRaw);
     const targets = forWho === "all"
         ? [...FOUNDERS]
         : FOUNDERS.includes(forWho)
