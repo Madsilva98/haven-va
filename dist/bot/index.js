@@ -364,7 +364,15 @@ export function buildBot() {
             return;
         if (hasNonTextMedia)
             return;
-        const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
+        // Only inject the Content Calendar context when the user is clearly
+        // talking about social-media planning. The previous regex matched
+        // any "post" / "content" / "story" anywhere in the text, which
+        // false-positives on common Portuguese words (e.g. "post-parto",
+        // "discontento") and bloats Haiku's context by 500-2000 tokens for
+        // unrelated messages. Anchor on the actual phrasings the guide
+        // documents: "ideia para post/story/reel", "content calendar",
+        // "social media", "agenda/publica/adiciona ao conteúdo", etc.
+        const calendarKeywords = /content\s*calendar|social\s*media|ideia\s+(?:para|de)\s+(?:post|story|stories|reel|reels|carrossel|conte[uú]do)|agenda(?:r|\s)\s*(?:o\s+|um\s+)?(?:post|story|reel|carrossel)|\bpublica(?:r|m|ç[ãa]o|do|da|dos)?\b|conte[uú]do\s+social/i;
         let contentCalendar;
         if (calendarKeywords.test(text)) {
             try {
