@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Knowledge base (read this if you haven't worked on the bot in a while)
+
+The `docs/knowledge-base/` folder is the durable memory of "how this bot actually works, where it breaks, how to operate it." Start with [`docs/knowledge-base/README.md`](docs/knowledge-base/README.md). Skim the relevant topic doc before touching the area you're about to change:
+
+- [`bot-architecture.md`](docs/knowledge-base/bot-architecture.md) — 10-minute mental model: message flow, file map, cron schedule, state model
+- [`deploy-and-access.md`](docs/knowledge-base/deploy-and-access.md) — NAS access (Tailscale, DSM, Container Manager), deploy pipeline, rollback, secret hygiene
+- [`notion-api-gotchas.md`](docs/knowledge-base/notion-api-gotchas.md) — data sources vs databases, schema brittleness, retry strategy, property type quirks
+- [`failure-modes-YYYY-MM-DD.md`](docs/knowledge-base/) — point-in-time failure-mode audits (cumulative; one per audit run)
+- [`cost-and-latency-YYYY-MM-DD.md`](docs/knowledge-base/) — Anthropic + Notion cost baselines and optimization ROI
+
+**Append to the knowledge base as you learn things.** If a gotcha bit you, write it down so it doesn't bite the next session.
+
 ## Commands
 
 ```bash
