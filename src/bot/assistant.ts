@@ -14,6 +14,7 @@ import { InlineKeyboard, type Context } from "grammy";
 
 import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
+import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import type { ContentCalendarRow } from "../notion.js";
@@ -544,7 +545,7 @@ async function execCreateReminder(
   const forWho = typeof input.for === "string" ? input.for : sender;
   if (!text || !whenRaw) return "parâmetros em falta";
 
-  const quando = lisbonLocalToUtc(whenRaw);
+  const quando = lisbonNaiveToUtcIso(whenRaw);
   const targets: FounderName[] =
     forWho === "all"
       ? [...FOUNDERS]

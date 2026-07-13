@@ -6,12 +6,16 @@ import * as notion from "../notion.js";
 import type { ReminderRecurrence } from "../types.js";
 
 function nextOccurrence(whenIso: string, recurrence: ReminderRecurrence): string {
+  // UTC-only arithmetic + toISOString(): keeps the stored value an
+  // unambiguous absolute UTC instant, matching every other writer of
+  // Quando. Building this from local getters (getHours, no "Z") used to
+  // relabel Lisbon wall-clock as UTC, delaying every 2nd+ recurring fire
+  // by the DST offset.
   const d = new Date(whenIso);
-  if (recurrence === "diária") d.setDate(d.getDate() + 1);
-  else if (recurrence === "semanal") d.setDate(d.getDate() + 7);
-  else if (recurrence === "mensal") d.setMonth(d.getMonth() + 1);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  if (recurrence === "diária") d.setUTCDate(d.getUTCDate() + 1);
+  else if (recurrence === "semanal") d.setUTCDate(d.getUTCDate() + 7);
+  else if (recurrence === "mensal") d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString();
 }
 
 export async function run(): Promise<void> {
