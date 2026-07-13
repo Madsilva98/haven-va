@@ -362,7 +362,7 @@ async function createTask(
     Owner: { select: { name: extraction.owner } },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
-    Status: { status: { name: "A fazer" satisfies Status } },
+    Status: { status: { name: "To do" satisfies Status } },
     Origem: richText(originalMsg),
     ...relProps,
   };
@@ -783,7 +783,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
           ? (priorityName as Priority)
           : null;
       const deadline = readDateStart(props["Deadline"]);
-      const statusName = readStatusName(props["Status"]) ?? "A fazer";
+      const statusName = readStatusName(props["Status"]) ?? "To do";
       const status = statusName as Status;
 
       tasks.push({
@@ -817,7 +817,7 @@ function rowToOpenTask(row: { id: string; properties: Record<string, unknown> })
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priorityName = readSelectName(props["Prioridade"]);
   const priority =
-    priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
+    priorityName === "Alta" || priorityName === "Média" || priorityName === "Baixa"
       ? (priorityName as Priority)
       : null;
   const deadline = readDateStart(props["Deadline"]);
@@ -1168,7 +1168,7 @@ async function getContentCalendarAlerts(): Promise<{
     return empty;
   }
   try {
-    const rows: Array<{ id: string; properties: Record<string, unknown> }> = [];
+    const rows: Array<{ id: string; properties: Record<string, unknown>; lastEditedTime: string }> = [];
     let cursor: string | undefined;
     do {
       const res = await withRetry("getContentCalendarAlerts", () =>
@@ -1182,6 +1182,7 @@ async function getContentCalendarAlerts(): Promise<{
         rows.push({
           id: row.id,
           properties: row.properties as Record<string, unknown>,
+          lastEditedTime: "last_edited_time" in row ? (row.last_edited_time as string) : new Date(0).toISOString(),
         });
       }
       cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -1195,34 +1196,21 @@ async function getContentCalendarAlerts(): Promise<{
     for (const row of rows) {
       try {
         const props = row.properties;
-        // Defensive: try common property names (unknown schema)
-        const status =
-          readSelectName(props["Status"]) ??
-          readStatusName(props["Status"]) ??
-          readSelectName(props["status"]);
-        const publishDate =
-          readDateStart(props["Data publicação"]) ??
-          readDateStart(props["Publish date"]) ??
-          readDateStart(props["Data"]);
-        const lastEdited =
-          readDateStart(props["Last edited"]) ??
-          readDateStart(props["Atualizado em"]);
+        const status = readStatusName(props["status"]) ?? readSelectName(props["status"]);
+        const publishDate = readDateStart(props["Posting Haven"]);
+        const lastEdited = row.lastEditedTime;
 
         if (publishDate) {
           const ms = new Date(publishDate).getTime() - now;
           const hours = ms / (1000 * 60 * 60);
-          if (hours > 0 && hours < 24 && status !== "Agendado") {
+          if (hours > 0 && hours < 24 && status !== "ready to post" && status !== "posted") {
             hoursToPublishUnscheduled.push(row);
           }
-          if (
-            hours > 0 &&
-            hours < 48 &&
-            (status === "Em edição" || status === "Editing")
-          ) {
+          if (hours > 0 && hours < 48 && status === "editing") {
             editingTooLong.push(row);
           }
         }
-        if (status === "Ideação" || status === "Ideation") {
+        if (status === "ideation") {
           const reference = lastEdited
             ? new Date(lastEdited).getTime()
             : null;

@@ -19,7 +19,7 @@ Each item has shape:
   "area": string,
   "priority": "Alta" | "Média" | "Baixa" | null,
   "deadline": string | null,
-  "status": "A fazer" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado"
+  "status": "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado"
 }
 ```
 
@@ -45,26 +45,26 @@ Each item has shape:
 - **`targetTitle`** is the matching task's existing title (verbatim from the list), used only for display in the confirmation message.
 - **`field`** is exactly one of: `status` | `owner` | `deadline` | `prioridade` | `area`. Map natural-language phrasing:
   - "feito", "fechado", "resolvido", "contactada", "contactado", "marcada como feita", "já está" → `field: "status"`, `newValue: "Feito"`
-  - "em curso", "a fazer", "bloqueado", "cancelado" → `field: "status"`, `newValue: "Em curso"` / `"A fazer"` / `"Bloqueado"` / `"Cancelado"`
+  - "em curso", "a fazer", "bloqueado", "cancelado" → `field: "status"`, `newValue: "Em curso"` / `"To do"` / `"Bloqueado"` / `"Cancelado"`
   - "muda o owner para X", "agora fica com a X", "passa para a X" → `field: "owner"`, `newValue: "X"` (one of the founder names)
   - "deadline sexta", "para segunda", "até dia 12" → `field: "deadline"`, `newValue: ISO date "YYYY-MM-DD"` (resolve relative dates assuming Europe/Lisbon, today's date is provided in context if needed; if you cannot resolve, return `null`)
   - "prioridade alta/média/baixa", "torna isto urgente" → `field: "prioridade"`, `newValue: "Alta"` / `"Média"` / `"Baixa"`
   - "muda a área para marketing/operações/…" → `field: "area"`, `newValue: <Area enum value>`
-- **`oldValue`** is the current value of the field on the matched task, formatted as a short human-readable string (e.g. `"Madalena"`, `"A fazer"`, `"sem deadline"`, `"Média"`). For nulls write `"sem deadline"` / `"sem prioridade"` / `"sem área"`.
+- **`oldValue`** is the current value of the field on the matched task, formatted as a short human-readable string (e.g. `"Madalena"`, `"To do"`, `"sem deadline"`, `"Média"`). For nulls write `"sem deadline"` / `"sem prioridade"` / `"sem área"`.
 - **`newValue`** is what we will write to Notion. Use the canonical enum casing (`"Feito"`, not `"feito"`; `"Madalena"`, not `"madalena"`).
 - Do not edit the `title` field — title edits are out of scope for Phase 1. If the user is asking to rename a task, return `null`.
 
 ## Examples
 
 Message: "marca a sport zone como contactada"
-Open tasks include: `{ "id": "abc123", "title": "contactar Sport Zone para parceria", "status": "A fazer", ... }`
+Open tasks include: `{ "id": "abc123", "title": "contactar Sport Zone para parceria", "status": "To do", ... }`
 Output:
 ```json
 {
   "targetTaskId": "abc123",
   "targetTitle": "contactar Sport Zone para parceria",
   "field": "status",
-  "oldValue": "A fazer",
+  "oldValue": "To do",
   "newValue": "Feito"
 }
 ```
