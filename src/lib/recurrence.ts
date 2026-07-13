@@ -17,11 +17,18 @@ export function nextOccurrence(whenIso: string, recurrence: ReminderRecurrence):
     case "mensal":
       d.setUTCMonth(d.getUTCMonth() + 1);
       break;
+    case "anual":
+      // Birthdays + anniversaries. setUTCFullYear handles Feb-29 birthdays
+      // correctly: a Feb-29 birthday in a non-leap year rolls forward
+      // to Mar-1 (JS Date semantics), which is acceptable here — we'd
+      // rather send the reminder a day late than skip the year.
+      d.setUTCFullYear(d.getUTCFullYear() + 1);
+      break;
     default: {
       // Defense in depth: if a future recurrence value bypasses the type
       // guard at the read site, refuse to silently return the original
       // date (which would re-fire the reminder forever on every 5-min
-      // cron tick — see docs/failure-modes-audit-2026-05-15.md).
+      // cron tick — see docs/knowledge-base/notion-api-gotchas.md).
       const _exhaustive: never = recurrence;
       throw new Error(`nextOccurrence: unsupported recurrence value: ${String(_exhaustive)}`);
     }

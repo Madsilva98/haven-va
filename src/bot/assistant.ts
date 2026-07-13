@@ -99,7 +99,11 @@ const TOOLS: Anthropic.Tool[] = [
         },
         recurrence: {
           type: "string",
-          description: "Repetição automática. Ex: 'diária', 'semanal', 'mensal', 'a cada 2 semanas'. Usa quando a mensagem pedir repetição.",
+          enum: ["diária", "semanal", "mensal", "anual"],
+          description:
+            "Repetição automática. Valores aceites: 'diária', 'semanal', 'mensal', 'anual'. " +
+            "Usa 'anual' para aniversários, datas anuais e celebrações que repetem todos os anos. " +
+            "Outras periodicidades ('a cada 2 semanas' etc.) não são suportadas — escolhe a mais próxima ou cria reminders manuais.",
         },
       },
       required: ["text", "when_iso", "for"],
@@ -559,8 +563,8 @@ async function execCreateReminder(
     : undefined;
 
   // Reject unknown recurrence values from the LLM tool input. Without this,
-  // a typo or hallucination ("anual", "yearly") would persist to Notion and
-  // later wedge the reminders cron (see lib/recurrence.ts).
+  // a typo or hallucination ("yearly", "annually") would persist to Notion
+  // and later wedge the reminders cron (see lib/recurrence.ts).
   const recurrenceInput = typeof input.recurrence === "string" ? input.recurrence : undefined;
   const recurrence = isValidRecurrence(recurrenceInput) ? recurrenceInput : undefined;
   if (recurrenceInput && !recurrence) {
