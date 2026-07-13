@@ -12,6 +12,8 @@
  *   after writes.
  */
 import { Client, APIResponseError } from "@notionhq/client";
+import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
+import { isValidRecurrence } from "./types.js";
 import { log } from "./lib/log.js";
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
@@ -33,19 +35,75 @@ if (!NOTION_API_KEY) {
 if (!NOTION_BACKLOG_DB_ID) {
     throw new Error("notion: NOTION_BACKLOG_DB_ID is required");
 }
-const client = new Client({ auth: NOTION_API_KEY });
+const client = new Client({
+    auth: NOTION_API_KEY,
+    notionVersion: "2025-09-03",
+});
+/**
+ * Resolve data_source_id for every configured Notion database. Must be
+ * called once at server startup before any query/create that touches a
+ * data source. Throws if any database has zero or multiple data sources
+ * (the multi-source breaking trap — see
+ * docs/knowledge-base/notion-api-gotchas.md).
+ */
+export async function initialize() {
+    await initializeDataSources(client, [
+        NOTION_BACKLOG_DB_ID,
+        NOTION_FOUNDER_FOCUS_DB_ID,
+        NOTION_PARTNER_DB_ID,
+        NOTION_INFLUENCER_DB_ID,
+        NOTION_REMINDERS_DB_ID,
+        NOTION_TO_DISCUSS_DB_ID,
+        NOTION_DECISIONS_DB_ID,
+        NOTION_CONTENT_CALENDAR_DB_ID,
+        NOTION_PROJECTS_DB_ID,
+        NOTION_EVENT_DB_ID,
+        NOTION_LISTS_DB_ID,
+    ]);
+}
 // ----- retry helper -----
+// Default backoff schedule for transient failures. 429s override the
+// scheduled delay with the value from the server's Retry-After header.
 const RETRY_DELAYS_MS = [500, 2000, 8000];
+// Cap on how long we'll wait if Retry-After is unreasonable (e.g. server
+// returns a 5-minute wait — better to fail and surface the error than
+// hang the bot's reply for that long).
+const MAX_RETRY_AFTER_MS = 30_000;
 function isRetriable(err) {
     if (err instanceof APIResponseError) {
         if (err.status === 429)
             return true;
+        if (err.status === 409)
+            return true; // conflict_error: concurrent write — safe to retry
         if (err.status >= 500 && err.status < 600)
             return true;
         return false;
     }
     // Network or unknown errors → retry once
     return true;
+}
+/**
+ * Parse a Retry-After header value. The Notion API returns it as
+ * seconds. Returns ms, capped at MAX_RETRY_AFTER_MS. Returns null if
+ * the header is missing or malformed.
+ */
+function retryAfterMs(err) {
+    if (!(err instanceof APIResponseError))
+        return null;
+    // The SDK exposes the underlying Response via err.headers on v5.
+    // We probe defensively in case the field shape shifts across versions.
+    const headers = err.headers;
+    if (!headers)
+        return null;
+    const raw = typeof headers.get === "function"
+        ? headers.get("retry-after")
+        : headers["retry-after"];
+    if (!raw)
+        return null;
+    const secs = Number(raw);
+    if (!Number.isFinite(secs) || secs <= 0)
+        return null;
+    return Math.min(Math.ceil(secs * 1000), MAX_RETRY_AFTER_MS);
 }
 async function withRetry(label, fn) {
     let lastErr;
@@ -66,11 +124,15 @@ async function withRetry(label, fn) {
                 });
                 throw err;
             }
-            const delay = RETRY_DELAYS_MS[attempt];
+            // On 429, prefer the server-supplied Retry-After header. Otherwise
+            // fall back to the fixed backoff schedule.
+            const hinted = retryAfterMs(err);
+            const delay = hinted ?? RETRY_DELAYS_MS[attempt];
             log.warn("notion.retry", {
                 label,
                 attempt: attempt + 1,
                 delayMs: delay,
+                delaySource: hinted ? "retry_after" : "fixed",
                 status: err instanceof APIResponseError ? err.status : undefined,
             });
             await new Promise((resolve) => setTimeout(resolve, delay));
@@ -245,8 +307,8 @@ async function findEntityByName(kind, nome) {
     if (!dbId)
         return null;
     try {
-        const res = await withRetry("findEntityByName", () => client.databases.query({
-            database_id: dbId,
+        const res = await withRetry("findEntityByName", () => client.dataSources.query({
+            data_source_id: dsId(dbId),
             filter: { property: "Name", title: { contains: nome } },
             page_size: 1,
         }));
@@ -275,7 +337,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
         Owner: { select: { name: extraction.owner } },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
-        Status: { status: { name: "A fazer" } },
+        Status: { status: { name: "To do" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
@@ -284,7 +346,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
     if (priority === "Alta")
         props["Prioridade semanal"] = { checkbox: true };
     const page = await withRetry("createTask", () => client.pages.create({
-        parent: { database_id: NOTION_BACKLOG_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_BACKLOG_DB_ID) },
         properties: props,
     }));
     invalidateOpenTasksCache();
@@ -372,8 +434,8 @@ const RECORD_DB_CONFIGS = {
 };
 async function findRecordByTitle(dbId, titleProp, query, dbKey) {
     // Layer 1a: title.contains (fast, exact)
-    const res = await withRetry("findRecordByTitle", () => client.databases.query({
-        database_id: dbId,
+    const res = await withRetry("findRecordByTitle", () => client.dataSources.query({
+        data_source_id: dsId(dbId),
         filter: { property: titleProp, title: { contains: query } },
         page_size: 5,
     }));
@@ -408,8 +470,8 @@ async function findRecordByTitle(dbId, titleProp, query, dbKey) {
         const candidates = [];
         for (const word of words) {
             try {
-                const wRes = await withRetry("findRecordByTitle.word", () => client.databases.query({
-                    database_id: dbId,
+                const wRes = await withRetry("findRecordByTitle.word", () => client.dataSources.query({
+                    data_source_id: dsId(dbId),
                     filter: { property: titleProp, title: { contains: word } },
                     page_size: 10,
                 }));
@@ -431,7 +493,7 @@ async function findRecordByTitle(dbId, titleProp, query, dbKey) {
     // Layer 3: fetch-all + client-side scoring (small DBs only)
     if (dbKey && SMALL_DBS.has(dbKey)) {
         try {
-            const allRes = await withRetry("findRecordByTitle.fetchAll", () => client.databases.query({ database_id: dbId, page_size: 100 }));
+            const allRes = await withRetry("findRecordByTitle.fetchAll", () => client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }));
             let best = null;
             for (const r of allRes.results) {
                 if (!("properties" in r))
@@ -458,8 +520,8 @@ async function findBacklogTask(query) {
 }
 async function searchRecordsInDb(dbId, titleProp, query, mapRow, dbKey) {
     // Layer 1a: title.contains (fast, exact)
-    const res = await withRetry("searchRecordsInDb", () => client.databases.query({
-        database_id: dbId,
+    const res = await withRetry("searchRecordsInDb", () => client.dataSources.query({
+        data_source_id: dsId(dbId),
         filter: { property: titleProp, title: { contains: query } },
         page_size: 10,
     }));
@@ -494,8 +556,8 @@ async function searchRecordsInDb(dbId, titleProp, query, mapRow, dbKey) {
         const wordResults = [];
         for (const word of words) {
             try {
-                const wRes = await withRetry("searchRecordsInDb.word", () => client.databases.query({
-                    database_id: dbId,
+                const wRes = await withRetry("searchRecordsInDb.word", () => client.dataSources.query({
+                    data_source_id: dsId(dbId),
                     filter: { property: titleProp, title: { contains: word } },
                     page_size: 10,
                 }));
@@ -515,7 +577,7 @@ async function searchRecordsInDb(dbId, titleProp, query, mapRow, dbKey) {
     // Layer 3: fetch-all + client-side scoring (small DBs only)
     if (dbKey && SMALL_DBS.has(dbKey)) {
         try {
-            const allRes = await withRetry("searchRecordsInDb.fetchAll", () => client.databases.query({ database_id: dbId, page_size: 100 }));
+            const allRes = await withRetry("searchRecordsInDb.fetchAll", () => client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }));
             const scored = allRes.results
                 .filter((r) => "properties" in r)
                 .map((r) => {
@@ -615,8 +677,8 @@ async function getOpenTasks() {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getOpenTasks", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
+        const res = await withRetry("getOpenTasks", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
                     { property: "Status", status: { does_not_equal: "Feito" } },
@@ -637,7 +699,7 @@ async function getOpenTasks() {
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
-            const statusName = readStatusName(props["Status"]) ?? "A fazer";
+            const statusName = readStatusName(props["Status"]) ?? "To do";
             const status = statusName;
             tasks.push({
                 id: row.id,
@@ -658,15 +720,25 @@ async function getOpenTasks() {
 // ============================================================
 // Phase 2 — Weekly cycle
 // ============================================================
+// Defensive: the Backlog "Prioridade" select has historically used both
+// numbered and bare forms ("1. Alta" / "Alta"). Map either shape to the
+// canonical Priority enum so readers don't silently see null when the DB
+// option string drifts. See docs/knowledge-base/notion-api-gotchas.md.
+function normalizePriority(raw) {
+    if (!raw)
+        return null;
+    const stripped = raw.replace(/^\d+\.\s*/, "").trim();
+    if (stripped === "Alta" || stripped === "Média" || stripped === "Baixa") {
+        return stripped;
+    }
+    return null;
+}
 function rowToOpenTask(row) {
     const props = row.properties;
     const title = readPlainText(props["Título"]);
     const owner = (readSelectName(props["Owner"]) ?? "Unassigned");
     const area = (readSelectName(props["Área"]) ?? "Outro");
-    const priorityName = readSelectName(props["Prioridade"]);
-    const priority = priorityName === "1. Alta" || priorityName === "2. Média" || priorityName === "3. Baixa"
-        ? priorityName
-        : null;
+    const priority = normalizePriority(readSelectName(props["Prioridade"]));
     const deadline = readDateStart(props["Deadline"]);
     const statusName = readStatusName(props["Status"]) ?? "To do";
     return {
@@ -693,8 +765,8 @@ async function getWeeklyPriorities(week) {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getWeeklyPriorities", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
+        const res = await withRetry("getWeeklyPriorities", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
                     { property: "Prioridade semanal", checkbox: { equals: true } },
@@ -738,8 +810,8 @@ async function getCompletedSince(date) {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getCompletedSince", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
+        const res = await withRetry("getCompletedSince", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
                     { property: "Status", status: { equals: "Feito" } },
@@ -773,8 +845,8 @@ async function getOverdueTasks() {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getOverdueTasks", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
+        const res = await withRetry("getOverdueTasks", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
                     { property: "Deadline", date: { before: today } },
@@ -804,7 +876,7 @@ async function setFounderFocus(entry) {
     }
     // Always create — latest entry per founder is the active focus.
     await withRetry("setFounderFocus", () => client.pages.create({
-        parent: { database_id: NOTION_FOUNDER_FOCUS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID) },
         properties: {
             Name: { title: [{ text: { content: entry.focoOperacional.slice(0, 80) } }] },
             Founder: { select: { name: entry.founder } },
@@ -817,8 +889,8 @@ async function setFounderFocus(entry) {
 async function getFounderFocusForWeek(week) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID)
         return [];
-    const res = await withRetry("getFounderFocusForWeek", () => client.databases.query({
-        database_id: NOTION_FOUNDER_FOCUS_DB_ID,
+    const res = await withRetry("getFounderFocusForWeek", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
         filter: { property: "Semana", formula: { string: { equals: week } } },
         sorts: [{ timestamp: "created_time", direction: "descending" }],
     }));
@@ -872,8 +944,8 @@ async function getPartnersStale(category) {
     const rows = [];
     let cursor;
     do {
-        const res = await withRetry("getPartnersStale", () => client.databases.query({
-            database_id: NOTION_PARTNER_DB_ID,
+        const res = await withRetry("getPartnersStale", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_PARTNER_DB_ID),
             filter: {
                 and: [
                     statusFilter,
@@ -921,8 +993,8 @@ async function getInfluencersStale(category) {
     const rows = [];
     let cursor;
     do {
-        const res = await withRetry("getInfluencersStale", () => client.databases.query({
-            database_id: NOTION_INFLUENCER_DB_ID,
+        const res = await withRetry("getInfluencersStale", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_INFLUENCER_DB_ID),
             filter: {
                 and: [
                     statusFilter,
@@ -966,8 +1038,8 @@ async function getContentCalendarAlerts() {
         const rows = [];
         let cursor;
         do {
-            const res = await withRetry("getContentCalendarAlerts", () => client.databases.query({
-                database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+            const res = await withRetry("getContentCalendarAlerts", () => client.dataSources.query({
+                data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
                 start_cursor: cursor,
             }));
             for (const row of res.results) {
@@ -976,6 +1048,7 @@ async function getContentCalendarAlerts() {
                 rows.push({
                     id: row.id,
                     properties: row.properties,
+                    lastEditedTime: "last_edited_time" in row ? row.last_edited_time : new Date(0).toISOString(),
                 });
             }
             cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -987,28 +1060,20 @@ async function getContentCalendarAlerts() {
         for (const row of rows) {
             try {
                 const props = row.properties;
-                // Defensive: try common property names (unknown schema)
-                const status = readSelectName(props["Status"]) ??
-                    readStatusName(props["Status"]) ??
-                    readSelectName(props["status"]);
-                const publishDate = readDateStart(props["Data publicação"]) ??
-                    readDateStart(props["Publish date"]) ??
-                    readDateStart(props["Data"]);
-                const lastEdited = readDateStart(props["Last edited"]) ??
-                    readDateStart(props["Atualizado em"]);
+                const status = readStatusName(props["status"]) ?? readSelectName(props["status"]);
+                const publishDate = readDateStart(props["Posting Haven"]);
+                const lastEdited = row.lastEditedTime;
                 if (publishDate) {
                     const ms = new Date(publishDate).getTime() - now;
                     const hours = ms / (1000 * 60 * 60);
-                    if (hours > 0 && hours < 24 && status !== "Agendado") {
+                    if (hours > 0 && hours < 24 && status !== "ready to post" && status !== "posted") {
                         hoursToPublishUnscheduled.push(row);
                     }
-                    if (hours > 0 &&
-                        hours < 48 &&
-                        (status === "Em edição" || status === "Editing")) {
+                    if (hours > 0 && hours < 48 && status === "editing") {
                         editingTooLong.push(row);
                     }
                 }
-                if (status === "Ideação" || status === "Ideation") {
+                if (status === "ideation") {
                     const reference = lastEdited
                         ? new Date(lastEdited).getTime()
                         : null;
@@ -1039,6 +1104,12 @@ async function getContentCalendarAlerts() {
         return empty;
     }
 }
+// Cap on rows passed back to the assistant. The full content calendar
+// can have 100+ historical rows that bloat Haiku's context without
+// adding signal. Within ±CONTENT_CAL_WINDOW_DAYS of today, capped at
+// CONTENT_CAL_MAX_ROWS, sorted by publishDate ascending (closest first).
+const CONTENT_CAL_WINDOW_DAYS = 30;
+const CONTENT_CAL_MAX_ROWS = 20;
 async function getContentCalendarRows() {
     if (!NOTION_CONTENT_CALENDAR_DB_ID)
         return [];
@@ -1046,8 +1117,8 @@ async function getContentCalendarRows() {
         const rows = [];
         let cursor;
         do {
-            const res = await withRetry("getContentCalendarRows", () => client.databases.query({
-                database_id: NOTION_CONTENT_CALENDAR_DB_ID,
+            const res = await withRetry("getContentCalendarRows", () => client.dataSources.query({
+                data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
                 start_cursor: cursor,
             }));
             for (const row of res.results) {
@@ -1068,7 +1139,34 @@ async function getContentCalendarRows() {
             }
             cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
         } while (cursor);
-        return rows;
+        // Filter to ±CONTENT_CAL_WINDOW_DAYS, then sort by date ascending,
+        // then cap at CONTENT_CAL_MAX_ROWS. Rows without a publishDate are
+        // treated as "future drafts" and kept at the end so they don't get
+        // culled before scheduled content.
+        const now = Date.now();
+        const windowMs = CONTENT_CAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+        const minTs = now - windowMs;
+        const maxTs = now + windowMs;
+        const filtered = rows.filter((r) => {
+            if (!r.publishDate)
+                return true;
+            const t = Date.parse(r.publishDate);
+            if (!Number.isFinite(t))
+                return true;
+            return t >= minTs && t <= maxTs;
+        });
+        filtered.sort((a, b) => {
+            const ta = a.publishDate ? Date.parse(a.publishDate) : Number.POSITIVE_INFINITY;
+            const tb = b.publishDate ? Date.parse(b.publishDate) : Number.POSITIVE_INFINITY;
+            return ta - tb;
+        });
+        const capped = filtered.slice(0, CONTENT_CAL_MAX_ROWS);
+        log.debug("notion.content_calendar_capped", {
+            total: rows.length,
+            afterWindow: filtered.length,
+            returned: capped.length,
+        });
+        return capped;
     }
     catch (err) {
         log.warn("notion.content_calendar_rows_failed", {
@@ -1092,7 +1190,7 @@ async function createContentCalendarEntry(params) {
         properties["Ad type"] = { select: { name: params.adType } };
     }
     const page = await withRetry("createContentCalendarEntry", () => client.pages.create({
-        parent: { database_id: NOTION_CONTENT_CALENDAR_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID) },
         properties: properties,
     }));
     log.info("notion.content_calendar_entry_created", { title: params.title });
@@ -1116,7 +1214,7 @@ async function createReminder(r, taskPageId) {
         properties["Recorrência"] = { select: { name: r.recurrence } };
     }
     const page = await withRetry("createReminder", () => client.pages.create({
-        parent: { database_id: NOTION_REMINDERS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_REMINDERS_DB_ID) },
         properties: properties,
     }));
     if (taskPageId) {
@@ -1138,8 +1236,8 @@ async function getDueReminders() {
     const rows = [];
     let cursor;
     do {
-        const res = await withRetry("getDueReminders", () => client.databases.query({
-            database_id: NOTION_REMINDERS_DB_ID,
+        const res = await withRetry("getDueReminders", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_REMINDERS_DB_ID),
             filter: {
                 and: [
                     { property: "Enviado", checkbox: { equals: false } },
@@ -1160,7 +1258,17 @@ async function getDueReminders() {
                 continue;
             }
             const recurrenceRaw = readSelectName(props["Recorrência"]);
-            const recurrence = recurrenceRaw ?? undefined;
+            let recurrence;
+            if (recurrenceRaw == null) {
+                recurrence = undefined;
+            }
+            else if (isValidRecurrence(recurrenceRaw)) {
+                recurrence = recurrenceRaw;
+            }
+            else {
+                log.warn("notion.unknown_recurrence", { id: row.id, value: recurrenceRaw });
+                recurrence = undefined;
+            }
             rows.push({
                 id: row.id,
                 texto: readPlainText(props["Reminder"]),
@@ -1192,8 +1300,8 @@ async function markReminderSent(id) {
 async function cancelReminder(text) {
     if (!NOTION_REMINDERS_DB_ID)
         return null;
-    const res = await withRetry("cancelReminder", () => client.databases.query({
-        database_id: NOTION_REMINDERS_DB_ID,
+    const res = await withRetry("cancelReminder", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_REMINDERS_DB_ID),
         filter: {
             and: [
                 { property: "Reminder", title: { contains: text } },
@@ -1236,7 +1344,7 @@ async function createToDiscuss(item, originalMsg, entityRef) {
         properties["Deadline"] = { date: { start: item.deadline } };
     }
     const page = await withRetry("createToDiscuss", () => client.pages.create({
-        parent: { database_id: NOTION_TO_DISCUSS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_TO_DISCUSS_DB_ID) },
         properties: properties,
     }));
     log.info("notion.to_discuss_created", {
@@ -1252,8 +1360,8 @@ async function getToDiscussPending() {
     const rows = [];
     let cursor;
     do {
-        const res = await withRetry("getToDiscussPending", () => client.databases.query({
-            database_id: NOTION_TO_DISCUSS_DB_ID,
+        const res = await withRetry("getToDiscussPending", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_TO_DISCUSS_DB_ID),
             filter: {
                 property: "Status",
                 status: { equals: "Pendente" },
@@ -1331,7 +1439,7 @@ async function createDecision(d, originalMsg) {
         properties["Notas"] = richText(d.notas);
     }
     const page = await withRetry("createDecision", () => client.pages.create({
-        parent: { database_id: NOTION_DECISIONS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_DECISIONS_DB_ID) },
         properties: properties,
     }));
     log.info("notion.decision_created", { id: page.id, area: d.area });
@@ -1341,8 +1449,8 @@ async function getRecentDecisions(n) {
     if (!NOTION_DECISIONS_DB_ID) {
         throw new Error("NOTION_DECISIONS_DB_ID not set — Phase 5 decision features disabled");
     }
-    const res = await withRetry("getRecentDecisions", () => client.databases.query({
-        database_id: NOTION_DECISIONS_DB_ID,
+    const res = await withRetry("getRecentDecisions", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_DECISIONS_DB_ID),
         sorts: [{ property: "Data", direction: "descending" }],
         page_size: Math.min(Math.max(n, 1), 100),
     }));
@@ -1382,8 +1490,8 @@ async function setTaskDependency(blockedId, prerequisiteId) {
 async function getDependentTasks(prerequisiteId) {
     if (!NOTION_BACKLOG_DB_ID)
         return [];
-    const res = await withRetry("getDependentTasks", () => client.databases.query({
-        database_id: NOTION_BACKLOG_DB_ID,
+    const res = await withRetry("getDependentTasks", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID),
         filter: {
             and: [
                 { property: "Depende de", relation: { contains: prerequisiteId } },
@@ -1456,7 +1564,7 @@ async function createProject(nome, owner, originalMsg) {
         throw new Error("NOTION_PROJECTS_DB_ID not set");
     }
     const page = await withRetry("createProject", () => client.pages.create({
-        parent: { database_id: NOTION_PROJECTS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_PROJECTS_DB_ID) },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { multi_select: [{ name: owner }] },
@@ -1483,7 +1591,7 @@ async function createEvent(nome, owner, originalMsg) {
         throw new Error("NOTION_EVENT_DB_ID not set");
     }
     const page = await withRetry("createEvent", () => client.pages.create({
-        parent: { database_id: NOTION_EVENT_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_EVENT_DB_ID) },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { multi_select: [{ name: owner }] },
@@ -1511,7 +1619,7 @@ async function createPartner(nome, owner, originalMsg) {
         throw new Error("NOTION_PARTNER_DB_ID not set");
     }
     const page = await withRetry("createPartner", () => client.pages.create({
-        parent: { database_id: NOTION_PARTNER_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_PARTNER_DB_ID) },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
@@ -1539,7 +1647,7 @@ async function createInfluencer(nome, owner, originalMsg) {
         throw new Error("NOTION_INFLUENCER_DB_ID not set");
     }
     const page = await withRetry("createInfluencer", () => client.pages.create({
-        parent: { database_id: NOTION_INFLUENCER_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_INFLUENCER_DB_ID) },
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
@@ -1636,7 +1744,7 @@ async function appendToPageSection(pageId, content, section) {
     log.info("notion.page_content_added", { pageId, section: section ?? "root" });
 }
 const NOTION_API_BASE = "https://api.notion.com/v1";
-const NOTION_VERSION = "2022-06-28";
+const NOTION_VERSION = "2025-09-03";
 async function uploadAndAttachFile(pageId, fileName, mimeType, fileBuffer, section) {
     // Step 1 — create file upload entry
     const createRes = await fetch(`${NOTION_API_BASE}/file_uploads`, {
@@ -1696,7 +1804,7 @@ async function addToList(item, lista, adicionadoPor, originalMsg) {
     if (!NOTION_LISTS_DB_ID)
         throw new Error("NOTION_LISTS_DB_ID not set");
     const page = await withRetry("addToList", () => client.pages.create({
-        parent: { database_id: NOTION_LISTS_DB_ID },
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_LISTS_DB_ID) },
         properties: {
             Item: { title: [{ text: { content: item.slice(0, 100) } }] },
             Lista: { select: { name: lista } },
@@ -1729,7 +1837,7 @@ async function getListNames() {
     if (_listNamesCache && now - _listNamesCache.ts < 24 * 60 * 60 * 1000)
         return _listNamesCache.names;
     try {
-        const db = await client.databases.retrieve({ database_id: NOTION_LISTS_DB_ID });
+        const db = await client.dataSources.retrieve({ data_source_id: dsId(NOTION_LISTS_DB_ID) });
         const listaProp = db.properties["Lista"];
         const names = listaProp?.select?.options?.map((o) => o.name) ?? [];
         _listNamesCache = { names, ts: now };
@@ -1744,8 +1852,8 @@ async function checkListItem(itemTitle, lista) {
         throw new Error("NOTION_LISTS_DB_ID not set");
     let rows;
     try {
-        const res = await client.databases.query({
-            database_id: NOTION_LISTS_DB_ID,
+        const res = await client.dataSources.query({
+            data_source_id: dsId(NOTION_LISTS_DB_ID),
             filter: {
                 and: [
                     { property: "Lista", select: { equals: lista } },
@@ -1758,8 +1866,8 @@ async function checkListItem(itemTitle, lista) {
     }
     catch {
         // select option not found (400 validation_error) — fetch all open items and match lista in JS
-        const res = await withRetry("checkListItem.queryAll", () => client.databases.query({
-            database_id: NOTION_LISTS_DB_ID,
+        const res = await withRetry("checkListItem.queryAll", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_LISTS_DB_ID),
             filter: { property: "Fechada", checkbox: { equals: false } },
             page_size: 100,
         }));
@@ -1806,8 +1914,8 @@ async function deleteListItem(itemTitle, lista) {
         throw new Error("NOTION_LISTS_DB_ID not set");
     let rows;
     try {
-        const res = await client.databases.query({
-            database_id: NOTION_LISTS_DB_ID,
+        const res = await client.dataSources.query({
+            data_source_id: dsId(NOTION_LISTS_DB_ID),
             filter: {
                 and: [
                     { property: "Lista", select: { equals: lista } },
@@ -1819,8 +1927,8 @@ async function deleteListItem(itemTitle, lista) {
         rows = res.results;
     }
     catch {
-        const res = await withRetry("deleteListItem.queryAll", () => client.databases.query({
-            database_id: NOTION_LISTS_DB_ID,
+        const res = await withRetry("deleteListItem.queryAll", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_LISTS_DB_ID),
             filter: { property: "Fechada", checkbox: { equals: false } },
             page_size: 100,
         }));
@@ -1867,8 +1975,8 @@ async function getList(lista) {
     let rows;
     if (lista) {
         try {
-            const res = await client.databases.query({
-                database_id: NOTION_LISTS_DB_ID,
+            const res = await client.dataSources.query({
+                data_source_id: dsId(NOTION_LISTS_DB_ID),
                 filter: { property: "Lista", select: { equals: lista } },
                 sorts: [{ timestamp: "created_time", direction: "ascending" }],
                 page_size: 100,
@@ -1877,8 +1985,8 @@ async function getList(lista) {
         }
         catch {
             // select option not found — fetch all and filter in JS
-            const res = await withRetry("getList.fallback", () => client.databases.query({
-                database_id: NOTION_LISTS_DB_ID,
+            const res = await withRetry("getList.fallback", () => client.dataSources.query({
+                data_source_id: dsId(NOTION_LISTS_DB_ID),
                 sorts: [{ timestamp: "created_time", direction: "ascending" }],
                 page_size: 100,
             }));
@@ -1890,8 +1998,8 @@ async function getList(lista) {
         }
     }
     else {
-        const res = await withRetry("getList", () => client.databases.query({
-            database_id: NOTION_LISTS_DB_ID,
+        const res = await withRetry("getList", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_LISTS_DB_ID),
             sorts: [{ timestamp: "created_time", direction: "ascending" }],
             page_size: 100,
         }));
@@ -1929,8 +2037,8 @@ async function getEntitiesForOwner(dbKey, owner) {
         status: readStatusName(r.properties["Status"]) ?? null,
     });
     try {
-        const res = await client.databases.query({
-            database_id: dbId,
+        const res = await client.dataSources.query({
+            data_source_id: dsId(dbId),
             filter: ownerFilter,
             page_size: 20,
         });
@@ -1941,7 +2049,7 @@ async function getEntitiesForOwner(dbKey, owner) {
     catch {
         // select/multi_select option not found — fetch all and filter in JS
         try {
-            const res = await withRetry(`getEntitiesForOwner.${dbKey}.fallback`, () => client.databases.query({ database_id: dbId, page_size: 100 }));
+            const res = await withRetry(`getEntitiesForOwner.${dbKey}.fallback`, () => client.dataSources.query({ data_source_id: dsId(dbId), page_size: 100 }));
             const ownerLower = owner.toLowerCase();
             return res.results
                 .filter((r) => "properties" in r)
@@ -1962,8 +2070,8 @@ async function getTasksForEntity(entityField, entityPageId) {
     if (!NOTION_BACKLOG_DB_ID)
         return [];
     try {
-        const res = await withRetry("getTasksForEntity", () => client.databases.query({
-            database_id: NOTION_BACKLOG_DB_ID,
+        const res = await withRetry("getTasksForEntity", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
                     { property: entityField, relation: { contains: entityPageId } },

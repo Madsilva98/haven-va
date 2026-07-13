@@ -17,7 +17,7 @@ export type Area =
 
 export type Priority = "Alta" | "Média" | "Baixa";
 
-export type Status = "A fazer" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
+export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
 
 export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area" | "title";
 
@@ -42,6 +42,7 @@ export interface WeeklyPriority {
 // ----- Phase 3 -----
 
 export type PartnerStatus =
+  | "On hold"
   | "A contactar"
   | "Contactado"
   | "A aguardar resposta"
@@ -83,7 +84,21 @@ export interface InfluencerRow {
   origem?: string;
 }
 
-export type ReminderRecurrence = string;
+export type ReminderRecurrence = "diária" | "semanal" | "mensal" | "anual";
+
+export const RECURRENCE_VALUES: readonly ReminderRecurrence[] = [
+  "diária",
+  "semanal",
+  "mensal",
+  "anual",
+];
+
+export function isValidRecurrence(value: unknown): value is ReminderRecurrence {
+  return (
+    typeof value === "string" &&
+    (RECURRENCE_VALUES as readonly string[]).includes(value)
+  );
+}
 
 export interface ReminderRow {
   id: string;

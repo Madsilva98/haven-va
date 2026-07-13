@@ -11,10 +11,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
 import { log } from "../lib/log.js";
 import { currentWeekLabel } from "../lib/week.js";
+import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import { checkAndUnblockDependents } from "./dependencies.js";
+import { isValidRecurrence } from "../types.js";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 1500;
 const OWNERS = ["Madalena", "Mafalda", "Beatriz", "Unassigned"];
@@ -77,7 +79,10 @@ const TOOLS = [
                 },
                 recurrence: {
                     type: "string",
-                    description: "Repetição automática. Ex: 'diária', 'semanal', 'mensal', 'a cada 2 semanas'. Usa quando a mensagem pedir repetição.",
+                    enum: ["diária", "semanal", "mensal", "anual"],
+                    description: "Repetição automática. Valores aceites: 'diária', 'semanal', 'mensal', 'anual'. " +
+                        "Usa 'anual' para aniversários, datas anuais e celebrações que repetem todos os anos. " +
+                        "Outras periodicidades ('a cada 2 semanas' etc.) não são suportadas — escolhe a mais próxima ou cria reminders manuais.",
                 },
             },
             required: ["text", "when_iso", "for"],
@@ -224,16 +229,17 @@ const TOOLS = [
                 new_value: {
                     type: "string",
                     description: "Novo valor. " +
-                        "backlog status: A fazer|Em curso|Bloqueado|Feito|Cancelado. " +
+                        "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
                         "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
                         "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
                         "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
                         "to_discuss status: Pendente|Discutido|Arquivado|Aberto. " +
                         "decisions status: Pendente implementação|Implementada. " +
                         "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
-                        "partners|influencers status: A contactar|Em negociação|Ativo|Inativo. " +
+                        "partners status: On hold|A contactar|Contactado|A aguardar resposta|Em negociação|Fechado|Arquivado. " +
+                        "influencers status: A identificar|A contactar|Contactado|Em conversa|Proposta enviada|Fechado|Arquivado. " +
                         "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
-                        "projects status: Ativo|Em pausa|Concluído|Cancelado.",
+                        "projects status: Not started|In progress|Done.",
                 },
             },
             required: ["db", "item", "field", "new_value"],
@@ -332,9 +338,24 @@ const SILENCE_PHRASES = [
     "não requer ação",
     "não vou responder",
 ];
+const EMOJI_ONLY_RE = /^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\s]+$/u;
+const ZERO_WIDTH_ONLY_RE = /^[​-‏⁠﻿\s]*$/;
 function isSilenceResponse(text) {
-    const lower = text.toLowerCase();
-    return SILENCE_PHRASES.some((p) => lower.includes(p));
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+    if (SILENCE_PHRASES.some((p) => lower.includes(p)))
+        return true;
+    if (ZERO_WIDTH_ONLY_RE.test(trimmed))
+        return true;
+    if (EMOJI_ONLY_RE.test(trimmed))
+        return true;
+    // Model sometimes narrates the silence decision instead of truly producing no text,
+    // e.g. "[Silêncio]", "(silêncio — cumprimento puro.)" — strip a single wrapping
+    // bracket/paren pair and check if what remains starts with "silêncio".
+    const unwrapped = trimmed.replace(/^[\[(]+/, "").replace(/[\])]+$/, "").trim().toLowerCase();
+    if (/^sil[eê]ncio\b/.test(unwrapped))
+        return true;
+    return false;
 }
 let anthropicClient = null;
 let systemPromptText = null;
@@ -460,7 +481,7 @@ async function execCreateReminder(input, sender, ctx, collector) {
     const forWho = typeof input.for === "string" ? input.for : sender;
     if (!text || !whenRaw)
         return "parâmetros em falta";
-    const quando = lisbonLocalToUtc(whenRaw);
+    const quando = lisbonNaiveToUtcIso(whenRaw);
     const targets = forWho === "all"
         ? [...FOUNDERS]
         : FOUNDERS.includes(forWho)
@@ -469,7 +490,14 @@ async function execCreateReminder(input, sender, ctx, collector) {
     const taskPageId = typeof input.task_page_id === "string" && input.task_page_id
         ? input.task_page_id
         : undefined;
-    const recurrence = typeof input.recurrence === "string" ? input.recurrence : undefined;
+    // Reject unknown recurrence values from the LLM tool input. Without this,
+    // a typo or hallucination ("yearly", "annually") would persist to Notion
+    // and later wedge the reminders cron (see lib/recurrence.ts).
+    const recurrenceInput = typeof input.recurrence === "string" ? input.recurrence : undefined;
+    const recurrence = isValidRecurrence(recurrenceInput) ? recurrenceInput : undefined;
+    if (recurrenceInput && !recurrence) {
+        log.warn("assistant.invalid_recurrence_dropped", { value: recurrenceInput });
+    }
     await Promise.all(targets.map((paraQuem) => notion.createReminder({
         texto: text,
         paraQuem,
@@ -868,11 +896,21 @@ export async function handleAssistant(ctx, sender, text, recentMessages, replied
     for (let i = 0; i < MAX_ITERATIONS; i++) {
         let response;
         try {
+            // Anthropic prompt caching: marking the last tool with
+            // cache_control caches the entire tools block (~3000 tokens of
+            // JSON schema) at the 5-min ephemeral tier. Cuts input cost on
+            // every cache hit from $1/MTok to $0.10/MTok — roughly half of
+            // total per-message input cost since the tools block is large
+            // and stable. See docs/knowledge-base/cost-and-latency-2026-05-15.md
+            // optimization #1.
+            const toolsWithCache = TOOLS.map((t, i) => i === TOOLS.length - 1
+                ? { ...t, cache_control: { type: "ephemeral" } }
+                : t);
             response = await runtime.client.messages.create({
                 model: runtime.model,
                 max_tokens: MAX_TOKENS,
                 system: systemBlocks,
-                tools: TOOLS,
+                tools: toolsWithCache,
                 messages,
             });
         }
