@@ -219,15 +219,6 @@ export async function listEvents(days = 7): Promise<CalendarEvent[]> {
   return all;
 }
 
-export async function listEventsToday(): Promise<CalendarEvent[]> {
-  const events = await listEvents(1);
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(todayStart);
-  todayEnd.setDate(todayEnd.getDate() + 1);
-  return events.filter((e) => e.start >= todayStart && e.start < todayEnd);
-}
-
 export async function createEvent(params: {
   title: string;
   start: Date;

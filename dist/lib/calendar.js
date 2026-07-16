@@ -170,14 +170,6 @@ export async function listEvents(days = 7) {
     _eventsCache = { data: all, ts: now };
     return all;
 }
-export async function listEventsToday() {
-    const events = await listEvents(1);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
-    return events.filter((e) => e.start >= todayStart && e.start < todayEnd);
-}
 export async function createEvent(params) {
     const auth = await getAuthenticatedClient();
     if (!auth)
