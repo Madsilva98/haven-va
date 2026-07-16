@@ -1,9 +1,9 @@
 /**
  * `/focus <text>` — single-shot operational focus setter.
  *
- * Upserts the founder's row in the Founder Focus DB for the current
- * week. Useful when the founder skipped the `/week` wizard's last
- * step or wants to update the focus mid-week.
+ * Deactivates the founder's previous Founder Focus row (if any) and
+ * creates a new one, active. Only one active row per founder at a
+ * time — history is preserved via Ativo=false on old rows.
  */
 
 import type { Context } from "grammy";

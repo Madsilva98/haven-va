@@ -343,8 +343,6 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
     };
     if (deadline)
         props["Deadline"] = { date: { start: deadline } };
-    if (priority === "Alta")
-        props["Prioridade semanal"] = { checkbox: true };
     const page = await withRetry("createTask", () => client.pages.create({
         parent: { type: "data_source_id", data_source_id: dsId(NOTION_BACKLOG_DB_ID) },
         properties: props,
@@ -360,9 +358,6 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
 }
 async function updateTask(pageId, field, newValue) {
     const properties = buildEditPatch(field, newValue);
-    if (field === "prioridade" && newValue === "Alta") {
-        properties["Prioridade semanal"] = { checkbox: true };
-    }
     await withRetry("updateTask", () => client.pages.update({
         page_id: pageId,
         properties: properties,
@@ -863,15 +858,38 @@ async function getWeeklyOverdueTasks() {
     log.debug("notion.weekly_overdue_fetched", { count: tasks.length });
     return tasks;
 }
+async function deactivatePreviousFocus(founder) {
+    const res = await withRetry("deactivatePreviousFocus.query", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
+        filter: {
+            and: [
+                { property: "Founder", select: { equals: founder } },
+                { property: "Ativo", checkbox: { equals: true } },
+            ],
+        },
+    }));
+    for (const row of res.results) {
+        if (!("id" in row))
+            continue;
+        await withRetry("deactivatePreviousFocus.update", () => client.pages.update({
+            page_id: row.id,
+            properties: {
+                Ativo: { checkbox: false },
+            },
+        }));
+    }
+    log.info("notion.founder_focus_deactivated", { founder, count: res.results.length });
+}
 async function setFounderFocus(entry) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID) {
         throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
     }
-    // Always create — latest entry per founder is the active focus.
+    // Only one active (Ativo=true) row per founder — deactivate any existing before creating the new one.
+    await deactivatePreviousFocus(entry.founder);
     await withRetry("setFounderFocus", () => client.pages.create({
         parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID) },
         properties: {
-            Name: { title: [{ text: { content: entry.focoOperacional.slice(0, 80) } }] },
+            Name: { title: [{ text: { content: `${entry.founder} Focus` } }] },
             Founder: { select: { name: entry.founder } },
             "Foco operacional": richText(entry.focoOperacional),
             Ativo: { checkbox: true },
@@ -907,6 +925,37 @@ async function getFounderFocusForWeek(week) {
         });
     }
     log.debug("notion.founder_focus_fetched", { week, count: entries.length });
+    return entries;
+}
+async function getActiveFounderFocuses() {
+    if (!NOTION_FOUNDER_FOCUS_DB_ID)
+        return [];
+    const res = await withRetry("getActiveFounderFocuses", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
+        filter: { property: "Ativo", checkbox: { equals: true } },
+        sorts: [{ timestamp: "created_time", direction: "descending" }],
+    }));
+    // Dedupe defensively — legacy rows created before deactivation logic existed
+    // may leave more than one Ativo=true row per founder; keep the newest.
+    const seen = new Set();
+    const entries = [];
+    for (const row of res.results) {
+        if (!("properties" in row))
+            continue;
+        const props = row.properties;
+        const founderName = readSelectName(props["Founder"]);
+        if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz")
+            continue;
+        if (seen.has(founderName))
+            continue;
+        seen.add(founderName);
+        entries.push({
+            founder: founderName,
+            semana: readFormulaString(props["Semana"]) ?? "",
+            focoOperacional: readPlainText(props["Foco operacional"]),
+        });
+    }
+    log.debug("notion.active_founder_focus_fetched", { count: entries.length });
     return entries;
 }
 // ============================================================
@@ -1970,7 +2019,7 @@ async function getTasksForEntity(entityField, entityPageId) {
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archivePage, 
 // Phase 2
-getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
+getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, getActiveFounderFocuses, 
 // Phase 3
 getPartnersStale, getInfluencersStale, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
@@ -2003,6 +2052,7 @@ export const notion = {
     getWeeklyOverdueTasks,
     setFounderFocus,
     getFounderFocusForWeek,
+    getActiveFounderFocuses,
     // Phase 3
     getPartnersStale,
     getInfluencersStale,

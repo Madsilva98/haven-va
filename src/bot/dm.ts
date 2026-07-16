@@ -14,12 +14,7 @@ import * as notion from "../notion.js";
 import { handleAssistant } from "./assistant.js";
 import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
-import {
-  handleWeek,
-  handleWeekTextStep,
-  isWeekCommand,
-  isAwaitingFocusFor,
-} from "./week.js";
+import { handleWeek, isWeekCommand } from "./week.js";
 
 const STRANGER_REPLY = "este bot só funciona para a equipa do Haven";
 const warnedStrangers = new Set<number>();
@@ -68,15 +63,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
     } catch (err) {
       log.error("dm.focus_failed", { err: String(err) });
       await safeReply(ctx);
-    }
-    return true;
-  }
-
-  if (isAwaitingFocusFor(fromId)) {
-    try {
-      await handleWeekTextStep(ctx, senderName, text);
-    } catch (err) {
-      log.error("dm.week_text_step_failed", { err: String(err) });
     }
     return true;
   }

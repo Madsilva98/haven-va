@@ -3,6 +3,7 @@
  *
  * Routes:
  *   task:undo:<pageId>               → archive a directly-created task
+ *   task:weeklyprio:<pageId>         → mark a directly-created task as weekly priority
  *   task:edit_undo:<pageId>:<field>:<oldValue> → revert an update_task action
  */
 
@@ -54,6 +55,28 @@ export async function handleCallback(ctx: Context): Promise<void> {
       // message may be too old to edit — ignore
     }
     await ctx.reply("↩ task removida");
+    return;
+  }
+
+  // task:weeklyprio:pageId — mark task as weekly priority
+  if (scope === "task" && action === "weeklyprio") {
+    const pageId = parts.slice(2).join(":");
+    await ctx.answerCallbackQuery();
+    try {
+      await notion.setWeeklyPriority(pageId, true);
+    } catch (err) {
+      log.error("callback.weeklyprio_failed", { err: String(err), pageId });
+      await ctx.reply("erro a marcar prioridade semanal — tenta outra vez");
+      return;
+    }
+    try {
+      await ctx.editMessageReplyMarkup({
+        reply_markup: { inline_keyboard: [[{ text: "↩ Desfazer", callback_data: `task:undo:${pageId}` }]] },
+      });
+    } catch {
+      // message may be too old to edit — ignore
+    }
+    await ctx.reply("📌 marcada como prioridade semanal");
     return;
   }
 

@@ -4,7 +4,9 @@
  */
 import { InlineKeyboard } from "grammy";
 export function taskUndoKeyboard(pageId) {
-    return new InlineKeyboard().text("↩ Desfazer", `task:undo:${pageId}`);
+    return new InlineKeyboard()
+        .text("📌 Prioridade semanal", `task:weeklyprio:${pageId}`)
+        .text("↩ Desfazer", `task:undo:${pageId}`);
 }
 export function editKeyboard() {
     return new InlineKeyboard()

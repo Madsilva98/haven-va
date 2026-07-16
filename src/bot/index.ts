@@ -4,7 +4,7 @@
  * Handles:
  *   - group messages → conversational assistant (handleAssistant)
  *   - private messages → DM router (handleDM)
- *   - slash commands: /help /start /task /hoje /status /dashboard
+ *   - slash commands: /help /start /task /status /dashboard
  *     /week /focus /remind /todiscuss
  *   - inline button callbacks: namespaced by data prefix
  */
@@ -23,7 +23,6 @@ import { handleCallback as handlePhase1Callback } from "./callbacks.js";
 import {
   handleDashboard,
   handleHelp,
-  handleHoje,
   handleLista,
   handleStart,
   handleTask,
@@ -36,12 +35,7 @@ import {
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
 import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
-import {
-  handleWeek,
-  handleWeekCallback,
-  handleWeekTextStep,
-  isAwaitingFocusFor,
-} from "./week.js";
+import { handleWeek } from "./week.js";
 import { handleFocus } from "./focus.js";
 import { handleRemind } from "./remind.js";
 import {
@@ -115,16 +109,6 @@ async function callbackRouter(ctx: Context): Promise<void> {
       await handlePhase1Callback(ctx);
       return;
     }
-    if (scope === "week") {
-      const fromId = ctx.from?.id;
-      const founder = fromId ? getFounderName(fromId) : null;
-      if (!founder) {
-        await ctx.answerCallbackQuery();
-        return;
-      }
-      await handleWeekCallback(ctx, founder);
-      return;
-    }
     if (scope === "todiscuss") {
       await handleToDiscussCallback(ctx);
       return;
@@ -175,7 +159,6 @@ export function buildBot(): Bot {
   // Register slash commands for Telegram dropdown.
   bot.api.setMyCommands([
     { command: "task",        description: "Criar task manualmente" },
-    { command: "hoje",        description: "Ver as minhas tasks de hoje" },
     { command: "dashboard",   description: "Dashboard semanal" },
     { command: "projects",    description: "Ver os meus projetos em aberto" },
     { command: "partners",    description: "Ver os meus parceiros" },
@@ -184,7 +167,8 @@ export function buildBot(): Bot {
     { command: "calendar",    description: "Calendário — hoje e próximos 2 dias" },
     { command: "todiscuss",   description: "Adicionar à lista de discussão" },
     { command: "remind",      description: "Criar lembrete" },
-    { command: "week",        description: "Definir foco semanal" },
+    { command: "week",        description: "Ver prioridades semanais" },
+    { command: "focus",       description: "Definir foco semanal" },
     { command: "lista",       description: "Ver uma lista (/lista compras)" },
     { command: "help",        description: "Ajuda" },
   ]).catch((err) => log.warn("bot.set_commands_failed", { err: String(err) }));
@@ -207,7 +191,6 @@ export function buildBot(): Bot {
   });
   bot.command("remind", handleRemind);
   bot.command("todiscuss", handleToDiscussCommand);
-  bot.command("hoje", handleHoje);
   bot.command("dashboard", handleDashboard);
   bot.command("lista", handleLista);
   bot.command("projects", handleProjects);
@@ -365,17 +348,7 @@ export function buildBot(): Bot {
       }
     }
 
-    // 1) DM-only: if mid-/week flow, route there first.
-    if (chatType === "private" && isAwaitingFocusFor(fromId)) {
-      try {
-        await handleWeekTextStep(ctx, senderName, text);
-      } catch (err) {
-        log.error("week.text_step_failed", { err: String(err) });
-      }
-      return;
-    }
-
-    // 2) DM router.
+    // 1) DM router.
     if (chatType === "private") {
       // Google Calendar auth code intercept.
       if (awaitingAuthCodeFrom === fromId && text.startsWith("4/")) {
@@ -401,7 +374,7 @@ export function buildBot(): Bot {
       }
     }
 
-    // 3) Group pipeline.
+    // 2) Group pipeline.
     const repliedTo = ctx.message.reply_to_message;
     const isReplyToBot =
       botInfoUserId !== null && repliedTo?.from?.id === botInfoUserId;

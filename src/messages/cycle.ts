@@ -232,7 +232,32 @@ export function formatDailyMadalenaPlaceholder(
   return lines.join("\n");
 }
 
-// ----- Task ranking + traffic lights (shared by daily DM and /hoje) -----
+// ----- /week (read-only list of tasks marked "Prioridade semanal") -----
+
+export interface WeeklyPrioritiesArgs {
+  founder: FounderName;
+  tasks: OpenTask[];
+}
+
+export function formatWeeklyPriorities(args: WeeklyPrioritiesArgs): string {
+  const lines: string[] = [];
+  lines.push(`*prioridades semanais — ${escapeMd(args.founder)}*`);
+  lines.push("");
+  if (args.tasks.length === 0) {
+    lines.push(
+      escapeMd(
+        'nenhuma task marcada como prioridade semanal. usa o botão "📌 Prioridade semanal" ao criar uma task com /task.',
+      ),
+    );
+    return lines.join("\n");
+  }
+  for (const t of args.tasks) {
+    lines.push(`${fmtTaskNoOwner(t)} — _${escapeMd(t.status)}_`);
+  }
+  return lines.join("\n");
+}
+
+// ----- Task ranking + traffic lights (shared by daily DM) -----
 
 const PRIORITY_RANK: Record<string, number> = { "Alta": 0, "Média": 1, "Baixa": 2 };
 
@@ -262,34 +287,18 @@ const LIGHT_EMOJI: Record<TrafficLight, string> = {
   green: "🟢",
 };
 
-function fmtTrafficTask(t: OpenTask): string {
-  const light = LIGHT_EMOJI[trafficLight(t)];
-  const title = escapeMd(t.title);
-  const parts: string[] = [];
-  if (t.priority) parts.push(escapeMd(t.priority.toLowerCase()));
-  if (t.deadline) parts.push(escapeMd(t.deadline));
-  const tail = parts.length ? ` \\(${parts.join(", ")}\\)` : "";
-  return `${light} ${title}${tail}`;
-}
-
 // ----- Daily DM (calendar-aware, Phase 4) -----
 
 export interface DailyDMArgs {
   founder: FounderName;
   tasks: OpenTask[];
-  calDesc: string; // "" when not Madalena or calendar not configured
 }
 
 export function formatDailyDM(args: DailyDMArgs): string {
   const lines: string[] = [];
 
-  if (args.calDesc) {
-    lines.push(`Bom dia\\! ${escapeMd(args.calDesc)}\\.`);
-    lines.push("");
-  } else {
-    lines.push(`Bom dia, ${escapeMd(args.founder)}\\!`);
-    lines.push("");
-  }
+  lines.push(`Bom dia, ${escapeMd(args.founder)}\\!`);
+  lines.push("");
 
   if (args.tasks.length === 0) {
     lines.push(escapeMd("nada no backlog — descansa um bocado"));
@@ -337,40 +346,6 @@ export function formatDailyDM(args: DailyDMArgs): string {
     for (const t of emCurso) {
       lines.push(`• ${escapeMd(t.title)}`);
     }
-  }
-
-  return lines.join("\n");
-}
-
-// ----- /hoje command -----
-
-export interface HojeArgs {
-  target: FounderName;
-  tasks: OpenTask[];
-  calDesc: string;
-}
-
-export function formatHoje(args: HojeArgs): string {
-  const lines: string[] = [];
-  lines.push(`*hoje — ${escapeMd(args.target)}*`);
-  lines.push("");
-
-  if (args.calDesc) {
-    lines.push(escapeMd(args.calDesc));
-    lines.push("");
-  }
-
-  if (args.tasks.length === 0) {
-    lines.push(escapeMd("backlog limpo"));
-    return lines.join("\n");
-  }
-
-  const shown = args.tasks.slice(0, 8);
-  for (const t of shown) {
-    lines.push(fmtTrafficTask(t));
-  }
-  if (args.tasks.length > 8) {
-    lines.push(escapeMd(`... +${args.tasks.length - 8} outras`));
   }
 
   return lines.join("\n");

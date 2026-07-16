@@ -177,7 +177,20 @@ export function formatDailyMadalenaPlaceholder(args) {
     }
     return lines.join("\n");
 }
-// ----- Task ranking + traffic lights (shared by daily DM and /hoje) -----
+export function formatWeeklyPriorities(args) {
+    const lines = [];
+    lines.push(`*prioridades semanais — ${escapeMd(args.founder)}*`);
+    lines.push("");
+    if (args.tasks.length === 0) {
+        lines.push(escapeMd('nenhuma task marcada como prioridade semanal. usa o botão "📌 Prioridade semanal" ao criar uma task com /task.'));
+        return lines.join("\n");
+    }
+    for (const t of args.tasks) {
+        lines.push(`${fmtTaskNoOwner(t)} — _${escapeMd(t.status)}_`);
+    }
+    return lines.join("\n");
+}
+// ----- Task ranking + traffic lights (shared by daily DM) -----
 const PRIORITY_RANK = { "Alta": 0, "Média": 1, "Baixa": 2 };
 export function rankTasks(tasks) {
     return [...tasks].sort((a, b) => {
@@ -203,27 +216,10 @@ const LIGHT_EMOJI = {
     yellow: "🟡",
     green: "🟢",
 };
-function fmtTrafficTask(t) {
-    const light = LIGHT_EMOJI[trafficLight(t)];
-    const title = escapeMd(t.title);
-    const parts = [];
-    if (t.priority)
-        parts.push(escapeMd(t.priority.toLowerCase()));
-    if (t.deadline)
-        parts.push(escapeMd(t.deadline));
-    const tail = parts.length ? ` \\(${parts.join(", ")}\\)` : "";
-    return `${light} ${title}${tail}`;
-}
 export function formatDailyDM(args) {
     const lines = [];
-    if (args.calDesc) {
-        lines.push(`Bom dia\\! ${escapeMd(args.calDesc)}\\.`);
-        lines.push("");
-    }
-    else {
-        lines.push(`Bom dia, ${escapeMd(args.founder)}\\!`);
-        lines.push("");
-    }
+    lines.push(`Bom dia, ${escapeMd(args.founder)}\\!`);
+    lines.push("");
     if (args.tasks.length === 0) {
         lines.push(escapeMd("nada no backlog — descansa um bocado"));
         return lines.join("\n");
@@ -261,27 +257,6 @@ export function formatDailyDM(args) {
         for (const t of emCurso) {
             lines.push(`• ${escapeMd(t.title)}`);
         }
-    }
-    return lines.join("\n");
-}
-export function formatHoje(args) {
-    const lines = [];
-    lines.push(`*hoje — ${escapeMd(args.target)}*`);
-    lines.push("");
-    if (args.calDesc) {
-        lines.push(escapeMd(args.calDesc));
-        lines.push("");
-    }
-    if (args.tasks.length === 0) {
-        lines.push(escapeMd("backlog limpo"));
-        return lines.join("\n");
-    }
-    const shown = args.tasks.slice(0, 8);
-    for (const t of shown) {
-        lines.push(fmtTrafficTask(t));
-    }
-    if (args.tasks.length > 8) {
-        lines.push(escapeMd(`... +${args.tasks.length - 8} outras`));
     }
     return lines.join("\n");
 }

@@ -1,5 +1,5 @@
 /**
- * Slash commands: /help, /start, /task <descrição>, /status, /hoje, /dashboard.
+ * Slash commands: /help, /start, /task <descrição>, /status, /dashboard.
  *
  * /task creates a task directly in Notion without going through the AI pipeline.
  */
@@ -11,12 +11,9 @@ import { getFounderName } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { HELP_MESSAGE } from "../messages/help.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
-import { escapeMd, formatHoje, rankTasks } from "../messages/cycle.js";
+import { escapeMd } from "../messages/cycle.js";
 import { formatDashboard } from "../messages/dashboard.js";
 import * as notion from "../notion.js";
-import { currentWeekLabel } from "../lib/week.js";
-import type { FounderName } from "../types.js";
-import { buildFreeTimeDesc } from "../crons/daily-madalena.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import { handleAssistant } from "./assistant.js";
 
@@ -81,42 +78,6 @@ export async function handleTask(ctx: Context): Promise<void> {
   }
 }
 
-export async function handleHoje(ctx: Context): Promise<void> {
-  const fromId = ctx.from?.id;
-  const sender = fromId ? getFounderName(fromId) : null;
-  if (!sender) return;
-
-  const arg = (ctx.message?.text ?? "")
-    .replace(/^\/hoje(@\w+)?\s*/i, "")
-    .trim()
-    .toLowerCase();
-  const nameMap: Record<string, FounderName> = {
-    madalena: "Madalena",
-    mafalda: "Mafalda",
-    beatriz: "Beatriz",
-    bia: "Beatriz",
-  };
-  const target: FounderName = (arg ? nameMap[arg] : undefined) ?? sender;
-
-  try {
-    const tasks = await notion.getOpenTasksFor(target);
-    const ranked = rankTasks(tasks);
-
-    let calDesc = "";
-    if (target === "Madalena" && calendar.isAuthenticated()) {
-      const events = await calendar.listEventsToday();
-      calDesc = buildFreeTimeDesc(events);
-    }
-
-    const text = formatHoje({ target, tasks: ranked, calDesc });
-    await ctx.reply(text, { parse_mode: "MarkdownV2" });
-  } catch (err) {
-    log.error("commands.hoje.failed", { err: String(err) });
-    await ctx.reply("erro a buscar tasks — tenta outra vez");
-  }
-}
-
-
 export async function handleLista(ctx: Context): Promise<void> {
   const arg = (ctx.message?.text ?? "")
     .replace(/^\/lista(@\w+)?\s*/i, "")
@@ -163,7 +124,7 @@ export async function handleLista(ctx: Context): Promise<void> {
 export async function handleDashboard(ctx: Context): Promise<void> {
   try {
     const [focus, toDiscuss] = await Promise.all([
-      notion.getFounderFocusForWeek(currentWeekLabel()),
+      notion.getActiveFounderFocuses(),
       notion.getToDiscussPending(),
     ]);
     const text = formatDashboard({ focus, toDiscuss });
