@@ -141,9 +141,9 @@ export function formatWeekendBrief(args: WeekendBriefArgs): string {
   }
   lines.push("");
 
-  lines.push(`*por fechar \\(${args.openTasks.length}\\)*`);
+  lines.push(`*prioridades semanais por fechar \\(${args.openTasks.length}\\)*`);
   if (args.openTasks.length === 0) {
-    lines.push(escapeMd("nada — backlog limpo"));
+    lines.push(escapeMd("nada — todas as prioridades semanais em dia"));
   } else {
     const grouped = groupByOwner(args.openTasks);
     for (const [owner, tasks] of grouped) {

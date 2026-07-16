@@ -390,15 +390,6 @@ const RECORD_DB_CONFIGS = {
             notas: { notionProp: "Notas", type: "rich_text" },
         },
     },
-    content_calendar: {
-        dbId: () => NOTION_CONTENT_CALENDAR_DB_ID,
-        titleProp: "Name",
-        fields: {
-            status: { notionProp: "status", type: "status" },
-            publish_date: { notionProp: "Posting Haven", type: "date" },
-            ad_type: { notionProp: "Ad type", type: "select" },
-        },
-    },
     partners: {
         dbId: () => NOTION_PARTNER_DB_ID,
         titleProp: "Name",
@@ -806,14 +797,15 @@ async function setWeeklyPriority(taskId, value) {
     weeklyPrioritiesCache = null;
     log.info("notion.weekly_priority_set", { taskId, value });
 }
-async function getCompletedSince(date) {
+async function getWeeklyCompletedSince(date) {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getCompletedSince", () => client.dataSources.query({
+        const res = await withRetry("getWeeklyCompletedSince", () => client.dataSources.query({
             data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
+                    { property: "Prioridade semanal", checkbox: { equals: true } },
                     { property: "Status", status: { equals: "Feito" } },
                     {
                         timestamp: "last_edited_time",
@@ -833,10 +825,10 @@ async function getCompletedSince(date) {
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
-    log.debug("notion.completed_since_fetched", { since: date, count: tasks.length });
+    log.debug("notion.weekly_completed_since_fetched", { since: date, count: tasks.length });
     return tasks;
 }
-async function getOverdueTasks() {
+async function getWeeklyOverdueTasks() {
     const now = Date.now();
     if (overdueCache && overdueCache.expiresAt > now) {
         return overdueCache.value;
@@ -845,10 +837,11 @@ async function getOverdueTasks() {
     const tasks = [];
     let cursor;
     do {
-        const res = await withRetry("getOverdueTasks", () => client.dataSources.query({
+        const res = await withRetry("getWeeklyOverdueTasks", () => client.dataSources.query({
             data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
+                    { property: "Prioridade semanal", checkbox: { equals: true } },
                     { property: "Deadline", date: { before: today } },
                     { property: "Status", status: { does_not_equal: "Feito" } },
                     { property: "Status", status: { does_not_equal: "Cancelado" } },
@@ -867,7 +860,7 @@ async function getOverdueTasks() {
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
     overdueCache = { value: tasks, expiresAt: now + OVERDUE_TTL_MS };
-    log.debug("notion.overdue_fetched", { count: tasks.length });
+    log.debug("notion.weekly_overdue_fetched", { count: tasks.length });
     return tasks;
 }
 async function setFounderFocus(entry) {
@@ -1025,176 +1018,58 @@ async function getInfluencersStale(category) {
     log.debug("notion.influencers_stale_fetched", { category, count: rows.length });
     return rows;
 }
-async function getContentCalendarAlerts() {
-    const empty = {
-        hours_to_publish_unscheduled: [],
-        editing_too_long: [],
-        ideation_stale: [],
-    };
-    if (!NOTION_CONTENT_CALENDAR_DB_ID) {
-        return empty;
-    }
-    try {
-        const rows = [];
-        let cursor;
-        do {
-            const res = await withRetry("getContentCalendarAlerts", () => client.dataSources.query({
-                data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
-                start_cursor: cursor,
-            }));
-            for (const row of res.results) {
-                if (!("properties" in row))
-                    continue;
-                rows.push({
-                    id: row.id,
-                    properties: row.properties,
-                    lastEditedTime: "last_edited_time" in row ? row.last_edited_time : new Date(0).toISOString(),
-                });
-            }
-            cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
-        } while (cursor);
-        const now = Date.now();
-        const hoursToPublishUnscheduled = [];
-        const editingTooLong = [];
-        const ideationStale = [];
-        for (const row of rows) {
-            try {
-                const props = row.properties;
-                const status = readStatusName(props["status"]) ?? readSelectName(props["status"]);
-                const publishDate = readDateStart(props["Posting Haven"]);
-                const lastEdited = row.lastEditedTime;
-                if (publishDate) {
-                    const ms = new Date(publishDate).getTime() - now;
-                    const hours = ms / (1000 * 60 * 60);
-                    if (hours > 0 && hours < 24 && status !== "ready to post" && status !== "posted") {
-                        hoursToPublishUnscheduled.push(row);
-                    }
-                    if (hours > 0 && hours < 48 && status === "editing") {
-                        editingTooLong.push(row);
-                    }
-                }
-                if (status === "ideation") {
-                    const reference = lastEdited
-                        ? new Date(lastEdited).getTime()
-                        : null;
-                    if (reference !== null) {
-                        const ageDays = (now - reference) / (1000 * 60 * 60 * 24);
-                        if (ageDays > 14)
-                            ideationStale.push(row);
-                    }
-                }
-            }
-            catch (err) {
-                log.warn("notion.content_calendar_row_skipped", {
-                    rowId: row.id,
-                    message: err instanceof Error ? err.message : String(err),
-                });
-            }
-        }
-        return {
-            hours_to_publish_unscheduled: hoursToPublishUnscheduled,
-            editing_too_long: editingTooLong,
-            ideation_stale: ideationStale,
-        };
-    }
-    catch (err) {
-        log.warn("notion.content_calendar_alerts_failed", {
-            message: err instanceof Error ? err.message : String(err),
-        });
-        return empty;
-    }
-}
-// Cap on rows passed back to the assistant. The full content calendar
-// can have 100+ historical rows that bloat Haiku's context without
-// adding signal. Within ±CONTENT_CAL_WINDOW_DAYS of today, capped at
-// CONTENT_CAL_MAX_ROWS, sorted by publishDate ascending (closest first).
-const CONTENT_CAL_WINDOW_DAYS = 30;
-const CONTENT_CAL_MAX_ROWS = 20;
-async function getContentCalendarRows() {
+// Alerts founders when a content-calendar item is due to publish within
+// CONTENT_CAL_LOOKAHEAD_DAYS but hasn't reached "Scheduled" yet (still
+// "Planned" or "Drafted"). See pipeline-alerts.ts for the cron that
+// consumes this.
+const CONTENT_CAL_LOOKAHEAD_DAYS = 2;
+async function getContentCalendarNeedsScheduling() {
     if (!NOTION_CONTENT_CALENDAR_DB_ID)
         return [];
     try {
+        const now = new Date();
+        const cutoff = new Date(now.getTime() + CONTENT_CAL_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000);
         const rows = [];
         let cursor;
         do {
-            const res = await withRetry("getContentCalendarRows", () => client.dataSources.query({
+            const res = await withRetry("getContentCalendarNeedsScheduling", () => client.dataSources.query({
                 data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID),
                 start_cursor: cursor,
+                filter: {
+                    and: [
+                        { property: "Date", date: { on_or_after: now.toISOString() } },
+                        { property: "Date", date: { on_or_before: cutoff.toISOString() } },
+                        {
+                            or: [
+                                { property: "Status", select: { equals: "Planned" } },
+                                { property: "Status", select: { equals: "Drafted" } },
+                            ],
+                        },
+                    ],
+                },
             }));
             for (const row of res.results) {
                 if (!("properties" in row))
                     continue;
                 const props = row.properties;
-                const title = readPlainText(props["Name"] ?? props["Título"] ?? props["Title"] ?? props["name"]);
-                const status = readStatusName(props["status"]) ??
-                    readSelectName(props["status"]) ??
-                    readStatusName(props["Status"]) ??
-                    readSelectName(props["Status"]) ?? null;
-                const publishDate = readDateStart(props["Posting Haven"]) ??
-                    readDateStart(props["Data publicação"]) ??
-                    readDateStart(props["Publish date"]) ??
-                    readDateStart(props["Data"]) ?? null;
-                const adType = readSelectName(props["Ad type"]) ?? null;
-                rows.push({ id: row.id, title, status, publishDate, platform: adType, owner: null });
+                const title = readPlainText(props["Name"]);
+                const date = readDateStart(props["Date"]);
+                const status = readSelectName(props["Status"]);
+                const channel = readSelectName(props["Channel"]);
+                if (!date || !status)
+                    continue;
+                rows.push({ id: row.id, title, date, status, channel });
             }
             cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
         } while (cursor);
-        // Filter to ±CONTENT_CAL_WINDOW_DAYS, then sort by date ascending,
-        // then cap at CONTENT_CAL_MAX_ROWS. Rows without a publishDate are
-        // treated as "future drafts" and kept at the end so they don't get
-        // culled before scheduled content.
-        const now = Date.now();
-        const windowMs = CONTENT_CAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-        const minTs = now - windowMs;
-        const maxTs = now + windowMs;
-        const filtered = rows.filter((r) => {
-            if (!r.publishDate)
-                return true;
-            const t = Date.parse(r.publishDate);
-            if (!Number.isFinite(t))
-                return true;
-            return t >= minTs && t <= maxTs;
-        });
-        filtered.sort((a, b) => {
-            const ta = a.publishDate ? Date.parse(a.publishDate) : Number.POSITIVE_INFINITY;
-            const tb = b.publishDate ? Date.parse(b.publishDate) : Number.POSITIVE_INFINITY;
-            return ta - tb;
-        });
-        const capped = filtered.slice(0, CONTENT_CAL_MAX_ROWS);
-        log.debug("notion.content_calendar_capped", {
-            total: rows.length,
-            afterWindow: filtered.length,
-            returned: capped.length,
-        });
-        return capped;
+        return rows;
     }
     catch (err) {
-        log.warn("notion.content_calendar_rows_failed", {
+        log.warn("notion.content_calendar_needs_scheduling_failed", {
             message: err instanceof Error ? err.message : String(err),
         });
         return [];
     }
-}
-async function createContentCalendarEntry(params) {
-    if (!NOTION_CONTENT_CALENDAR_DB_ID) {
-        throw new Error("notion: NOTION_CONTENT_CALENDAR_DB_ID is not configured");
-    }
-    const properties = {
-        Name: { title: [{ text: { content: params.title } }] },
-        status: { status: { name: params.status ?? "raw idea" } },
-    };
-    if (params.publishDate) {
-        properties["Posting Haven"] = { date: { start: params.publishDate } };
-    }
-    if (params.adType) {
-        properties["Ad type"] = { select: { name: params.adType } };
-    }
-    const page = await withRetry("createContentCalendarEntry", () => client.pages.create({
-        parent: { type: "data_source_id", data_source_id: dsId(NOTION_CONTENT_CALENDAR_DB_ID) },
-        properties: properties,
-    }));
-    log.info("notion.content_calendar_entry_created", { title: params.title });
-    return page.id;
 }
 async function createReminder(r, taskPageId) {
     if (!NOTION_REMINDERS_DB_ID) {
@@ -2095,9 +1970,9 @@ async function getTasksForEntity(entityField, entityPageId) {
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archivePage, 
 // Phase 2
-getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getCompletedSince, getOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
+getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, 
 // Phase 3
-getPartnersStale, getInfluencersStale, getContentCalendarAlerts, getContentCalendarRows, createContentCalendarEntry, createReminder, getDueReminders, markReminderSent, cancelReminder, 
+getPartnersStale, getInfluencersStale, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Dependencies
@@ -2124,16 +1999,14 @@ export const notion = {
     getOpenTasksFor,
     getWeeklyPriorities,
     setWeeklyPriority,
-    getCompletedSince,
-    getOverdueTasks,
+    getWeeklyCompletedSince,
+    getWeeklyOverdueTasks,
     setFounderFocus,
     getFounderFocusForWeek,
     // Phase 3
     getPartnersStale,
     getInfluencersStale,
-    getContentCalendarAlerts,
-    getContentCalendarRows,
-    createContentCalendarEntry,
+    getContentCalendarNeedsScheduling,
     createReminder,
     getDueReminders,
     markReminderSent,

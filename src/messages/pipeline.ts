@@ -5,7 +5,12 @@
  * Used by the cron pipeline-alerts handler before sending DMs to owners.
  */
 
-import type { InfluencerRow, PartnerRow, ReminderRow } from "../types.js";
+import type {
+  ContentCalendarNeedsSchedulingRow,
+  InfluencerRow,
+  PartnerRow,
+  ReminderRow,
+} from "../types.js";
 
 function statusOrDash(s: string | null | undefined): string {
   return s && s.trim().length > 0 ? s.toLowerCase() : "—";
@@ -58,19 +63,15 @@ export function formatInfluencerAlert(
   return lines.join("\n");
 }
 
-export function formatContentAlert(buckets: {
-  hours_to_publish_unscheduled: unknown[];
-  editing_too_long: unknown[];
-  ideation_stale: unknown[];
-}): string {
-  const a = buckets.hours_to_publish_unscheduled.length;
-  const b = buckets.editing_too_long.length;
-  const c = buckets.ideation_stale.length;
-  const lines: string[] = ["📅 content calendar:"];
-  if (a > 0) lines.push(`• ${a} a publicar em <24h sem agendamento`);
-  if (b > 0) lines.push(`• ${b} em edição há >48h da publicação`);
-  if (c > 0) lines.push(`• ${c} em ideação há >14d`);
-  if (a === 0 && b === 0 && c === 0) lines.push("• tudo a andar 👌");
+export function formatContentAlert(
+  rows: ContentCalendarNeedsSchedulingRow[],
+): string {
+  const lines: string[] = ["📅 conteúdo por agendar (próx. 2 dias):"];
+  for (const row of rows) {
+    const date = row.date.slice(0, 10);
+    const channel = row.channel ? ` [${row.channel}]` : "";
+    lines.push(`• ${row.title} — ${date}${channel} (${row.status})`);
+  }
   return lines.join("\n");
 }
 

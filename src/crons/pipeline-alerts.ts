@@ -1,3 +1,4 @@
+import { alertKey, pruneStaleKeys } from "../lib/alert-dedup.js";
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM } from "../lib/telegram.js";
@@ -18,12 +19,15 @@ type AlertType =
   | "influencer_no_progress"
   | "content_calendar";
 
+const FOUNDERS: FounderName[] = ["Madalena", "Mafalda", "Beatriz"];
+
 // In-process dedup: resets on restart but acceptable — same alert won't fire
-// multiple times within a week under normal operation.
+// multiple times within a week (or day, for content_calendar) under normal
+// operation.
 const seen = new Set<string>();
 
-function alertKey(rowId: string, type: AlertType, week: number): string {
-  return `${rowId}|${type}|${week}`;
+function todayLabel(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function daysSince(iso: string | null): number {
@@ -122,47 +126,46 @@ async function processInfluencers(
   return sent;
 }
 
-async function processContentCalendar(week: number): Promise<number> {
-  let buckets: Awaited<ReturnType<typeof notion.getContentCalendarAlerts>>;
+async function processContentCalendar(today: string): Promise<number> {
+  let rows: Awaited<ReturnType<typeof notion.getContentCalendarNeedsScheduling>>;
   try {
-    buckets = await notion.getContentCalendarAlerts();
+    rows = await notion.getContentCalendarNeedsScheduling();
   } catch (err) {
     log.warn("pipeline_alerts.content_fetch_failed", {
       message: err instanceof Error ? err.message : String(err),
     });
     return 0;
   }
-  const total =
-    buckets.hours_to_publish_unscheduled.length +
-    buckets.editing_too_long.length +
-    buckets.ideation_stale.length;
-  if (total === 0) return 0;
+  const unseen = rows.filter(
+    (row) => !seen.has(alertKey(row.id, "content_calendar", today)),
+  );
+  if (unseen.length === 0) return 0;
 
-  const shape =
-    `${buckets.hours_to_publish_unscheduled.length}-` +
-    `${buckets.editing_too_long.length}-${buckets.ideation_stale.length}`;
-  const key = alertKey(`content:${shape}`, "content_calendar", week);
-  if (seen.has(key)) return 0;
-
-  const text = formatContentAlert(buckets);
-  await notifyOwner("Madalena", text, { type: "content_calendar" });
-  seen.add(key);
-  return 1;
+  const text = formatContentAlert(unseen);
+  for (const founder of FOUNDERS) {
+    await notifyOwner(founder, text, { type: "content_calendar" });
+  }
+  for (const row of unseen) {
+    seen.add(alertKey(row.id, "content_calendar", today));
+  }
+  return unseen.length;
 }
 
 export async function run(): Promise<void> {
   const week = weekOfYear();
-  // Prune entries from previous weeks to prevent unbounded Set growth.
-  for (const key of seen) {
-    const keyWeek = Number(key.split("|").at(-1));
-    if (keyWeek !== week) seen.delete(key);
+  const today = todayLabel();
+  // Prune entries whose scope matches neither the current week nor today
+  // — covers both the weekly (partner/influencer) and daily
+  // (content_calendar) dedup keys, preventing unbounded Set growth.
+  for (const key of pruneStaleKeys(seen, week, today)) {
+    seen.delete(key);
   }
   const counts = {
     partner_no_response: await processPartners("no_response", week),
     partner_no_progress: await processPartners("no_progress", week),
     influencer_no_response: await processInfluencers("no_response", week),
     influencer_no_progress: await processInfluencers("no_progress", week),
-    content_calendar: await processContentCalendar(week),
+    content_calendar: await processContentCalendar(today),
   };
   log.info("pipeline_alerts.done", { week, ...counts });
 }

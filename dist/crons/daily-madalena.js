@@ -3,6 +3,7 @@ import * as calendar from "../lib/calendar.js";
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM } from "../lib/telegram.js";
+import { currentWeekLabel } from "../lib/week.js";
 import { formatDailyDM, rankTasks } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 const WORK_START = parseInt(process.env.WORK_START_HOUR ?? "9", 10);
@@ -35,6 +36,7 @@ export async function run() {
         log.info("cron.daily_madalena.no_daily_founders");
         return;
     }
+    const priorities = await notion.getWeeklyPriorities(currentWeekLabel());
     let sent = 0;
     for (const founder of dailyFounders) {
         const tgId = getTelegramId(founder);
@@ -43,7 +45,7 @@ export async function run() {
             continue;
         }
         try {
-            const tasks = await notion.getOpenTasksFor(founder);
+            const tasks = priorities.filter((t) => t.owner === founder);
             const ranked = rankTasks(tasks);
             let calDesc = "";
             if (founder === "Madalena" && calendar.isAuthenticated()) {

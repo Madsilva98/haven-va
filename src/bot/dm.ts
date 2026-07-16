@@ -96,16 +96,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
   const chatId = ctx.chat.id;
   pushRecent(chatId, senderName, text);
 
-  const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
-  let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
-  if (calendarKeywords.test(text)) {
-    try {
-      contentCalendar = await notion.getContentCalendarRows();
-    } catch (err) {
-      log.warn("dm.calendar_fetch_failed", { err: String(err) });
-    }
-  }
-
   let openTasks: import("../types.js").OpenTask[] = [];
   try {
     openTasks = await notion.getOpenTasksFor(senderName);
@@ -120,7 +110,6 @@ export async function handleDM(ctx: Context): Promise<boolean> {
       text,
       getPriors(chatId),
       undefined,
-      contentCalendar,
       lastBotRepliesByChat.get(chatId),
       openTasks,
     );

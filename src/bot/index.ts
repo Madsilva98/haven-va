@@ -32,7 +32,6 @@ import {
   handleEvents,
   handleInfluencers,
   handleCalendar,
-  handleContent,
 } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
@@ -183,7 +182,6 @@ export function buildBot(): Bot {
     { command: "events",      description: "Ver os meus eventos" },
     { command: "influencers", description: "Ver os meus influencers" },
     { command: "calendar",    description: "Calendário — hoje e próximos 2 dias" },
-    { command: "content",     description: "Content Calendar — próximos 3 dias" },
     { command: "todiscuss",   description: "Adicionar à lista de discussão" },
     { command: "remind",      description: "Criar lembrete" },
     { command: "week",        description: "Definir foco semanal" },
@@ -217,7 +215,6 @@ export function buildBot(): Bot {
   bot.command("events", handleEvents);
   bot.command("influencers", handleInfluencers);
   bot.command("calendar", handleCalendar);
-  bot.command("content", handleContent);
 
   // Google Calendar auth — Madalena's private DM only.
   bot.command("auth", async (ctx) => {
@@ -424,25 +421,6 @@ export function buildBot(): Bot {
     if (text.trim().length < 4) return;
     if (hasNonTextMedia) return;
 
-    // Only inject the Content Calendar context when the user is clearly
-    // talking about social-media planning. The previous regex matched
-    // any "post" / "content" / "story" anywhere in the text, which
-    // false-positives on common Portuguese words (e.g. "post-parto",
-    // "discontento") and bloats Haiku's context by 500-2000 tokens for
-    // unrelated messages. Anchor on the actual phrasings the guide
-    // documents: "ideia para post/story/reel", "content calendar",
-    // "social media", "agenda/publica/adiciona ao conteúdo", etc.
-    const calendarKeywords =
-      /content\s*calendar|social\s*media|ideia\s+(?:para|de)\s+(?:post|story|stories|reel|reels|carrossel|conte[uú]do)|agenda(?:r|\s)\s*(?:o\s+|um\s+)?(?:post|story|reel|carrossel)|\bpublica(?:r|m|ç[ãa]o|do|da|dos)?\b|conte[uú]do\s+social/i;
-    let contentCalendar: import("../notion.js").ContentCalendarRow[] | undefined;
-    if (calendarKeywords.test(text)) {
-      try {
-        contentCalendar = await notion.getContentCalendarRows();
-      } catch (err) {
-        log.warn("pipeline.calendar_fetch_failed", { err: String(err) });
-      }
-    }
-
     let openTasks: import("../types.js").OpenTask[] = [];
     try {
       openTasks = await notion.getOpenTasksFor(senderName);
@@ -457,7 +435,6 @@ export function buildBot(): Bot {
         text,
         getPriors(chatId),
         repliedToText,
-        contentCalendar,
         lastBotRepliesByChat.get(chatId),
         openTasks,
       );

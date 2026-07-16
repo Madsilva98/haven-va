@@ -11,8 +11,8 @@ export async function run(): Promise<void> {
 
   const [priorities, completed, overdue, focus] = await Promise.all([
     notion.getWeeklyPriorities(weekLabel),
-    notion.getCompletedSince(mondayIso),
-    notion.getOverdueTasks(),
+    notion.getWeeklyCompletedSince(mondayIso),
+    notion.getWeeklyOverdueTasks(),
     safeFounderFocus(weekLabel),
   ]);
 

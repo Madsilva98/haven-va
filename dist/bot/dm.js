@@ -83,16 +83,6 @@ export async function handleDM(ctx) {
         return true;
     const chatId = ctx.chat.id;
     pushRecent(chatId, senderName, text);
-    const calendarKeywords = /calendar|calend|social media|content|story|stories|reel|conteúdo|publicaç/i;
-    let contentCalendar;
-    if (calendarKeywords.test(text)) {
-        try {
-            contentCalendar = await notion.getContentCalendarRows();
-        }
-        catch (err) {
-            log.warn("dm.calendar_fetch_failed", { err: String(err) });
-        }
-    }
     let openTasks = [];
     try {
         openTasks = await notion.getOpenTasksFor(senderName);
@@ -101,7 +91,7 @@ export async function handleDM(ctx) {
         log.warn("dm.open_tasks_fetch_failed", { err: String(err) });
     }
     try {
-        const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), undefined, contentCalendar, lastBotRepliesByChat.get(chatId), openTasks);
+        const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), undefined, lastBotRepliesByChat.get(chatId), openTasks);
         if (botReplies.length > 0) {
             lastBotRepliesByChat.set(chatId, botReplies);
         }

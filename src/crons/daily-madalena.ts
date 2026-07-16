@@ -3,6 +3,7 @@ import * as calendar from "../lib/calendar.js";
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM } from "../lib/telegram.js";
+import { currentWeekLabel } from "../lib/week.js";
 import { formatDailyDM, rankTasks } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 import type { CalendarEvent } from "../lib/calendar.js";
@@ -44,6 +45,8 @@ export async function run(): Promise<void> {
     return;
   }
 
+  const priorities = await notion.getWeeklyPriorities(currentWeekLabel());
+
   let sent = 0;
   for (const founder of dailyFounders) {
     const tgId = getTelegramId(founder);
@@ -53,7 +56,7 @@ export async function run(): Promise<void> {
     }
 
     try {
-      const tasks = await notion.getOpenTasksFor(founder);
+      const tasks = priorities.filter((t) => t.owner === founder);
       const ranked = rankTasks(tasks);
 
       let calDesc = "";

@@ -8,8 +8,8 @@ export async function run() {
     const mondayIso = mondayOf().toISOString();
     const [priorities, completed, overdue, focus] = await Promise.all([
         notion.getWeeklyPriorities(weekLabel),
-        notion.getCompletedSince(mondayIso),
-        notion.getOverdueTasks(),
+        notion.getWeeklyCompletedSince(mondayIso),
+        notion.getWeeklyOverdueTasks(),
         safeFounderFocus(weekLabel),
     ]);
     const text = formatFridayBalance({ weekLabel, priorities, completed, overdue, focus });

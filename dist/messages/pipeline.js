@@ -42,19 +42,13 @@ export function formatInfluencerAlert(row, daysSinceContact, suggestedFollowup) 
     lines.push(quoteDraft(suggestedFollowup));
     return lines.join("\n");
 }
-export function formatContentAlert(buckets) {
-    const a = buckets.hours_to_publish_unscheduled.length;
-    const b = buckets.editing_too_long.length;
-    const c = buckets.ideation_stale.length;
-    const lines = ["📅 content calendar:"];
-    if (a > 0)
-        lines.push(`• ${a} a publicar em <24h sem agendamento`);
-    if (b > 0)
-        lines.push(`• ${b} em edição há >48h da publicação`);
-    if (c > 0)
-        lines.push(`• ${c} em ideação há >14d`);
-    if (a === 0 && b === 0 && c === 0)
-        lines.push("• tudo a andar 👌");
+export function formatContentAlert(rows) {
+    const lines = ["📅 conteúdo por agendar (próx. 2 dias):"];
+    for (const row of rows) {
+        const date = row.date.slice(0, 10);
+        const channel = row.channel ? ` [${row.channel}]` : "";
+        lines.push(`• ${row.title} — ${date}${channel} (${row.status})`);
+    }
     return lines.join("\n");
 }
 export function formatReminderMessage(r) {

@@ -24,7 +24,6 @@ const REMINDERS_DB_ID        = process.env.NOTION_REMINDERS_DB_ID;
 const PROJECTS_DB_ID         = process.env.NOTION_PROJECTS_DB_ID;
 const EVENTS_DB_ID           = process.env.NOTION_EVENT_DB_ID;
 const LISTS_DB_ID            = process.env.NOTION_LISTS_DB_ID;
-const CONTENT_CALENDAR_DB_ID = process.env.NOTION_CONTENT_CALENDAR_DB_ID;
 
 if (!BACKLOG_DB_ID) {
   console.error("missing NOTION_BACKLOG_DB_ID env var — fill .env first");
@@ -206,33 +205,6 @@ const listasProperties = {
   Origem: { rich_text: {} },
 };
 
-// ── Content Calendar ──────────────────────────────────────────────────────────
-// Title property is "Name". Date field is "Posting Haven" only.
-const contentCalendarProperties = {
-  "Posting Haven": { date: {} },
-  "Ad type": { select: { options: [
-    { name: "awareness" }, { name: "traffic" }, { name: "conversion" },
-  ] } },
-  Series: { select: { options: [
-    { name: "Haven About" }, { name: "Haven Benefits" }, { name: "Haven Community" },
-    { name: "Pilates Educational" }, { name: "Filler Studio" }, { name: "Filler Motivational" },
-    { name: "Filler Relatable" }, { name: "Filler Funny" }, { name: "Customer Highlight" },
-    { name: "Instructor Highlight" }, { name: "Funny & Relatable" },
-    { name: "Day to day" }, { name: "About us" },
-  ] } },
-  Caption: { rich_text: {} },
-  "Post URL": { url: {} },
-  Script: { rich_text: {} },
-  Clips: { rich_text: {} },
-  Description: { rich_text: {} },
-  "Inspo video": { rich_text: {} },
-  "Recording date": { date: {} },
-  Type: { multi_select: { options: [
-    { name: "Haven" }, { name: "Ad" },
-  ] } },
-  "Active ad": { checkbox: {} },
-};
-
 async function setup(label, dbId, props) {
   console.log(`\n→ ${label} (${dbId})`);
   try {
@@ -271,8 +243,6 @@ async function main() {
   else console.log("· Eventos DB id not set — skipping");
   if (LISTS_DB_ID)            await setup("Listas",           LISTS_DB_ID,            listasProperties);
   else console.log("· Listas DB id not set — skipping");
-  if (CONTENT_CALENDAR_DB_ID) await setup("Content Calendar", CONTENT_CALENDAR_DB_ID, contentCalendarProperties);
-  else console.log("· Content Calendar DB id not set — skipping");
 }
 
 main().catch((err) => {

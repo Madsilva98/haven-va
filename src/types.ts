@@ -39,6 +39,14 @@ export interface WeeklyPriority {
   deadline: string | null;
 }
 
+export interface ContentCalendarNeedsSchedulingRow {
+  id: string;
+  title: string;
+  date: string;
+  status: string;
+  channel: string | null;
+}
+
 // ----- Phase 3 -----
 
 export type PartnerStatus =

@@ -6,7 +6,7 @@ import * as notion from "../notion.js";
 export async function run() {
     const weekLabel = currentWeekLabel();
     const [openTasks, focusByFounder, toDiscuss] = await Promise.all([
-        notion.getOpenTasks(),
+        notion.getWeeklyPriorities(weekLabel),
         safeFounderFocus(weekLabel),
         safeToDiscuss(),
     ]);

@@ -16,7 +16,7 @@ import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
 import * as notion from "../notion.js";
 import { handleCallback as handlePhase1Callback } from "./callbacks.js";
-import { handleDashboard, handleHelp, handleHoje, handleLista, handleStart, handleTask, handleProjects, handlePartners, handleEvents, handleInfluencers, handleCalendar, handleContent, } from "./commands.js";
+import { handleDashboard, handleHelp, handleHoje, handleLista, handleStart, handleTask, handleProjects, handlePartners, handleEvents, handleInfluencers, handleCalendar, } from "./commands.js";
 import { handleAssistant } from "./assistant.js";
 import { handleDM } from "./dm.js";
 import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
@@ -144,7 +144,6 @@ export function buildBot() {
         { command: "events", description: "Ver os meus eventos" },
         { command: "influencers", description: "Ver os meus influencers" },
         { command: "calendar", description: "Calendário — hoje e próximos 2 dias" },
-        { command: "content", description: "Content Calendar — próximos 3 dias" },
         { command: "todiscuss", description: "Adicionar à lista de discussão" },
         { command: "remind", description: "Criar lembrete" },
         { command: "week", description: "Definir foco semanal" },
@@ -179,7 +178,6 @@ export function buildBot() {
     bot.command("events", handleEvents);
     bot.command("influencers", handleInfluencers);
     bot.command("calendar", handleCalendar);
-    bot.command("content", handleContent);
     // Google Calendar auth — Madalena's private DM only.
     bot.command("auth", async (ctx) => {
         if (ctx.chat.type !== "private")
@@ -364,24 +362,6 @@ export function buildBot() {
             return;
         if (hasNonTextMedia)
             return;
-        // Only inject the Content Calendar context when the user is clearly
-        // talking about social-media planning. The previous regex matched
-        // any "post" / "content" / "story" anywhere in the text, which
-        // false-positives on common Portuguese words (e.g. "post-parto",
-        // "discontento") and bloats Haiku's context by 500-2000 tokens for
-        // unrelated messages. Anchor on the actual phrasings the guide
-        // documents: "ideia para post/story/reel", "content calendar",
-        // "social media", "agenda/publica/adiciona ao conteúdo", etc.
-        const calendarKeywords = /content\s*calendar|social\s*media|ideia\s+(?:para|de)\s+(?:post|story|stories|reel|reels|carrossel|conte[uú]do)|agenda(?:r|\s)\s*(?:o\s+|um\s+)?(?:post|story|reel|carrossel)|\bpublica(?:r|m|ç[ãa]o|do|da|dos)?\b|conte[uú]do\s+social/i;
-        let contentCalendar;
-        if (calendarKeywords.test(text)) {
-            try {
-                contentCalendar = await notion.getContentCalendarRows();
-            }
-            catch (err) {
-                log.warn("pipeline.calendar_fetch_failed", { err: String(err) });
-            }
-        }
         let openTasks = [];
         try {
             openTasks = await notion.getOpenTasksFor(senderName);
@@ -390,7 +370,7 @@ export function buildBot() {
             log.warn("pipeline.open_tasks_fetch_failed", { err: String(err) });
         }
         try {
-            const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), repliedToText, contentCalendar, lastBotRepliesByChat.get(chatId), openTasks);
+            const botReplies = await handleAssistant(ctx, senderName, text, getPriors(chatId), repliedToText, lastBotRepliesByChat.get(chatId), openTasks);
             if (botReplies.length > 0) {
                 lastBotRepliesByChat.set(chatId, botReplies);
             }

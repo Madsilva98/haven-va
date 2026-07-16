@@ -162,13 +162,6 @@ const TESTS = [
     expectTool: "add_to_list",
   },
 
-  // ── content calendar ───────────────────────────────────
-  {
-    name: "content calendar idea",
-    text: `${PREFIX} ideia para post: benefícios do pilates pós-parto`,
-    expectTool: "create_content_calendar_entry",
-  },
-
   // ── Edge cases: must NOT create anything ────────────────
   {
     name: "pure greeting (silence)",
@@ -237,7 +230,6 @@ async function main() {
         t.text,
         [], // recentMessages
         undefined, // repliedToText
-        [], // contentCalendar
         [], // lastBotReplies
         openTasks,
       );

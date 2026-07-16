@@ -205,7 +205,7 @@ export async function handleEvents(ctx) {
 export async function handleInfluencers(ctx) {
     await handleEntityCommand(ctx, "influencers", "influencers");
 }
-// ----- Calendar & Content -----
+// ----- Calendar -----
 const dayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon" });
 const timeFormatter = new Intl.DateTimeFormat("pt-PT", {
     hour: "2-digit",
@@ -261,33 +261,5 @@ export async function handleCalendar(ctx) {
     catch (err) {
         log.error("commands.calendar.failed", { err: String(err) });
         await ctx.reply("erro a carregar calendário — tenta outra vez");
-    }
-}
-export async function handleContent(ctx) {
-    try {
-        const rows = await notion.getContentCalendarRows();
-        const now = new Date();
-        const todayStr = dayFormatter.format(now);
-        const endStr = dayFormatter.format(new Date(now.getTime() + 3 * 86_400_000));
-        const upcoming = rows
-            .filter((r) => r.publishDate && r.publishDate >= todayStr && r.publishDate < endStr)
-            .sort((a, b) => (a.publishDate ?? "").localeCompare(b.publishDate ?? ""));
-        if (upcoming.length === 0) {
-            await ctx.reply(escapeMd("nada planeado nos próximos 3 dias"), { parse_mode: "MarkdownV2" });
-            return;
-        }
-        const lines = ["*content — próximos 3 dias*"];
-        for (const r of upcoming) {
-            lines.push("");
-            const typeStr = r.platform ? ` \\[${escapeMd(r.platform)}\\]` : "";
-            const statusStr = r.status ? ` \\(${escapeMd(r.status)}\\)` : "";
-            lines.push(`📱 ${escapeMd(r.publishDate ?? "?")}${typeStr}${statusStr}`);
-            lines.push(`  ${escapeMd(r.title)}`);
-        }
-        await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
-    }
-    catch (err) {
-        log.error("commands.content.failed", { err: String(err) });
-        await ctx.reply("erro a carregar content calendar — tenta outra vez");
     }
 }

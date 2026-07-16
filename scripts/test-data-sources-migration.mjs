@@ -120,11 +120,11 @@ async function main() {
     console.log(`  (skipped: ${err.message})`);
   }
 
-  section("9. Read content calendar");
+  section("9. Read content calendar needing scheduling");
   try {
-    const cal = await notion.getContentCalendarRows();
+    const cal = await notion.getContentCalendarNeedsScheduling();
     summary("content calendar rows", cal);
-    sample("sample", cal, ["title", "status", "publishDate"]);
+    sample("sample", cal, ["title", "status", "date"]);
   } catch (err) {
     console.log(`  (skipped: ${err.message})`);
   }

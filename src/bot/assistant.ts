@@ -17,7 +17,6 @@ import { currentWeekLabel } from "../lib/week.js";
 import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
-import type { ContentCalendarRow } from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
 import { checkAndUnblockDependents } from "./dependencies.js";
 import { isValidRecurrence } from "../types.js";
@@ -173,22 +172,8 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "create_content_calendar_entry",
-    description: "Adiciona uma entrada ao Content Calendar (Social Media Calendar). NUNCA usar add_to_list para conteúdo social.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Título do conteúdo" },
-        status: { type: "string", description: "Estado: raw idea, ideation, ready to record, editing, ready to post, posted. Default: raw idea" },
-        publish_date: { type: "string", description: "Data de publicação YYYY-MM-DD (opcional)" },
-        ad_type: { type: "string", description: "Tipo: Post, Story, Reel, Carrossel, etc. (opcional)" },
-      },
-      required: ["title"],
-    },
-  },
-  {
     name: "add_to_list",
-    description: "Adiciona um item a uma lista genérica no Notion. NÃO usar para Content Calendar ou Social Media Calendar.",
+    description: "Adiciona um item a uma lista genérica no Notion.",
     input_schema: {
       type: "object",
       properties: {
@@ -230,7 +215,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         db: {
           type: "string",
-          enum: ["backlog", "to_discuss", "decisions", "content_calendar", "partners", "influencers", "events", "projects"],
+          enum: ["backlog", "to_discuss", "decisions", "partners", "influencers", "events", "projects"],
           description: "Base de dados alvo",
         },
         item: {
@@ -244,7 +229,6 @@ const TOOLS: Anthropic.Tool[] = [
             "backlog: status|owner|deadline|prioridade|area|title. " +
             "to_discuss: urgencia|status|area|resolucao. " +
             "decisions: status|area|notas. " +
-            "content_calendar: status|publish_date|ad_type. " +
             "partners|influencers: status|owner. " +
             "events|projects: status|owner.",
         },
@@ -258,7 +242,6 @@ const TOOLS: Anthropic.Tool[] = [
             "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
             "to_discuss status: Pendente|Discutido|Arquivado|Aberto. " +
             "decisions status: Pendente implementação|Implementada. " +
-            "content_calendar status: raw idea|ideation|ready to record|editing|ready to post|posted. " +
             "partners status: On hold|A contactar|Contactado|A aguardar resposta|Em negociação|Fechado|Arquivado. " +
             "influencers status: A identificar|A contactar|Contactado|Em conversa|Proposta enviada|Fechado|Arquivado. " +
             "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
@@ -303,7 +286,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         db: {
           type: "string",
-          enum: ["backlog", "to_discuss", "decisions", "content_calendar", "partners", "influencers", "events", "projects"],
+          enum: ["backlog", "to_discuss", "decisions", "partners", "influencers", "events", "projects"],
           description: "Base de dados a pesquisar",
         },
         query: {
@@ -420,7 +403,6 @@ function buildUserMessage(
   text: string,
   recentMessages: { sender: FounderName; text: string }[],
   repliedToText?: string,
-  contentCalendar?: ContentCalendarRow[],
   lastBotReplies?: string[],
   openTasks?: OpenTask[],
   availableCalendars?: { id: string; summary: string }[],
@@ -459,16 +441,6 @@ function buildUserMessage(
 
   if (repliedToText) {
     lines.push(`[Em resposta ao bot: "${repliedToText}"]`);
-    lines.push("");
-  }
-
-  if (contentCalendar && contentCalendar.length > 0) {
-    lines.push("Social Media Calendar:");
-    for (const row of contentCalendar) {
-      const date = row.publishDate ?? "sem data";
-      const adType = row.platform ? ` [${row.platform}]` : "";
-      lines.push(`  - "${row.title}" | ${row.status ?? "—"} | ${date}${adType}`);
-    }
     lines.push("");
   }
 
@@ -705,30 +677,6 @@ async function execAddToList(
   const listReply = `📝 "${item}" adicionado à lista *${lista}*`;
   collector.push(listReply);
   await ctx.reply(listReply);
-  return "ok";
-}
-
-async function execCreateContentCalendarEntry(
-  input: Record<string, unknown>,
-  sender: FounderName,
-  ctx: Context,
-  collector: string[],
-): Promise<string> {
-  const title = typeof input.title === "string" ? input.title.trim() : "";
-  if (!title) return "parâmetros em falta";
-  const status = typeof input.status === "string" ? input.status.trim() : "Raw Idea";
-  const publishDate = typeof input.publish_date === "string" && input.publish_date ? input.publish_date : undefined;
-  const adType = typeof input.ad_type === "string" ? input.ad_type.trim() : undefined;
-  await notion.createContentCalendarEntry({
-    title,
-    status,
-    publishDate,
-    adType,
-    originalMsg: ctx.message?.text ?? "",
-  });
-  const calReply = `📅 "${title}" adicionado ao Content Calendar`;
-  collector.push(calReply);
-  await ctx.reply(calReply);
   return "ok";
 }
 
@@ -994,8 +942,6 @@ async function dispatchTool(
       return await execSetFocus(input, sender, ctx, collector);
     case "add_to_list":
       return await execAddToList(input, sender, ctx, collector);
-    case "create_content_calendar_entry":
-      return await execCreateContentCalendarEntry(input, sender, ctx, collector);
     case "check_list_item":
       return await execCheckListItem(input, ctx, collector);
     case "delete_list_item":
@@ -1020,7 +966,6 @@ export async function handleAssistant(
   text: string,
   recentMessages: { sender: FounderName; text: string }[],
   repliedToText?: string,
-  contentCalendar?: ContentCalendarRow[],
   lastBotReplies?: string[],
   openTasks?: OpenTask[],
 ): Promise<string[]> {
@@ -1050,7 +995,7 @@ export async function handleAssistant(
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
-      content: buildUserMessage(sender, text, recentMessages, repliedToText, contentCalendar, lastBotReplies, openTasks, availableCalendars, availableLists),
+      content: buildUserMessage(sender, text, recentMessages, repliedToText, lastBotReplies, openTasks, availableCalendars, availableLists),
     },
   ];
 

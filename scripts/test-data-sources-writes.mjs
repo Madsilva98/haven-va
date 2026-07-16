@@ -124,14 +124,6 @@ async function main() {
     ),
   );
 
-  // 5. ContentCalendar entry
-  await runWriteTest("createContentCalendarEntry (Content)", async () =>
-    notion.createContentCalendarEntry({
-      title: `${PREFIX} test content`,
-      status: "raw idea",
-    }),
-  );
-
   // 6. Project entity
   await runWriteTest("createProject (Projects)", async () =>
     notion.createProject(

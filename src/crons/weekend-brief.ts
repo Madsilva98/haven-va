@@ -9,7 +9,7 @@ export async function run(): Promise<void> {
   const weekLabel = currentWeekLabel();
 
   const [openTasks, focusByFounder, toDiscuss] = await Promise.all([
-    notion.getOpenTasks(),
+    notion.getWeeklyPriorities(weekLabel),
     safeFounderFocus(weekLabel),
     safeToDiscuss(),
   ]);
