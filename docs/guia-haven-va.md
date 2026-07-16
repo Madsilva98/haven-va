@@ -1,5 +1,7 @@
 # Haven VA — Guia rápido
 
+> Este ficheiro `.md` é a fonte de verdade. `guia-haven-va.html` é um export manual para partilhar fora do repo — regenera-o à mão depois de editares este ficheiro; não há script automático.
+
 Bot de Telegram que liga diretamente ao Notion e ao Google Calendar. Fala com ele como farias com uma colega — ele age, não pergunta.
 
 ---

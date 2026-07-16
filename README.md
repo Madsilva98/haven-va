@@ -68,6 +68,10 @@ In short:
 
 For the full mental model, read [`docs/knowledge-base/bot-architecture.md`](docs/knowledge-base/bot-architecture.md).
 
+## Documentation
+
+Full docs index: [`docs/README.md`](docs/README.md) — onboarding, architecture/ADRs, ops runbook, testing.
+
 ## Knowledge base
 
 `docs/knowledge-base/` is the durable home for everything not derivable from the code:
