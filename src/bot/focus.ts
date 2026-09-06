@@ -1,9 +1,11 @@
 /**
- * `/focus <text>` — single-shot operational focus setter.
+ * `/focus <text>` — weekly goals setter for the Founder Focus tracker.
  *
- * Deactivates the founder's previous Founder Focus row (if any) and
- * creates a new one, active. Only one active row per founder at a
- * time — history is preserved via Ativo=false on old rows.
+ * One active row per founder per week. Calling this again in the same
+ * week updates that week's goals in place (e.g. goals changed mid-week);
+ * calling it in a new week deactivates the old row and creates a new one.
+ * "Cumprido" and "Comentários" are filled in manually in Notion at the
+ * weekly review — the bot never writes them.
  */
 
 import type { Context } from "grammy";

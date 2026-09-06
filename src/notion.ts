@@ -1058,13 +1058,48 @@ async function deactivatePreviousFocus(founder: FounderName): Promise<void> {
   log.info("notion.founder_focus_deactivated", { founder, count: res.results.length });
 }
 
+// Founder Focus is a weekly tracker: one row per founder per week. If the active row
+// already belongs to the current week (goals edited mid-week), update it in place —
+// this preserves any "Cumprido"/"Comentários" already filled in manually for that week.
+// Otherwise (new week) deactivate the old row and create a fresh one.
 async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
   if (!NOTION_FOUNDER_FOCUS_DB_ID) {
     throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
   }
+  const res = await withRetry("setFounderFocus.query", () =>
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
+      filter: {
+        and: [
+          { property: "Founder", select: { equals: entry.founder } },
+          { property: "Ativo", checkbox: { equals: true } },
+        ],
+      },
+    }),
+  );
+  const activeRow = res.results.find((row) => "properties" in row);
+  const activeWeek =
+    activeRow && "properties" in activeRow
+      ? readFormulaString((activeRow.properties as Record<string, unknown>)["Semana"])
+      : undefined;
+
+  if (activeRow && activeWeek === entry.semana) {
+    await withRetry("setFounderFocus.update", () =>
+      client.pages.update({
+        page_id: activeRow.id,
+        properties: {
+          Name: { title: [{ text: { content: `${entry.founder} Focus` } }] },
+          "Foco operacional": richText(entry.focoOperacional),
+        } as Parameters<typeof client.pages.update>[0]["properties"],
+      }),
+    );
+    log.info("notion.founder_focus_updated", { founder: entry.founder, semana: entry.semana });
+    return;
+  }
+
   // Only one active (Ativo=true) row per founder — deactivate any existing before creating the new one.
   await deactivatePreviousFocus(entry.founder);
-  await withRetry("setFounderFocus", () =>
+  await withRetry("setFounderFocus.create", () =>
     client.pages.create({
       parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!) },
       properties: {

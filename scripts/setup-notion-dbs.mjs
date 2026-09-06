@@ -11,7 +11,7 @@
 
 import { Client } from "@notionhq/client";
 
-const notion = new Client({ auth: process.env.NOTION_API_KEY });
+const notion = new Client({ auth: process.env.NOTION_API_KEY, notionVersion: "2025-09-03" });
 
 const BACKLOG_DB_ID          = process.env.NOTION_BACKLOG_DB_ID;
 const FOUNDER_FOCUS_DB_ID    = process.env.NOTION_FOUNDER_FOCUS_DB_ID;
@@ -74,12 +74,17 @@ const remindersProperties = {
 
 // ── Founder Focus ────────────────────────────────────────────────────────────
 // Title property is "Name" (bot sets it from foco operacional text).
+// Weekly performance tracker: um row por founder por semana. "Foco operacional"
+// guarda os weekly goals (accionáveis — apresentar, fazer, terminar); "Cumprido"
+// e "Comentários" são preenchidos manualmente na reunião de avaliação, nunca pelo bot.
 const founderFocusProperties = {
   Founder: { select: { options: FOUNDER_OPTIONS } },
   // "Semana" is a formula in Notion — cannot be set via databases.update
   "Foco operacional": { rich_text: {} },
   Ativo: { checkbox: {} },
   Origem: { rich_text: {} },
+  Cumprido: { select: { options: [{ name: "Sim" }, { name: "Não" }] } },
+  Comentários: { rich_text: {} },
 };
 
 // ── Partner Pipeline ─────────────────────────────────────────────────────────
@@ -208,8 +213,17 @@ const listasProperties = {
 async function setup(label, dbId, props) {
   console.log(`\n→ ${label} (${dbId})`);
   try {
-    const res = await notion.databases.update({
-      database_id: dbId,
+    // As of API version 2025-09-03, schema lives on the database's data source,
+    // not the database itself — databases.update no longer accepts `properties`.
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    const dataSources = db.data_sources ?? [];
+    if (dataSources.length !== 1) {
+      throw new Error(
+        `expected exactly 1 data source, found ${dataSources.length} (${dataSources.map((d) => d.name).join(", ")})`,
+      );
+    }
+    const res = await notion.dataSources.update({
+      data_source_id: dataSources[0].id,
       properties: props,
     });
     const propNames = Object.keys(res.properties);

@@ -189,9 +189,11 @@ const dbs = [
       ["Name", "title", "", "bot cria nome com base no foco operacional"],
       ["Founder", "select", "Madalena | Mafalda | Beatriz", ""],
       ["Semana", "formula", "", "read-only"],
-      ["Foco operacional", "text", "", ""],
-      ["Ativo", "checkbox", "", ""],
+      ["Foco operacional", "text", "", "weekly goals — accionáveis (apresentar/fazer/terminar), não progresso"],
+      ["Ativo", "checkbox", "", "1 linha ativa por founder por semana"],
       ["Origem", "text", "", ""],
+      ["Cumprido", "select", "Sim | Não", "preenchido manualmente na reunião de avaliação — bot nunca escreve"],
+      ["Comentários", "text", "", "justificação quando Cumprido = Não — preenchido manualmente"],
     ],
   },
 ];

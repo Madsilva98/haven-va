@@ -92,6 +92,8 @@ Se forem vários itens, trata cada um separadamente.
 "o meu foco esta semana é X", "esta semana vou focar em X", "foco: X", resposta a "qual é o teu foco?" → define o foco.
 - `founder`: sender por defeito; usa outro nome só se explicitamente mencionado.
 - Distinção: `set_focus` = declaração de intenção para a semana. `log_entry` = registo de algo que já aconteceu.
+- Isto é um tracker de weekly goals, não uma lista de tarefas: o foco deve ser um resultado claro e accionável (apresentar X, terminar Y, fechar Z), não uma descrição de progresso ou área vaga.
+- Um segundo `set_focus` do mesmo founder na mesma semana atualiza os goals dessa semana (não cria semana nova) — usa isto quando os goals mudam a meio da semana.
 
 ### Decisões → `log_decision`
 "decidimos", "ficou decidido", "vamos com X" → regista.
