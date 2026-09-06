@@ -124,6 +124,21 @@ The `Dockerfile` does `COPY dist/ ./dist/` — it does NOT `RUN npm run build`. 
 
 Fix in flight (planned PR): move `RUN npm ci && npm run build` *inside* the Dockerfile so the build happens during the image build and the host's `dist/` becomes irrelevant.
 
+### Gotcha: `tsc` swap-thrashes on the NAS
+
+The NAS has 1.75GB RAM total. Running `npm run build` (`tsc`) directly on the NAS competes with Synology's own services (Photos, Contacts, Calendar, synoscgi) for that RAM and can start swap-thrashing — the process sits in `D` state (uninterruptible disk wait) barely accumulating CPU time (seconds of CPU per 10+ minutes of wall clock) and may never finish in practice.
+
+Symptom: `ps aux` shows the `tsc` node process in state `Dl` for many minutes with CPU time barely increasing; `free -m` shows swap usage climbing and available RAM near zero.
+
+Workaround: don't run `tsc` on the NAS at all. Build `dist/` locally (`npm run build`), then copy it to the NAS directly:
+```bash
+ssh haven-nas "mv /volume1/docker/haven-va/code/haven-va/dist /volume1/docker/haven-va/code/haven-va/dist.old.$(date +%s)"  # never rm -rf a remote dir sight unseen
+tar -czf - -C dist . | ssh haven-nas "mkdir -p /volume1/docker/haven-va/code/haven-va/dist && tar -xzf - -C /volume1/docker/haven-va/code/haven-va/dist"
+```
+Note: the NAS's `sftp-server` subsystem isn't enabled, so plain `scp` fails with `subsystem request failed` — the `tar` pipe over the existing `ssh` session works around that. From there, continue with the normal `docker compose build --no-cache && docker compose up -d`.
+
+If a `tsc` run is already stuck like this, `pkill -f 'node_modules/.bin/tsc'` on the NAS frees the RAM/swap immediately (the killed process only holds `dist/`'s work-in-progress, nothing persists mid-compile).
+
 ### Gotcha: `.env` changes don't reload
 
 The compose file uses `env_file: /volume1/docker/haven-va/data/.env`. Compose reads it at container creation, not at runtime. So editing `.env` and running `docker compose restart` does **not** pick up new values — you need `docker compose up -d --force-recreate` (or just rebuild).
