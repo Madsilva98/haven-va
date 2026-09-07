@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { InlineKeyboard, type Context } from "grammy";
 
 import { log } from "../lib/log.js";
-import { currentWeekLabel } from "../lib/week.js";
+import { weekOfYear } from "../lib/week.js";
 import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
@@ -169,6 +169,41 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["foco"],
+    },
+  },
+  {
+    name: "add_to_focus_body",
+    description: "Adiciona texto livre/tarefas ao corpo da página de Founder Focus (a semana atual ou a semana seguinte).",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "Texto a adicionar. Linhas com '- ' tornam-se bullets." },
+        target: { type: "string", enum: ["esta_semana", "proxima_semana"], description: "Semana alvo" },
+        founder: {
+          type: "string",
+          enum: ["Madalena", "Mafalda", "Beatriz"],
+          description: "Founder dona da página (default: sender). Se diferente do sender, o bot regista uma nota de quem adicionou.",
+        },
+      },
+      required: ["content", "target"],
+    },
+  },
+  {
+    name: "edit_focus_body",
+    description: "Edita ou remove uma linha já escrita no corpo da página de Founder Focus, por correspondência aproximada de texto.",
+    input_schema: {
+      type: "object",
+      properties: {
+        search_text: { type: "string", description: "Trecho da linha a encontrar (correspondência aproximada)" },
+        new_text: { type: "string", description: "Novo texto. Omitir para remover a linha." },
+        target: { type: "string", enum: ["esta_semana", "proxima_semana"], description: "Semana alvo" },
+        founder: {
+          type: "string",
+          enum: ["Madalena", "Mafalda", "Beatriz"],
+          description: "Founder dona da página (default: sender)",
+        },
+      },
+      required: ["search_text", "target"],
     },
   },
   {
@@ -657,10 +692,74 @@ async function execSetFocus(
     ? (input.founder as FounderName)
     : sender;
 
-  await notion.setFounderFocus({ founder, semana: currentWeekLabel(), focoOperacional: foco });
+  await notion.setFounderFocus({ founder, weekNumber: weekOfYear(), focoOperacional: foco });
   const focusReply = `🎯 foco de ${founder} esta semana: "${foco}"`;
   collector.push(focusReply);
   await ctx.reply(focusReply);
+  return "ok";
+}
+
+function focusTargetWeek(target: unknown): number {
+  return weekOfYear() + (target === "proxima_semana" ? 1 : 0);
+}
+
+async function execAddToFocusBody(
+  input: Record<string, unknown>,
+  sender: FounderName,
+  ctx: Context,
+  collector: string[],
+): Promise<string> {
+  const content = typeof input.content === "string" ? input.content.trim() : "";
+  if (!content) return "parâmetros em falta";
+  const founder = FOUNDERS.includes(input.founder as FounderName)
+    ? (input.founder as FounderName)
+    : sender;
+  const weekNumber = focusTargetWeek(input.target);
+
+  const pageId = await notion.getOrCreateFounderFocusRow(founder, weekNumber, { activate: false });
+  const meta = founder !== sender ? { addedBy: sender, when: new Date() } : undefined;
+  await notion.appendFounderFocusBody(pageId, content, meta);
+
+  const whose = founder !== sender ? ` de ${founder}` : "";
+  const reply = `✏️ adicionado ao foco${whose} (semana ${weekNumber})`;
+  collector.push(reply);
+  await ctx.reply(reply);
+  return "ok";
+}
+
+async function execEditFocusBody(
+  input: Record<string, unknown>,
+  sender: FounderName,
+  ctx: Context,
+  collector: string[],
+): Promise<string> {
+  const searchText = typeof input.search_text === "string" ? input.search_text.trim() : "";
+  if (!searchText) return "parâmetros em falta";
+  const newText = typeof input.new_text === "string" ? input.new_text.trim() : undefined;
+  const founder = FOUNDERS.includes(input.founder as FounderName)
+    ? (input.founder as FounderName)
+    : sender;
+  const weekNumber = focusTargetWeek(input.target);
+
+  const existing = await notion.getFounderFocusForWeek(weekNumber);
+  const row = existing.find((e) => e.founder === founder);
+  if (!row) {
+    const reply = `ainda não há nada escrito no foco de ${founder} para essa semana`;
+    await ctx.reply(reply);
+    return reply;
+  }
+  const pageId = await notion.getOrCreateFounderFocusRow(founder, weekNumber, { activate: false });
+  try {
+    await notion.editFounderFocusBodyItem(pageId, searchText, newText);
+  } catch (err) {
+    const reply = err instanceof Error ? err.message : "erro ao editar";
+    await ctx.reply(reply);
+    return reply;
+  }
+
+  const reply = newText ? `✏️ atualizado: "${searchText}" → "${newText}"` : `🗑 removido: "${searchText}"`;
+  collector.push(reply);
+  await ctx.reply(reply);
   return "ok";
 }
 
@@ -940,6 +1039,10 @@ async function dispatchTool(
       return await execAddToDiscuss(input, sender, ctx, collector);
     case "set_focus":
       return await execSetFocus(input, sender, ctx, collector);
+    case "add_to_focus_body":
+      return await execAddToFocusBody(input, sender, ctx, collector);
+    case "edit_focus_body":
+      return await execEditFocusBody(input, sender, ctx, collector);
     case "add_to_list":
       return await execAddToList(input, sender, ctx, collector);
     case "check_list_item":

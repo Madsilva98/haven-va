@@ -1,6 +1,8 @@
 /**
  * Week-of-year helpers, all in Europe/Lisbon timezone.
- * Match the Notion `Semana` formula format ("Semana 18").
+ * `weekOfYear` is the single source of truth for the Notion Founder Focus
+ * `Semana` number property — the bot writes it explicitly (it's a plain
+ * number property, not a formula).
  */
 
 import { TZDate } from "./tz.js";

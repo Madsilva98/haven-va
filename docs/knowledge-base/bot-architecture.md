@@ -62,8 +62,11 @@ Telegram message
 | `crons/friday-balance.ts` | `0 17 * * 5` | no | End-of-week summary. |
 | `crons/weekend-brief.ts` | `0 9 * * 6` | no | Saturday morning prep. |
 | `crons/pipeline-alerts.ts` | `0 */4 * * 1-5` | **yes** (via `draft-followup.ts`) | Stale-outreach alerts. ~$0.001 per draft. |
+| `crons/birthdays.ts` | `0 8 * * *` | no | Birthday reminders. |
+| `crons/founder-focus-cycle.ts` (`runSundayAsk`) | `0 18 * * 0` | no | Asks "cumpriste o foco?" (Sim/Não) to whoever's active-week row still has `Cumprido` empty. Tapping closes the week (see `bot/focusCallbacks.ts`). |
+| `crons/founder-focus-cycle.ts` (`runMondayReask`) | `0 8 * * 1` | no | Fallback for whoever didn't tap Sunday: closes the week anyway (`Cumprido` stays blank) and asks for the new week's goals directly, no Sim/Não re-ask. |
 
-Five of six crons are pure Notion + Telegram. **`pipeline-alerts` is the only cron that costs API money** — and it's a tiny line item (~$0.01/day at most).
+All crons are pure Notion + Telegram except **`pipeline-alerts`, the only one that costs API money** — and it's a tiny line item (~$0.01/day at most).
 
 ## State model
 
@@ -77,6 +80,7 @@ Five of six crons are pure Notion + Telegram. **`pipeline-alerts` is the only cr
 | Pending file uploads | `bot/index.ts:61-62` | no | 5-min TTL, abandoned on restart |
 | Deduped update IDs | `bot/index.ts:91-105` | no | After restart, an update within Telegram's retention window can be reprocessed once |
 | Pipeline-alerts seen-key set | `crons/pipeline-alerts.ts:23` | no | Prevents duplicate alerts within the same week; resets on restart |
+| Founder Focus "porquê?" pending comment | `bot/focusCallbacks.ts` | no | 2h TTL, keyed by Telegram user id. If the bot restarts between "Não" and the comment reply, the comment is lost — `Comentários` just stays blank (fine, it's manual-fill fallback anyway) |
 
 You can `docker restart` anytime — the bot rebuilds state on next message.
 

@@ -1,6 +1,6 @@
 import { log } from "../lib/log.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel } from "../lib/week.js";
+import { currentWeekLabel, weekOfYear } from "../lib/week.js";
 import { formatWeekendBrief } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 import type { FounderFocusEntry, FounderName } from "../types.js";
@@ -10,7 +10,7 @@ export async function run(): Promise<void> {
 
   const [openTasks, focusByFounder, toDiscuss] = await Promise.all([
     notion.getWeeklyPriorities(weekLabel),
-    safeFounderFocus(weekLabel),
+    safeFounderFocus(weekOfYear()),
     safeToDiscuss(),
   ]);
 
@@ -24,9 +24,9 @@ export async function run(): Promise<void> {
   });
 }
 
-async function safeFounderFocus(weekLabel: string): Promise<FounderFocusEntry[]> {
+async function safeFounderFocus(weekNumber: number): Promise<FounderFocusEntry[]> {
   try {
-    return await notion.getFounderFocusForWeek(weekLabel);
+    return await notion.getFounderFocusForWeek(weekNumber);
   } catch (err) {
     log.warn("cron.weekend_brief.focus_unavailable", {
       err: err instanceof Error ? err.message : String(err),

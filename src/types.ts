@@ -26,7 +26,7 @@ export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "ar
 
 export interface FounderFocusEntry {
   founder: FounderName;
-  semana: string; // "Semana 18"
+  weekNumber: number; // ISO week number, matches the Notion "Semana" number property
   focoOperacional: string;
 }
 

@@ -11,7 +11,7 @@
 import type { Context } from "grammy";
 
 import { log } from "../lib/log.js";
-import { currentWeekLabel } from "../lib/week.js";
+import { weekOfYear } from "../lib/week.js";
 import * as notion from "../notion.js";
 import type { FounderName } from "../types.js";
 
@@ -35,7 +35,7 @@ export async function handleFocus(
   try {
     await notion.setFounderFocus({
       founder,
-      semana: currentWeekLabel(),
+      weekNumber: weekOfYear(),
       focoOperacional: focus,
     });
   } catch (err) {

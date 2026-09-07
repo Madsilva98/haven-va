@@ -73,14 +73,16 @@ const remindersProperties = {
 };
 
 // ── Founder Focus ────────────────────────────────────────────────────────────
-// Title property is "Name" (bot sets it from foco operacional text).
-// Weekly performance tracker: um row por founder por semana. "Foco operacional"
+// Title property is "Nome" (bot sets it to "Objetivos {Founder} W{semana}").
+// Weekly performance tracker: um row por founder por semana. "Objetivos"
 // guarda os weekly goals (accionáveis — apresentar, fazer, terminar); "Cumprido"
-// e "Comentários" são preenchidos manualmente na reunião de avaliação, nunca pelo bot.
+// é escrito pelo bot no fecho de ciclo (domingo/segunda) quando respondido, senão
+// fica por preencher manualmente; "Comentários" idem quando a resposta é "Não".
 const founderFocusProperties = {
   Founder: { select: { options: FOUNDER_OPTIONS } },
-  // "Semana" is a formula in Notion — cannot be set via databases.update
-  "Foco operacional": { rich_text: {} },
+  // "Semana" is a plain number (ISO week) written by the bot on every create.
+  Semana: { number: {} },
+  Objetivos: { rich_text: {} },
   Ativo: { checkbox: {} },
   Origem: { rich_text: {} },
   Cumprido: { select: { options: [{ name: "Sim" }, { name: "Não" }] } },

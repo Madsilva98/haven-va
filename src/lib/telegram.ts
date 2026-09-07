@@ -13,6 +13,10 @@ const TELEGRAM_GROUP_ID = process.env.TELEGRAM_GROUP_ID;
 
 type ParseMode = "MarkdownV2" | "HTML";
 
+export interface InlineKeyboardMarkup {
+  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+}
+
 interface SendMessageResponse {
   ok: boolean;
   result?: { message_id: number };
@@ -24,6 +28,7 @@ async function sendMessage(
   chatId: number | string,
   text: string,
   parseMode?: ParseMode,
+  replyMarkup?: InlineKeyboardMarkup,
 ): Promise<number> {
   if (!TELEGRAM_BOT_TOKEN) {
     throw new Error("telegram: TELEGRAM_BOT_TOKEN is not set");
@@ -36,6 +41,7 @@ async function sendMessage(
     disable_web_page_preview: true,
   };
   if (parseMode) body.parse_mode = parseMode;
+  if (replyMarkup) body.reply_markup = replyMarkup;
 
   const res = await fetch(url, {
     method: "POST",
@@ -72,6 +78,7 @@ export async function sendDM(
   telegramUserId: number,
   text: string,
   parseMode?: ParseMode,
+  replyMarkup?: InlineKeyboardMarkup,
 ): Promise<number> {
-  return sendMessage(telegramUserId, text, parseMode);
+  return sendMessage(telegramUserId, text, parseMode, replyMarkup);
 }

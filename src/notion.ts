@@ -41,6 +41,7 @@ import type {
   ContentCalendarNeedsSchedulingRow,
 } from "./types.js";
 import { log } from "./lib/log.js";
+import { formatLisbonDateTime } from "./lib/tz.js";
 
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
@@ -345,6 +346,18 @@ function readFormulaString(prop: unknown): string | null {
     typeof (prop as { formula: { string?: string } }).formula === "object"
   ) {
     return (prop as { formula: { string?: string } }).formula.string ?? null;
+  }
+  return null;
+}
+
+function readNumber(prop: unknown): number | null {
+  if (
+    prop &&
+    typeof prop === "object" &&
+    "number" in prop &&
+    typeof (prop as { number: unknown }).number === "number"
+  ) {
+    return (prop as { number: number }).number;
   }
   return null;
 }
@@ -1080,20 +1093,20 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
   const activeRow = res.results.find((row) => "properties" in row);
   const activeWeek =
     activeRow && "properties" in activeRow
-      ? readFormulaString((activeRow.properties as Record<string, unknown>)["Semana"])
+      ? readNumber((activeRow.properties as Record<string, unknown>)["Semana"])
       : undefined;
 
-  if (activeRow && activeWeek === entry.semana) {
+  if (activeRow && activeWeek === entry.weekNumber) {
     await withRetry("setFounderFocus.update", () =>
       client.pages.update({
         page_id: activeRow.id,
         properties: {
-          Name: { title: [{ text: { content: `${entry.founder} Focus` } }] },
-          "Foco operacional": richText(entry.focoOperacional),
+          Nome: { title: [{ text: { content: founderFocusTitle(entry.founder, entry.weekNumber) } }] },
+          Objetivos: richText(entry.focoOperacional),
         } as Parameters<typeof client.pages.update>[0]["properties"],
       }),
     );
-    log.info("notion.founder_focus_updated", { founder: entry.founder, semana: entry.semana });
+    log.info("notion.founder_focus_updated", { founder: entry.founder, weekNumber: entry.weekNumber });
     return;
   }
 
@@ -1103,22 +1116,23 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
     client.pages.create({
       parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!) },
       properties: {
-        Name: { title: [{ text: { content: `${entry.founder} Focus` } }] },
+        Nome: { title: [{ text: { content: founderFocusTitle(entry.founder, entry.weekNumber) } }] },
         Founder: { select: { name: entry.founder } },
-        "Foco operacional": richText(entry.focoOperacional),
+        Semana: { number: entry.weekNumber },
+        Objetivos: richText(entry.focoOperacional),
         Ativo: { checkbox: true },
       } as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
-  log.info("notion.founder_focus_created", { founder: entry.founder, semana: entry.semana });
+  log.info("notion.founder_focus_created", { founder: entry.founder, weekNumber: entry.weekNumber });
 }
 
-async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]> {
+async function getFounderFocusForWeek(weekNumber: number): Promise<FounderFocusEntry[]> {
   if (!NOTION_FOUNDER_FOCUS_DB_ID) return [];
   const res = await withRetry("getFounderFocusForWeek", () =>
     client.dataSources.query({
       data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
-      filter: { property: "Semana", formula: { string: { equals: week } } },
+      filter: { property: "Semana", number: { equals: weekNumber } },
       sorts: [{ timestamp: "created_time", direction: "descending" }],
     }),
   );
@@ -1134,11 +1148,11 @@ async function getFounderFocusForWeek(week: string): Promise<FounderFocusEntry[]
     seen.add(founderName);
     entries.push({
       founder: founderName,
-      semana: readPlainText(props["Semana"]) || week,
-      focoOperacional: readPlainText(props["Foco operacional"]),
+      weekNumber: readNumber(props["Semana"]) ?? weekNumber,
+      focoOperacional: readPlainText(props["Objetivos"]),
     });
   }
-  log.debug("notion.founder_focus_fetched", { week, count: entries.length });
+  log.debug("notion.founder_focus_fetched", { weekNumber, count: entries.length });
   return entries;
 }
 
@@ -1164,12 +1178,184 @@ async function getActiveFounderFocuses(): Promise<FounderFocusEntry[]> {
     seen.add(founderName);
     entries.push({
       founder: founderName,
-      semana: readFormulaString(props["Semana"]) ?? "",
-      focoOperacional: readPlainText(props["Foco operacional"]),
+      weekNumber: readNumber(props["Semana"]) ?? 0,
+      focoOperacional: readPlainText(props["Objetivos"]),
     });
   }
   log.debug("notion.active_founder_focus_fetched", { count: entries.length });
   return entries;
+}
+
+function founderFocusTitle(founder: FounderName, weekNumber: number): string {
+  return `Objetivos ${founder} W${weekNumber}`;
+}
+
+/**
+ * Finds (or creates) the Founder Focus row for `founder`/`weekNumber`.
+ * Used by the body-append/edit tools (to get-or-create the "this week" or
+ * "next week" row without touching Ativo) and by the weekly rollover (which
+ * explicitly asks to activate the row it lands on).
+ */
+async function getOrCreateFounderFocusRow(
+  founder: FounderName,
+  weekNumber: number,
+  opts: { activate: boolean },
+): Promise<string> {
+  if (!NOTION_FOUNDER_FOCUS_DB_ID) {
+    throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
+  }
+  const res = await withRetry("getOrCreateFounderFocusRow.query", () =>
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
+      filter: {
+        and: [
+          { property: "Founder", select: { equals: founder } },
+          { property: "Semana", number: { equals: weekNumber } },
+        ],
+      },
+    }),
+  );
+  const existing = res.results.find((row) => "properties" in row);
+  if (existing) {
+    if (opts.activate) {
+      await withRetry("getOrCreateFounderFocusRow.activate", () =>
+        client.pages.update({
+          page_id: existing.id,
+          properties: { Ativo: { checkbox: true } } as Parameters<typeof client.pages.update>[0]["properties"],
+        }),
+      );
+    }
+    return existing.id;
+  }
+  const page = await withRetry("getOrCreateFounderFocusRow.create", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!) },
+      properties: {
+        Nome: { title: [{ text: { content: founderFocusTitle(founder, weekNumber) } }] },
+        Founder: { select: { name: founder } },
+        Semana: { number: weekNumber },
+        Ativo: { checkbox: opts.activate },
+      } as Parameters<typeof client.pages.create>[0]["properties"],
+    }),
+  );
+  log.info("notion.founder_focus_row_created", { founder, weekNumber, activate: opts.activate });
+  return page.id;
+}
+
+async function getFounderFocusRow(
+  pageId: string,
+): Promise<{ founder: FounderName; weekNumber: number; focoOperacional: string; ativo: boolean } | null> {
+  const page = await withRetry("getFounderFocusRow", () =>
+    client.pages.retrieve({ page_id: pageId }),
+  );
+  if (!("properties" in page)) return null;
+  const props = page.properties as Record<string, unknown>;
+  const founderName = readSelectName(props["Founder"]);
+  if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") return null;
+  return {
+    founder: founderName,
+    weekNumber: readNumber(props["Semana"]) ?? 0,
+    focoOperacional: readPlainText(props["Objetivos"]),
+    ativo: readCheckbox(props["Ativo"]),
+  };
+}
+
+async function setFounderFocusCumprido(
+  pageId: string,
+  cumprido: boolean,
+  comentario?: string,
+): Promise<void> {
+  const properties: Record<string, unknown> = {
+    Cumprido: { select: { name: cumprido ? "Sim" : "Não" } },
+  };
+  if (comentario !== undefined) {
+    properties["Comentários"] = richText(comentario);
+  }
+  await withRetry("setFounderFocusCumprido", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.founder_focus_cumprido_set", { pageId, cumprido, hasComentario: comentario !== undefined });
+}
+
+/**
+ * Closes the current week's cycle for `founder`: deactivates the active row
+ * and activates (creating if necessary) the row for the following ISO week.
+ * If a "next week" row was already pre-written via `add_to_focus_body`, it's
+ * reused instead of creating a duplicate.
+ */
+async function rolloverFounderFocusWeek(founder: FounderName, nextWeekNumber: number): Promise<string> {
+  await deactivatePreviousFocus(founder);
+  return getOrCreateFounderFocusRow(founder, nextWeekNumber, { activate: true });
+}
+
+/**
+ * Appends free text to a Founder Focus page body. `meta` is set when
+ * writing to a founder's page on someone else's behalf — it's rendered as
+ * a leading note so the founder knows who added it and when.
+ */
+async function appendFounderFocusBody(
+  pageId: string,
+  content: string,
+  meta?: { addedBy: FounderName; when: Date },
+): Promise<void> {
+  const prefixed = meta
+    ? `adicionado por ${meta.addedBy} em ${formatLisbonDateTime(meta.when)}\n${content}`
+    : content;
+  await appendToPageSection(pageId, prefixed);
+}
+
+/**
+ * Finds the body block whose text best matches `searchText` (case-insensitive
+ * substring, either direction) and either edits it in place (`newText` set)
+ * or deletes it (`newText` omitted). Throws if zero or more-than-one blocks
+ * match equally well, so the caller can ask the user to be more specific.
+ */
+async function editFounderFocusBodyItem(
+  pageId: string,
+  searchText: string,
+  newText?: string,
+): Promise<void> {
+  const listRes = await withRetry("editFounderFocusBodyItem.list", () =>
+    client.blocks.children.list({ block_id: pageId, page_size: 100 }),
+  );
+  const needle = searchText.trim().toLowerCase();
+  const candidates: { id: string; type: string; text: string }[] = [];
+  for (const block of listRes.results) {
+    if (!("type" in block)) continue;
+    const b = block as { type: string; id: string; [key: string]: unknown };
+    if (!["paragraph", "bulleted_list_item", "to_do"].includes(b.type)) continue;
+    const bData = b[b.type] as { rich_text?: Array<{ plain_text?: string }> };
+    const text = (bData.rich_text ?? []).map((rt) => rt.plain_text ?? "").join("");
+    const haystack = text.toLowerCase();
+    if (haystack.includes(needle) || needle.includes(haystack)) {
+      candidates.push({ id: b.id, type: b.type, text });
+    }
+  }
+  if (candidates.length === 0) {
+    throw new Error(`não encontrei nada parecido com "${searchText}"`);
+  }
+  if (candidates.length > 1) {
+    const list = candidates.map((c) => `"${c.text}"`).join(", ");
+    throw new Error(`encontrei várias linhas parecidas: ${list} — sê mais específico`);
+  }
+  const match = candidates[0]!;
+  if (newText === undefined) {
+    await withRetry("editFounderFocusBodyItem.delete", () =>
+      client.blocks.delete({ block_id: match.id }),
+    );
+    log.info("notion.founder_focus_body_item_removed", { pageId, blockId: match.id });
+    return;
+  }
+  await withRetry("editFounderFocusBodyItem.update", () =>
+    client.blocks.update({
+      block_id: match.id,
+      [match.type]: { rich_text: [{ type: "text", text: { content: newText } }] },
+    } as Parameters<typeof client.blocks.update>[0]),
+  );
+  log.info("notion.founder_focus_body_item_edited", { pageId, blockId: match.id });
 }
 
 // ============================================================
@@ -2442,6 +2628,12 @@ export {
   setFounderFocus,
   getFounderFocusForWeek,
   getActiveFounderFocuses,
+  getOrCreateFounderFocusRow,
+  getFounderFocusRow,
+  setFounderFocusCumprido,
+  rolloverFounderFocusWeek,
+  appendFounderFocusBody,
+  editFounderFocusBodyItem,
   // Phase 3
   getPartnersStale,
   getInfluencersStale,
@@ -2500,6 +2692,12 @@ export const notion = {
   setFounderFocus,
   getFounderFocusForWeek,
   getActiveFounderFocuses,
+  getOrCreateFounderFocusRow,
+  getFounderFocusRow,
+  setFounderFocusCumprido,
+  rolloverFounderFocusWeek,
+  appendFounderFocusBody,
+  editFounderFocusBodyItem,
   // Phase 3
   getPartnersStale,
   getInfluencersStale,

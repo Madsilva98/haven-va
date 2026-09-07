@@ -3,6 +3,7 @@ import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runDailyMadalena } from "./crons/daily-madalena.js";
 import { run as runFridayBalance } from "./crons/friday-balance.js";
+import { runSundayAsk, runMondayReask } from "./crons/founder-focus-cycle.js";
 import { run as runMondayPriorities } from "./crons/monday-priorities.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
@@ -69,6 +70,22 @@ const tasks = [
     () =>
       runBirthdays().catch((e) =>
         log.error("cron.birthdays", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "0 18 * * 0",
+    () =>
+      runSundayAsk().catch((e) =>
+        log.error("cron.focus_cycle.sunday", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "0 8 * * 1",
+    () =>
+      runMondayReask().catch((e) =>
+        log.error("cron.focus_cycle.monday", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

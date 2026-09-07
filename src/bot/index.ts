@@ -42,6 +42,7 @@ import {
   handleToDiscussCommand,
   handleToDiscussCallback,
 } from "./todiscuss.js";
+import { handleFocusCallback } from "./focusCallbacks.js";
 
 const errorLimit = new ErrorRateLimit();
 
@@ -111,6 +112,10 @@ async function callbackRouter(ctx: Context): Promise<void> {
     }
     if (scope === "todiscuss") {
       await handleToDiscussCallback(ctx);
+      return;
+    }
+    if (scope === "focusask") {
+      await handleFocusCallback(ctx);
       return;
     }
     log.warn("callback.unknown_scope", { scope, data });
