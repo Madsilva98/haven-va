@@ -205,8 +205,15 @@ const eventsProperties = {
 
 // ── Listas ───────────────────────────────────────────────────────────────────
 // Title property is "Item".
+// "Lista" is deliberately NOT included here: it's a select whose options are
+// created dynamically at runtime (one per distinct list name). Pushing
+// `{ select: { options: [] } }` through dataSources.update REPLACES the full
+// option list with empty — Notion then clears that property on every page
+// referencing a now-deleted option. Happened once (2026-09-07): wiped every
+// card's "Lista" value repo-wide. Never include this property in a schema
+// push; if the select itself needs to exist for the first time, create it
+// via the Notion UI once, then leave it alone here.
 const listasProperties = {
-  Lista: { select: { options: [] } }, // options created dynamically at runtime
   Fechada: { checkbox: {} },
   "Adicionado por": { select: { options: FOUNDER_OPTIONS } },
   Origem: { rich_text: {} },
