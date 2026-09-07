@@ -80,7 +80,7 @@ async function rolloverAndAsk(founder: FounderName, nextWeek: number): Promise<v
     return;
   }
   try {
-    markFounderAwaitingGoals(tgId);
+    markFounderAwaitingGoals(tgId, nextWeek);
     await sendDM(tgId, "quais são os teus objetivos desta semana?");
   } catch (err) {
     log.warn("cron.focus_cycle.monday.dm_failed", {

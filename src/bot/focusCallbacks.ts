@@ -16,13 +16,20 @@
  * the one thing the whole weekly cycle hinges on, so it shouldn't depend
  * on an LLM tool-choice call picking the right tool for whatever the
  * founder happens to type back.
+ *
+ * Critically, `pendingGoals` records the EXACT week number the rollover
+ * just activated — never recomputed via `weekOfYear()` at answer time.
+ * The calendar's current ISO week doesn't change until real midnight
+ * Monday, so on a real Sunday-evening "Sim" tap (or in any out-of-band
+ * manual test) `weekOfYear()` at reply time can still equal the OLD week,
+ * which would make `setFounderFocus` think it's a week-mismatch and spin
+ * up a stray extra row instead of filling in the one just activated.
  */
 
 import type { Context } from "grammy";
 
 import { getFounderName, isFounder } from "../lib/founders.js";
 import { log } from "../lib/log.js";
-import { weekOfYear } from "../lib/week.js";
 import * as notion from "../notion.js";
 import type { FounderName } from "../types.js";
 
@@ -35,16 +42,21 @@ interface PendingComment {
 const PENDING_TTL_MS = 2 * 60 * 60 * 1000; // 2h — same-session follow-up, not meant to survive long
 const pendingComments = new Map<number, PendingComment>();
 
+interface PendingGoals {
+  weekNumber: number;
+  expiresAt: number;
+}
+
 const GOALS_TTL_MS = 24 * 60 * 60 * 1000; // 24h — covers "reply whenever later that day"
-const pendingGoals = new Map<number, number>(); // telegramId -> expiresAt
+const pendingGoals = new Map<number, PendingGoals>();
 
 function gc(): void {
   const now = Date.now();
   for (const [k, v] of pendingComments) {
     if (v.expiresAt < now) pendingComments.delete(k);
   }
-  for (const [k, expiresAt] of pendingGoals) {
-    if (expiresAt < now) pendingGoals.delete(k);
+  for (const [k, v] of pendingGoals) {
+    if (v.expiresAt < now) pendingGoals.delete(k);
   }
 }
 
@@ -52,9 +64,9 @@ export function isFocusCallback(data: string): boolean {
   return data.startsWith("focusask:");
 }
 
-function markAwaitingGoals(telegramId: number): void {
+function markAwaitingGoals(telegramId: number, weekNumber: number): void {
   gc();
-  pendingGoals.set(telegramId, Date.now() + GOALS_TTL_MS);
+  pendingGoals.set(telegramId, { weekNumber, expiresAt: Date.now() + GOALS_TTL_MS });
 }
 
 async function closeWeekAndAskGoals(
@@ -63,8 +75,9 @@ async function closeWeekAndAskGoals(
   founder: FounderName,
   currentWeek: number,
 ): Promise<void> {
-  await notion.rolloverFounderFocusWeek(founder, currentWeek + 1);
-  markAwaitingGoals(telegramId);
+  const nextWeek = currentWeek + 1;
+  await notion.rolloverFounderFocusWeek(founder, nextWeek);
+  markAwaitingGoals(telegramId, nextWeek);
   await ctx.reply("quais são os teus objetivos desta semana?");
 }
 
@@ -146,8 +159,9 @@ export async function tryConsumeFocusComment(
   await notion.setFounderFocusCumprido(pending.pageId, false, text.trim());
   const row = await notion.getFounderFocusRow(pending.pageId);
   const weekNumber = row?.weekNumber ?? 0;
-  await notion.rolloverFounderFocusWeek(pending.founder, weekNumber + 1);
-  markAwaitingGoals(fromId);
+  const nextWeek = weekNumber + 1;
+  await notion.rolloverFounderFocusWeek(pending.founder, nextWeek);
+  markAwaitingGoals(fromId, nextWeek);
   await ctx.reply("quais são os teus objetivos desta semana?");
   log.info("focus_callback.comment_captured", { founder: pending.founder });
   return true;
@@ -164,16 +178,17 @@ export async function tryConsumeGoalsAnswer(
   text: string,
 ): Promise<boolean> {
   gc();
-  if (!pendingGoals.has(fromId)) return false;
+  const pending = pendingGoals.get(fromId);
+  if (!pending) return false;
   pendingGoals.delete(fromId);
 
   const founder = getFounderName(fromId);
   if (!founder) return false;
 
   const foco = text.trim().slice(0, 200);
-  await notion.setFounderFocus({ founder, weekNumber: weekOfYear(), focoOperacional: foco });
+  await notion.setFounderFocus({ founder, weekNumber: pending.weekNumber, focoOperacional: foco });
   await ctx.reply(`🎯 foco de ${founder} esta semana: "${foco}"`);
-  log.info("focus_callback.goals_captured", { founder });
+  log.info("focus_callback.goals_captured", { founder, weekNumber: pending.weekNumber });
   return true;
 }
 
@@ -182,6 +197,6 @@ export async function tryConsumeGoalsAnswer(
  * this covers the Monday-fallback DM, which has no button to drive
  * `closeWeekAndAskGoals`).
  */
-export function markFounderAwaitingGoals(telegramId: number): void {
-  markAwaitingGoals(telegramId);
+export function markFounderAwaitingGoals(telegramId: number, weekNumber: number): void {
+  markAwaitingGoals(telegramId, weekNumber);
 }
