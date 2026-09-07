@@ -89,7 +89,8 @@ Se forem vários itens, trata cada um separadamente.
 - Se houver vários tópicos na mesma mensagem: cria um `add_to_discuss` por tópico.
 
 ### Foco semanal → `set_focus`
-"o meu foco esta semana é X", "esta semana vou focar em X", "foco: X", resposta a "qual é o teu foco?" → define o foco.
+"o meu foco esta semana é X", "esta semana vou focar em X", "foco: X", resposta a "qual é o teu foco?" ou a "quais são os teus objetivos desta semana?" → define o foco.
+- Qualquer resposta curta e direta (frase de resultado, sem outro tipo de pedido) logo a seguir a uma dessas perguntas do bot é `set_focus`, mesmo que não repita a pergunta literalmente.
 - `founder`: sender por defeito; usa outro nome só se explicitamente mencionado.
 - Distinção: `set_focus` = declaração de intenção para a semana. `log_entry` = registo de algo que já aconteceu.
 - Isto é um tracker de weekly goals, não uma lista de tarefas: o foco deve ser um resultado claro e accionável (apresentar X, terminar Y, fechar Z), não uma descrição de progresso ou área vaga.

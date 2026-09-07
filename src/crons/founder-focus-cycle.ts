@@ -15,6 +15,7 @@
  * Both take `now` so they're testable without waiting for the real day.
  */
 
+import { markFounderAwaitingGoals } from "../bot/focusCallbacks.js";
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM, type InlineKeyboardMarkup } from "../lib/telegram.js";
@@ -79,6 +80,7 @@ async function rolloverAndAsk(founder: FounderName, nextWeek: number): Promise<v
     return;
   }
   try {
+    markFounderAwaitingGoals(tgId);
     await sendDM(tgId, "quais são os teus objetivos desta semana?");
   } catch (err) {
     log.warn("cron.focus_cycle.monday.dm_failed", {

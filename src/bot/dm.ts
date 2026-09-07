@@ -12,7 +12,7 @@ import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import * as notion from "../notion.js";
 import { handleAssistant } from "./assistant.js";
-import { tryConsumeFocusComment } from "./focusCallbacks.js";
+import { tryConsumeFocusComment, tryConsumeGoalsAnswer } from "./focusCallbacks.js";
 import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import { handleFocus, isFocusCommand } from "./focus.js";
 import { handleWeek, isWeekCommand } from "./week.js";
@@ -70,6 +70,7 @@ export async function handleDM(ctx: Context): Promise<boolean> {
 
   try {
     if (await tryConsumeFocusComment(ctx, fromId, text)) return true;
+    if (await tryConsumeGoalsAnswer(ctx, fromId, text)) return true;
   } catch (err) {
     log.error("dm.focus_comment_failed", { err: String(err) });
   }
