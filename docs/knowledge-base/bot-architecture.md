@@ -29,7 +29,9 @@ Telegram message
 |---|---|---|
 | `src/server.ts` | ~80 | Entry point. Registers cron schedules. Starts grammY in long-polling mode. |
 | `src/bot/index.ts` | 478 | `buildBot()` — routing, founder identity check, file upload pipeline, Google OAuth intercept. |
-| `src/bot/assistant.ts` | 1098 | `handleAssistant()` — the Haiku call with `tool_use`. 13 tools defined inline. Tool dispatch loop bounded to 5 iterations. |
+| `src/bot/assistant.ts` | 1098+ | `handleAssistant()` — the Haiku call with `tool_use`. 16 tools defined inline (incl. `add_to_focus_body`/`edit_focus_body`, 2026-09). Tool dispatch loop bounded to 5 iterations. |
+| `src/bot/focusCallbacks.ts` | new (2026-09) | Founder Focus weekly-cycle state: Sim/Não callback handling, "porquê?" comment capture, and the "quais são os teus objetivos?" answer capture — all short-lived in-memory pending maps (telegramId → expiry), never relying on the LLM to recognize these replies. |
+| `src/crons/founder-focus-cycle.ts` | new (2026-09) | Sunday-18:00 (`runSundayAsk`) / Monday-08:00 (`runMondayReask`) pair that closes each founder's weekly cycle automatically — see the Cron schedule table below. |
 | `src/notion.ts` | ~2400 | The single Notion wrapper. Singleton `Client`. Hardcoded property names. Open-tasks 60s cache. `withRetry` (3 attempts, 0.5/2/8s). |
 | `src/types.ts` | ~315 | Every shared type. Add new DB fields here first. |
 | `src/lib/founders.ts` | small | Telegram-ID → founder-name lookup. IDs in env vars. |
