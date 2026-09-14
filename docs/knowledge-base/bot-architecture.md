@@ -67,7 +67,7 @@ Telegram message
 | `crons/birthdays.ts` | `0 8 * * *` | no | Birthday reminders. |
 | `crons/founder-focus-cycle.ts` (`runSundayAsk`) | `0 18 * * 0` | no | Asks "cumpriste o foco?" (Sim/Não) to whoever's active-week row still has `Cumprido` empty. Tapping closes the week (see `bot/focusCallbacks.ts`). |
 | `crons/founder-focus-cycle.ts` (`runMondayReask`) | `0 8 * * 1` | no | Fallback for whoever didn't tap Sunday: closes the week anyway (`Cumprido` stays blank) and asks for the new week's goals directly, no Sim/Não re-ask. |
-| `crons/tidy-mailboxes.ts` | `0 * * * *` | **yes** (via `bot/classify-mailbox-thread.ts`) | Fully automatic Outlook inbox tidying (archives resolved threads, forwards invoice attachments) — see [`tidy-mailboxes.md`](tidy-mailboxes.md). No Notion/Telegram involved; disabled unless `OUTLOOK_TIDY_MAILBOXES` is set. |
+| `crons/tidy-mailboxes.ts` | `0 7 * * *` | **yes** (via `bot/classify-mailbox-thread.ts`) | Fully automatic Outlook inbox tidying (archives resolved threads, forwards invoice attachments) — see [`tidy-mailboxes.md`](tidy-mailboxes.md). No Notion/Telegram involved; disabled unless `OUTLOOK_TIDY_MAILBOXES` is set. |
 
 All crons are pure Notion + Telegram except **`pipeline-alerts`** (via `draft-followup.ts`) and **`tidy-mailboxes`** (via `classify-mailbox-thread.ts`), which call Claude Haiku — both are tiny line items (well under $0.01/run).
 
@@ -131,6 +131,6 @@ Not every script in this repo runs inside the bot. The Outlook → Notion partne
 
 ## Last touched
 
-2026-09-14 — Added `crons/tidy-mailboxes.ts` to the cron schedule table (real live-bot cron, unlike the sibling partnerships-sync scripts). Noted the Outlook partnerships sync as adjacent tooling (not in the live message pipeline or cron registry).
+2026-09-14 — Added `crons/tidy-mailboxes.ts` to the cron schedule table (real live-bot cron, unlike the sibling partnerships-sync scripts). Noted the Outlook partnerships sync as adjacent tooling (not in the live message pipeline or cron registry). Later same day: changed its cadence from hourly to daily (07:00).
 
 2026-05-15 — Initial knowledge base seed during the cost/audit session.

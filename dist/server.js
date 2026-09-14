@@ -24,7 +24,7 @@ const tasks = [
     cron.schedule("0 17 * * 5", () => runFridayBalance().catch((e) => log.error("cron.friday", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 * * 6", () => runWeekendBrief().catch((e) => log.error("cron.weekend", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 */4 * * 1-5", () => runPipelineAlerts().catch((e) => log.error("cron.pipeline", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("0 * * * *", () => runTidyMailboxes().catch((e) => log.error("cron.tidy_mailboxes", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("0 7 * * *", () => runTidyMailboxes().catch((e) => log.error("cron.tidy_mailboxes", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 18 * * 0", () => runSundayAsk().catch((e) => log.error("cron.focus_cycle.sunday", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * 1", () => runMondayReask().catch((e) => log.error("cron.focus_cycle.monday", { e: String(e) })), { timezone: TZ }),

@@ -67,7 +67,7 @@ const tasks = [
     { timezone: TZ },
   ),
   cron.schedule(
-    "0 * * * *",
+    "0 7 * * *",
     () =>
       runTidyMailboxes().catch((e) =>
         log.error("cron.tidy_mailboxes", { e: String(e) }),

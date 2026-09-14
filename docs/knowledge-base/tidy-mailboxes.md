@@ -1,6 +1,6 @@
 # Tidy-mailboxes cron
 
-A real, live-bot cron (`src/crons/tidy-mailboxes.ts`, registered in `src/server.ts`, runs hourly) that keeps configured Outlook shared inboxes tidy: forwards invoice-looking attachments to a dedicated finance address, then archives any remaining thread a Haiku classifier judges resolved.
+A real, live-bot cron (`src/crons/tidy-mailboxes.ts`, registered in `src/server.ts`, runs daily at 07:00 Europe/Lisbon — changed from an initial hourly cadence on 2026-09-14, since daily is plenty for inbox tidying and cuts the LLM/API call volume) that keeps configured Outlook shared inboxes tidy: forwards invoice-looking attachments to a dedicated finance address, then archives any remaining thread a Haiku classifier judges resolved.
 
 **Fully automatic — no human review step.** This is the opposite design from the sibling [Outlook partnerships sync](outlook-partnerships-sync.md), which always requires a human to review before writing anything. The two features share `src/lib/outlook.ts` but differ in autonomy for a reason: writing business records to Notion propagates a wrong guess forward, while archiving an email (still exists, still searchable, just out of the Inbox) or forwarding a false-positive "invoice" (mildly annoying, not harmful) are both low-stakes, reversible-in-spirit mistakes. That's the judgment call behind running this unattended — re-litigate it if the failure mode ever turns out worse than that in practice.
 
@@ -24,7 +24,7 @@ The classifier **fails toward `NEEDS_ACTION`** on any error, empty response, or 
 
 ## Cost design
 
-An hourly cron that reclassified everything still sitting in the Inbox every single run would re-pay the full LLM cost — and re-forward any invoice attachment — for every message still open, for as long as it stays open. Mitigations, cheapest-first:
+A cron that reclassified everything still sitting in the Inbox every single run would re-pay the full LLM cost — and re-forward any invoice attachment — for every message still open, for as long as it stays open. Mitigations, cheapest-first:
 
 - **Unread skip**: untouched entirely until a human opens it — no LLM call, no forward, no tag (see below).
 - **Category-based memory**: once a message is classified as needing action (or the classifier errors and fails safe), it's tagged with the Outlook category `TidyBot: revisto` (`outlook.setMessageCategories()`). Future runs skip anything already carrying that tag entirely — no re-classification, no re-forward. A reply to the thread is a *new* message with no tag, so it still gets fresh judgment; the stale original just sits there, correctly ignored.
@@ -76,6 +76,7 @@ Given this runs unattended, **spot-check the Archive folder occasionally**, espe
 2026-09-14 — Initial build, then hardened based on a real dry run against `geral@`/`hello@` before ever running for real:
 - Invoice-filename check originally used a `\b`-bounded regex, which misses filenames like `fatura_setembro.pdf` (`_` is a word character in regex, so there's no boundary between "fatura" and "_setembro") — switched to plain substring matching.
 - Invoice detection originally skipped classification entirely and always archived — wrongly archived a customer complaint and a contract awaiting signature that happened to have a PDF attached. Decoupled: classification always runs, forwarding a copy to finance is independent of the archive decision.
-- Added category-based skip memory and the sender-allowlist fast path (see Cost design) after noticing an unmitigated hourly cron would re-classify (and re-forward) the same still-open threads indefinitely.
+- Added category-based skip memory and the sender-allowlist fast path (see Cost design) after noticing an unmitigated cron would re-classify (and re-forward) the same still-open threads indefinitely.
+- Changed cadence from hourly to daily (07:00) — inbox tidying doesn't need hourly responsiveness, and daily meaningfully cuts LLM/Graph call volume.
 - Went live scoped to `geral@` only (not `hello@` yet), and added an unread-skip rule: a message the cron hasn't seen a founder actually open yet is left completely untouched (no classification, no forward, no tag) regardless of what an LLM would judge about its content.
 - Added `AUTO_ARCHIVE_RULES` (sender+subject combo fast path) for Wellhub/ClassPass/Gympass "assine" signup reminders and two Kenko/bookeeapp.com automated notification patterns, requested after seeing real recurring volume (155+ "you've got a new message from" notifications alone in one scan).

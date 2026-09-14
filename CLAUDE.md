@@ -80,7 +80,7 @@ Single file, ~2400 lines. Singleton `client`. All writes use `withRetry` (3 atte
 | `friday-balance.ts` | 17:00 Friday | End-of-week summary |
 | `weekend-brief.ts` | 09:00 Saturday | Weekend brief |
 | `pipeline-alerts.ts` | every 4h Mon–Fri | Stale partner/influencer pipeline alerts |
-| `tidy-mailboxes.ts` | hourly | Fully automatic Outlook inbox tidying (archive/forward) — disabled unless `OUTLOOK_TIDY_MAILBOXES` is set |
+| `tidy-mailboxes.ts` | 07:00 daily | Fully automatic Outlook inbox tidying (archive/forward) — disabled unless `OUTLOOK_TIDY_MAILBOXES` is set |
 
 ### Types (`src/types.ts`)
 

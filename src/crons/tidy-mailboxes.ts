@@ -23,9 +23,9 @@
  *
  * Cost note: every message left in the Inbox (needs a reply) gets tagged
  * with the TIDY_CATEGORY Outlook category and is skipped on every
- * subsequent run without calling Claude or re-forwarding anything — an
- * hourly cron only ever pays for genuinely new arrivals, not for
- * re-litigating the same still-open thread 24 times a day. On top of that,
+ * subsequent run without calling Claude or re-forwarding anything — this
+ * cron only ever pays for genuinely new arrivals, not for re-litigating
+ * the same still-open thread every single run. On top of that,
  * known pure-notification senders (DEFAULT_AUTO_ARCHIVE_SENDERS, extend via
  * TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS) skip the Haiku call AND the invoice
  * check entirely — archived on sender match alone.
@@ -39,10 +39,10 @@ import type { OutlookAttachment, OutlookMessage } from "../lib/outlook.js";
 // Tags a message once it's been checked and left in the Inbox (needs a
 // reply, or errored and fell back to needs-action) so the next run skips
 // it entirely — no re-classification, and critically, no re-forwarding an
-// invoice-looking attachment every single hour it sits there waiting for a
-// human. Without this, an hourly cron re-pays the full LLM cost (and
-// duplicates any forward) for every message still open, for as long as it
-// stays open — the real cost driver, not the one-time backlog of a first run.
+// invoice-looking attachment every single run it sits there waiting for a
+// human. Without this, the cron re-pays the full LLM cost (and duplicates
+// any forward) for every message still open, for as long as it stays open
+// — the real cost driver, not the one-time backlog of a first run.
 const TIDY_CATEGORY = "TidyBot: revisto";
 
 const INVOICE_WORDS = ["fatura", "invoice", "recibo", "receipt"];
