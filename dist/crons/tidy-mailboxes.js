@@ -13,6 +13,12 @@
  * forward, no category tag — until a human has actually opened them. Once
  * read, they're picked up fresh on the very next run.
  *
+ * A founder can apply the "TidyBot: devia ter arquivado" Outlook category
+ * directly to a message the classifier missed — no Claude Code needed. The
+ * next run archives it immediately and logs the full content under
+ * tidy_mailboxes.feedback_should_have_archived, building a record of real
+ * misses to refine the classifier prompt against later.
+ *
  * Gracefully disabled if OUTLOOK_TIDY_MAILBOXES or the Microsoft/Outlook
  * env vars aren't set — same pattern as every other optional feature here.
  *
@@ -53,6 +59,13 @@ import * as outlook from "../lib/outlook.js";
 // any forward) for every message still open, for as long as it stays open
 // — the real cost driver, not the one-time backlog of a first run.
 const TIDY_CATEGORY = "TidyBot: revisto";
+// A founder applies this Outlook category directly to a message (no Claude
+// Code, no Telegram) when they spot one the classifier should have archived
+// but didn't. Checked before anything else in the loop: archives the
+// message right away (the founder already made the call) and logs the full
+// content so a future session can review real misses and refine the
+// classifier prompt against them — see docs/knowledge-base/tidy-mailboxes.md.
+const FEEDBACK_SHOULD_ARCHIVE_CATEGORY = "TidyBot: devia ter arquivado";
 function recheckAfterDays() {
     const raw = Number(process.env.TIDY_MAILBOXES_RECHECK_AFTER_DAYS);
     return Number.isFinite(raw) && raw > 0 ? raw : 7;
@@ -318,6 +331,7 @@ export async function run() {
         skipped: 0,
         unread: 0,
         rechecked: 0,
+        feedbackArchived: 0,
         errors: 0,
     };
     for (const mailbox of mailboxes) {
@@ -355,6 +369,37 @@ export async function run() {
             });
         }
         for (const msg of messages) {
+            // A founder's explicit "this should have archived" override — checked
+            // before anything else, including the unread-skip, since applying the
+            // category IS a human having looked at it. Archives immediately and
+            // logs the full content for later review, then moves on: no
+            // classification, no invoice check, no tag-freshness logic applies.
+            if (msg.categories.includes(FEEDBACK_SHOULD_ARCHIVE_CATEGORY)) {
+                log.info("tidy_mailboxes.feedback_should_have_archived", {
+                    mailbox,
+                    messageId: msg.id,
+                    subject: msg.subject,
+                    from: msg.from.email,
+                    receivedDateTime: msg.receivedDateTime,
+                    webLink: msg.webLink,
+                    bodyPreview: msg.bodyPreview,
+                });
+                try {
+                    if (!isDryRun()) {
+                        await outlook.archiveMessage(mailbox, msg.id);
+                    }
+                    counts.feedbackArchived++;
+                }
+                catch (err) {
+                    log.error("tidy_mailboxes.feedback_archive_failed", {
+                        mailbox,
+                        messageId: msg.id,
+                        message: err instanceof Error ? err.message : String(err),
+                    });
+                    counts.errors++;
+                }
+                continue;
+            }
             // Untouched until a human has actually opened it — no classification,
             // no invoice-forward, no tag. Once read, it's picked up
             // fresh on the next run like any other message. This is deliberate:
