@@ -6,13 +6,25 @@ A real, live-bot cron (`src/crons/tidy-mailboxes.ts`, registered in `src/server.
 
 ## What it does, per configured mailbox
 
-1. Lists whatever's currently in the mailbox's **Inbox folder only** (not the whole mailbox) — this doubles as the to-do queue, since archiving is what removes something from it. No separate checkpoint file to maintain, unlike the partnerships sync.
-2. For each message with an attachment: checks whether it's a PDF/image whose filename, or the email's subject/body, mentions fatura/invoice/recibo/receipt (`invoiceAttachments()` in `tidy-mailboxes.ts`). If so: forwards the original message (attachments included) to `OUTLOOK_INVOICES_FORWARD_TO`, then archives it.
-3. Everything else: asks `classifyMailboxThread()` (Claude Haiku, `src/bot/classify-mailbox-thread.ts`) whether the thread still needs a reply/action. If not, archives it. If it does, leaves it alone.
+1. Lists whatever's currently in the mailbox's **Inbox folder only** (not the whole mailbox) — this doubles as the to-do queue, since archiving is what removes something from it.
+2. Skips anything already tagged with the `TidyBot: revisto` category (see Cost design below) — no re-work for a message a previous run already looked at and left alone.
+3. **Auto-archive fast path**: if the sender is an exact match in `DEFAULT_AUTO_ARCHIVE_SENDERS` (extend via `TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS`) — known pure logistics-notification addresses (couriers, Amazon's dedicated shipping-confirmation senders) — archives immediately. No invoice check, no Haiku call.
+4. Otherwise, **classification always runs first** (`classifyMailboxThread()`, Claude Haiku, `src/bot/classify-mailbox-thread.ts`) to decide whether the thread still needs a reply. This is the *only* thing that decides whether the original gets archived.
+5. Independently of that: if the message has a PDF/image attachment whose filename, or the email's subject/body, mentions fatura/invoice/recibo/receipt (`invoiceAttachments()`), a copy is forwarded to `OUTLOOK_INVOICES_FORWARD_TO` — **regardless of the classification result.** A customer complaint that happens to attach a receipt still gets forwarded (finance gets their copy) but is NOT archived, because it still needs a reply.
+6. If the classifier said the thread doesn't need action: archived. If it does: left in the Inbox and tagged `TidyBot: revisto` so future runs skip it without re-paying for the same judgment.
+
+**Steps 4 and 5 were NOT originally independent** — a first version treated a matched invoice attachment as a shortcut that skipped classification entirely and always archived. A dry run against real mailboxes (before this ever ran for real) caught it archiving a customer's "Issues with 10 day pass" complaint and a contract awaiting signature, both because they happened to have a PDF attached. Never reintroduce that shortcut — classification must always run, no matter what the attachment looks like.
 
 ## Fail-safe design
 
 The classifier **fails toward `NEEDS_ACTION`** on any error, empty response, or unparseable output — no API key, a network error, a malformed answer, all default to leaving the email where it is rather than risking an archive of something that needed a reply. Read `classify-mailbox-thread.ts`'s `fallback()` calls before changing this — the asymmetry (missed archive = mild annoyance; wrong archive = a customer inquiry silently disappears) is deliberate, not an oversight.
+
+## Cost design
+
+An hourly cron that reclassified everything still sitting in the Inbox every single run would re-pay the full LLM cost — and re-forward any invoice attachment — for every message still open, for as long as it stays open. Two mitigations:
+
+- **Category-based memory**: once a message is classified as needing action (or the classifier errors and fails safe), it's tagged with the Outlook category `TidyBot: revisto` (`outlook.setMessageCategories()`). Future runs skip anything already carrying that tag entirely — no re-classification, no re-forward. A reply to the thread is a *new* message with no tag, so it still gets fresh judgment; the stale original just sits there, correctly ignored.
+- **Auto-archive allowlist**: exact sender addresses that are unambiguously pure notifications (never an invoice, never actionable) skip the LLM call and the invoice check entirely. Deliberately scoped to *exact addresses*, not whole domains — a domain like `amazon.es` also sends account/billing mail that might need a look, but `confirmar-envio@amazon.es` never does. Don't add a domain-wide entry without checking it never also sends real invoices (e.g. `ikea.com` and `leroymerlin.pt` both do — never add those).
 
 ## Setup
 
@@ -42,7 +54,7 @@ This is a normal cron in `src/server.ts` now — no special deploy step, just th
 
 ## Auditing what it's done
 
-Every mutation logs a structured line: `tidy_mailboxes.invoice_forwarded` or `tidy_mailboxes.archived`, each with `mailbox`, `messageId`, `subject`, `from`, and (for archives) the classifier's one-line `reason`. Threads left alone log at `debug` level (`tidy_mailboxes.left_in_inbox`) — not visible in production logs by default, only when `NODE_ENV` isn't `production` (see `src/lib/log.ts`). To review what got archived, search the NAS's Docker logs for `tidy_mailboxes.archived` — see the `nas-logs` skill.
+Every mutation logs a structured line: `tidy_mailboxes.invoice_forwarded`, `tidy_mailboxes.archived`, or `tidy_mailboxes.auto_archived` (the sender-allowlist fast path), each with `mailbox`, `messageId`, `subject`, `from`, and (for LLM-judged archives) the classifier's one-line `reason`. Threads left alone log at `debug` level (`tidy_mailboxes.left_in_inbox`) — not visible in production logs by default, only when `NODE_ENV` isn't `production` (see `src/lib/log.ts`). To review what got archived, search the NAS's Docker logs for `tidy_mailboxes.archived` or `tidy_mailboxes.auto_archived` — see the `nas-logs` skill. The final `tidy_mailboxes.done` summary line per run breaks counts down as `forwarded`/`archived`/`autoArchived`/`left`/`skipped`/`errors`.
 
 Given this runs unattended, **spot-check the Archive folder occasionally**, especially in the first few weeks — if something wrongly archived turns up, that's a real signal to look at `classify-mailbox-thread.ts`'s system prompt, not just an isolated miss.
 
@@ -50,10 +62,13 @@ Given this runs unattended, **spot-check the Archive folder occasionally**, espe
 
 | File | Role |
 |---|---|
-| `src/lib/outlook.ts` | Shared with the partnerships sync — `listInboxMessages`, `getMessageAttachments`, `archiveMessage`, `forwardMessage` are the additions this feature needed |
+| `src/lib/outlook.ts` | Shared with the partnerships sync — `listInboxMessages`, `getMessageAttachments`, `archiveMessage`, `forwardMessage`, `setMessageCategories` are the additions this feature needed |
 | `src/bot/classify-mailbox-thread.ts` | Haiku classifier, fails safe toward NEEDS_ACTION |
 | `src/crons/tidy-mailboxes.ts` | The cron itself — invoice detection heuristic, per-message orchestration, structured logging |
 
 ## Last touched
 
-2026-09-14 — Initial build. Caught one bug before shipping: the invoice-filename check originally used a `\b`-bounded regex, which misses filenames like `fatura_setembro.pdf` (`_` is a word character in regex, so there's no boundary between "fatura" and "_setembro") — switched to plain substring matching after testing surfaced it.
+2026-09-14 — Initial build, then hardened based on a real dry run against `geral@`/`hello@` before ever running for real:
+- Invoice-filename check originally used a `\b`-bounded regex, which misses filenames like `fatura_setembro.pdf` (`_` is a word character in regex, so there's no boundary between "fatura" and "_setembro") — switched to plain substring matching.
+- Invoice detection originally skipped classification entirely and always archived — wrongly archived a customer complaint and a contract awaiting signature that happened to have a PDF attached. Decoupled: classification always runs, forwarding a copy to finance is independent of the archive decision.
+- Added category-based skip memory and the sender-allowlist fast path (see Cost design) after noticing an unmitigated hourly cron would re-classify (and re-forward) the same still-open threads indefinitely.

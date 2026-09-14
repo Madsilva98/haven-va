@@ -151,7 +151,7 @@ async function graphFetch(url, extraHeaders = {}, attempt = 1) {
     }
     return res;
 }
-const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments";
+const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories";
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
 // otherwise have to strip ourselves.
@@ -179,6 +179,7 @@ function mapGraphMessage(m, mailbox) {
         body: m.body?.content ?? m.bodyPreview ?? "",
         webLink: m.webLink ?? "",
         hasAttachments: m.hasAttachments ?? false,
+        categories: m.categories ?? [],
     };
 }
 async function fetchAllMessages(startUrl, mailbox) {
@@ -258,6 +259,27 @@ export async function getMessageAttachments(mailbox, messageId) {
         contentType: a.contentType ?? "",
         size: a.size ?? 0,
     }));
+}
+/**
+ * Replaces a message's categories with the given list — pass the full
+ * desired set (merge with the message's existing `categories` yourself
+ * first if you need to preserve any), since Graph's PATCH overwrites the
+ * whole collection rather than appending to it.
+ */
+export async function setMessageCategories(mailbox, messageId, categories) {
+    const url = `${mailboxBase(mailbox)}/messages/${encodeURIComponent(messageId)}`;
+    const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+            Authorization: `Bearer ${await getAccessToken()}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ categories }),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`outlook.setMessageCategories failed (${res.status}): ${text}`);
+    }
 }
 /**
  * Moves a message to the mailbox's Archive folder. Not retried on failure

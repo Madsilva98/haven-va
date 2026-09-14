@@ -11,12 +11,35 @@
  *
  * Gracefully disabled if OUTLOOK_TIDY_MAILBOXES or the Microsoft/Outlook
  * env vars aren't set — same pattern as every other optional feature here.
+ *
+ * Set TIDY_MAILBOXES_DRY_RUN=true to run the full classification/detection
+ * logic against real mailboxes without actually archiving or forwarding —
+ * logs tidy_mailboxes.would_archive/would_forward instead. Use this to
+ * sanity-check behavior on real inbox content before trusting it live.
+ *
+ * Cost note: every message left in the Inbox (needs a reply) gets tagged
+ * with the TIDY_CATEGORY Outlook category and is skipped on every
+ * subsequent run without calling Claude or re-forwarding anything — an
+ * hourly cron only ever pays for genuinely new arrivals, not for
+ * re-litigating the same still-open thread 24 times a day. On top of that,
+ * known pure-notification senders (DEFAULT_AUTO_ARCHIVE_SENDERS, extend via
+ * TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS) skip the Haiku call AND the invoice
+ * check entirely — archived on sender match alone.
  */
 
 import { classifyMailboxThread } from "../bot/classify-mailbox-thread.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
 import type { OutlookAttachment, OutlookMessage } from "../lib/outlook.js";
+
+// Tags a message once it's been checked and left in the Inbox (needs a
+// reply, or errored and fell back to needs-action) so the next run skips
+// it entirely — no re-classification, and critically, no re-forwarding an
+// invoice-looking attachment every single hour it sits there waiting for a
+// human. Without this, an hourly cron re-pays the full LLM cost (and
+// duplicates any forward) for every message still open, for as long as it
+// stays open — the real cost driver, not the one-time backlog of a first run.
+const TIDY_CATEGORY = "TidyBot: revisto";
 
 const INVOICE_WORDS = ["fatura", "invoice", "recibo", "receipt"];
 
@@ -58,23 +81,94 @@ function configuredMailboxes(): string[] {
     .filter(Boolean);
 }
 
+// Exact sender addresses known to send nothing but pure logistics
+// notifications (never an invoice, never anything actionable) — skips both
+// the invoice check and the Haiku call entirely for these. Deliberately
+// exact addresses, not whole domains: a domain like amazon.es also sends
+// account/billing mail that might need a look, but its dedicated shipping-
+// notification addresses (confirmar-envio@, auto-confirm@) never do.
+// Extend via TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS, comma-separated.
+const DEFAULT_AUTO_ARCHIVE_SENDERS = [
+  "no-reply@notifications.cttexpress.com",
+  "no-reply@cttexpresso.pt",
+  "no-reply@correosexpress.com",
+  "no-reply@sendcloud.com",
+  "noreply@gls-portugal.com",
+  "confirmar-envio@amazon.es",
+  "auto-confirm@amazon.es",
+  "devolucion@amazon.es",
+];
+
+function autoArchiveSenders(): Set<string> {
+  const extra = (process.env.TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set([...DEFAULT_AUTO_ARCHIVE_SENDERS, ...extra]);
+}
+
+function isDryRun(): boolean {
+  return process.env.TIDY_MAILBOXES_DRY_RUN === "true";
+}
+
+interface MessageOutcome {
+  forwarded: boolean;
+  archived: boolean;
+  autoArchived: boolean;
+}
+
+/**
+ * Classification ALWAYS runs, and is the only thing that decides whether
+ * the original stays in the Inbox — an invoice-looking attachment never
+ * bypasses it. Forwarding a copy to finance and archiving the original are
+ * independent decisions: a customer complaint that happens to attach a
+ * receipt still gets forwarded (finance gets their copy) but is NOT
+ * archived, because it still needs a reply.
+ *
+ * This wasn't the original design — a first version treated "has an
+ * invoice attachment" as a shortcut that skipped classification entirely
+ * and always archived. A dry run against real mailboxes caught it
+ * archiving a customer's "Issues with 10 day pass" complaint and a
+ * contract awaiting signature, both because they happened to have a PDF
+ * attached. Fixed 2026-09-14 before this ever ran for real — see
+ * docs/knowledge-base/tidy-mailboxes.md.
+ */
 async function handleMessage(
   mailbox: string,
   msg: OutlookMessage,
   forwardTo: string,
-): Promise<"forwarded" | "archived" | "left"> {
+): Promise<MessageOutcome> {
+  const dryRun = isDryRun();
+  const outcome: MessageOutcome = { forwarded: false, archived: false, autoArchived: false };
+
+  if (autoArchiveSenders().has(msg.from.email.toLowerCase())) {
+    if (!dryRun) {
+      await outlook.archiveMessage(mailbox, msg.id);
+    }
+    log.info(dryRun ? "tidy_mailboxes.would_auto_archive" : "tidy_mailboxes.auto_archived", {
+      mailbox,
+      messageId: msg.id,
+      subject: msg.subject,
+      from: msg.from.email,
+    });
+    outcome.archived = true;
+    outcome.autoArchived = true;
+    return outcome;
+  }
+
   if (msg.hasAttachments) {
     const attachments = await outlook.getMessageAttachments(mailbox, msg.id);
     const matched = invoiceAttachments(msg.subject, msg.body, attachments);
     if (matched) {
-      await outlook.forwardMessage(
-        mailbox,
-        msg.id,
-        [forwardTo],
-        "Reencaminhado automaticamente (parece conter uma fatura).",
-      );
-      await outlook.archiveMessage(mailbox, msg.id);
-      log.info("tidy_mailboxes.invoice_forwarded", {
+      if (!dryRun) {
+        await outlook.forwardMessage(
+          mailbox,
+          msg.id,
+          [forwardTo],
+          "Reencaminhado automaticamente (parece conter uma fatura).",
+        );
+      }
+      log.info(dryRun ? "tidy_mailboxes.would_forward" : "tidy_mailboxes.invoice_forwarded", {
         mailbox,
         messageId: msg.id,
         subject: msg.subject,
@@ -82,7 +176,7 @@ async function handleMessage(
         attachment: matched.map((a) => a.name).join(", "),
         forwardedTo: forwardTo,
       });
-      return "forwarded";
+      outcome.forwarded = true;
     }
   }
 
@@ -95,24 +189,30 @@ async function handleMessage(
   });
 
   if (needsAction) {
+    if (!dryRun) {
+      await outlook.setMessageCategories(mailbox, msg.id, [...msg.categories, TIDY_CATEGORY]);
+    }
     log.debug("tidy_mailboxes.left_in_inbox", {
       mailbox,
       messageId: msg.id,
       subject: msg.subject,
       reason,
     });
-    return "left";
+    return outcome;
   }
 
-  await outlook.archiveMessage(mailbox, msg.id);
-  log.info("tidy_mailboxes.archived", {
+  if (!dryRun) {
+    await outlook.archiveMessage(mailbox, msg.id);
+  }
+  log.info(dryRun ? "tidy_mailboxes.would_archive" : "tidy_mailboxes.archived", {
     mailbox,
     messageId: msg.id,
     subject: msg.subject,
     from: msg.from.email,
     reason,
   });
-  return "archived";
+  outcome.archived = true;
+  return outcome;
 }
 
 export async function run(): Promise<void> {
@@ -132,7 +232,7 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const counts = { forwarded: 0, archived: 0, left: 0, errors: 0 };
+  const counts = { forwarded: 0, archived: 0, autoArchived: 0, left: 0, skipped: 0, errors: 0 };
 
   for (const mailbox of mailboxes) {
     let messages: OutlookMessage[];
@@ -148,9 +248,16 @@ export async function run(): Promise<void> {
     }
 
     for (const msg of messages) {
+      if (msg.categories.includes(TIDY_CATEGORY)) {
+        counts.skipped++;
+        continue;
+      }
       try {
         const outcome = await handleMessage(mailbox, msg, forwardTo);
-        counts[outcome]++;
+        if (outcome.forwarded) counts.forwarded++;
+        if (outcome.autoArchived) counts.autoArchived++;
+        else if (outcome.archived) counts.archived++;
+        if (!outcome.archived) counts.left++;
       } catch (err) {
         log.error("tidy_mailboxes.message_failed", {
           mailbox,
@@ -163,5 +270,5 @@ export async function run(): Promise<void> {
     }
   }
 
-  log.info("tidy_mailboxes.done", { mailboxes, ...counts });
+  log.info("tidy_mailboxes.done", { mailboxes, dryRun: isDryRun(), ...counts });
 }
