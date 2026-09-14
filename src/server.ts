@@ -8,6 +8,7 @@ import { run as runMondayPriorities } from "./crons/monday-priorities.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
+import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { run as runWeekendBrief } from "./crons/weekend-brief.js";
 import { log } from "./lib/log.js";
 import * as notion from "./notion.js";
@@ -95,6 +96,14 @@ const tasks = [
     () =>
       runMondayReask().catch((e) =>
         log.error("cron.focus_cycle.monday", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "0 9 1 * *",
+    () =>
+      runTidyMailboxesFeedbackReminder().catch((e) =>
+        log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
