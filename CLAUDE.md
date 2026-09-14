@@ -10,6 +10,7 @@ The `docs/knowledge-base/` folder is the durable memory of "how this bot actuall
 - [`deploy-and-access.md`](docs/knowledge-base/deploy-and-access.md) — NAS access (Tailscale, DSM, Container Manager), deploy pipeline, rollback, secret hygiene
 - [`notion-api-gotchas.md`](docs/knowledge-base/notion-api-gotchas.md) — data sources vs databases, schema brittleness, retry strategy, property type quirks
 - [`outlook-partnerships-sync.md`](docs/knowledge-base/outlook-partnerships-sync.md) — Outlook → Notion Partner Pipeline sync (adjacent tooling, not the live bot): Azure setup, gotchas, checkpoint mechanism
+- [`tidy-mailboxes.md`](docs/knowledge-base/tidy-mailboxes.md) — fully automatic Outlook inbox tidying cron (archive resolved threads, forward invoices) — this one IS a live-bot cron, unlike the sync above
 - [`failure-modes-YYYY-MM-DD.md`](docs/knowledge-base/) — point-in-time failure-mode audits (cumulative; one per audit run)
 - [`cost-and-latency-YYYY-MM-DD.md`](docs/knowledge-base/) — Anthropic + Notion cost baselines and optimization ROI
 
@@ -79,6 +80,7 @@ Single file, ~2400 lines. Singleton `client`. All writes use `withRetry` (3 atte
 | `friday-balance.ts` | 17:00 Friday | End-of-week summary |
 | `weekend-brief.ts` | 09:00 Saturday | Weekend brief |
 | `pipeline-alerts.ts` | every 4h Mon–Fri | Stale partner/influencer pipeline alerts |
+| `tidy-mailboxes.ts` | hourly | Fully automatic Outlook inbox tidying (archive/forward) — disabled unless `OUTLOOK_TIDY_MAILBOXES` is set |
 
 ### Types (`src/types.ts`)
 

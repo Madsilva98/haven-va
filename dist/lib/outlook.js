@@ -4,7 +4,12 @@ import { log } from "./log.js";
 const DATA_DIR = process.env.DATA_DIR ?? ".";
 const TOKENS_PATH = path.join(DATA_DIR, "outlook-tokens.json");
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-const SCOPES = "offline_access Mail.Read Mail.Read.Shared";
+// ReadWrite/Send (+ .Shared) are needed for the tidy-mailboxes cron (archive,
+// forward) on top of the partnerships-sync's read-only Mail.Read(.Shared).
+// A token issued before these were added won't have them — re-run
+// scripts/outlook-auth.mjs after this scope list changes, see
+// docs/knowledge-base/outlook-partnerships-sync.md.
+const SCOPES = "offline_access Mail.Read Mail.Read.Shared Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared";
 let _cached = null;
 function tenantId() {
     const id = process.env.MICROSOFT_TENANT_ID;
@@ -146,6 +151,52 @@ async function graphFetch(url, extraHeaders = {}, attempt = 1) {
     }
     return res;
 }
+const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments";
+// Ask Graph to convert the body to plain text server-side (default is
+// HTML) — keeps keyword matching simple and avoids fetching markup we'd
+// otherwise have to strip ourselves.
+const TEXT_BODY_HEADER = { Prefer: 'outlook.body-content-type="text"' };
+function mailboxBase(mailbox) {
+    return mailbox === "me"
+        ? `${GRAPH_BASE}/me`
+        : `${GRAPH_BASE}/users/${encodeURIComponent(mailbox)}`;
+}
+function mapGraphMessage(m, mailbox) {
+    return {
+        id: m.id,
+        mailbox,
+        subject: m.subject ?? "",
+        from: {
+            name: m.from?.emailAddress?.name ?? "",
+            email: m.from?.emailAddress?.address ?? "",
+        },
+        to: (m.toRecipients ?? []).map((r) => ({
+            name: r.emailAddress?.name ?? "",
+            email: r.emailAddress?.address ?? "",
+        })),
+        receivedDateTime: m.receivedDateTime,
+        bodyPreview: m.bodyPreview ?? "",
+        body: m.body?.content ?? m.bodyPreview ?? "",
+        webLink: m.webLink ?? "",
+        hasAttachments: m.hasAttachments ?? false,
+    };
+}
+async function fetchAllMessages(startUrl, mailbox) {
+    let url = startUrl;
+    const messages = [];
+    while (url) {
+        const res = await graphFetch(url, TEXT_BODY_HEADER);
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`outlook.fetchAllMessages failed for ${mailbox} (${res.status}): ${text}`);
+        }
+        const data = (await res.json());
+        for (const m of data.value)
+            messages.push(mapGraphMessage(m, mailbox));
+        url = data["@odata.nextLink"];
+    }
+    return messages;
+}
 /** The authenticated ("me") account's own email address. */
 export async function getMyEmail() {
     const res = await graphFetch(`${GRAPH_BASE}/me?$select=mail,userPrincipalName`);
@@ -163,55 +214,89 @@ export async function getMyEmail() {
  * Paginates through every page. Omitting `sinceISO` scans full history.
  */
 export async function searchMailboxMessages(mailbox, opts = {}) {
-    const base = mailbox === "me"
-        ? `${GRAPH_BASE}/me/messages`
-        : `${GRAPH_BASE}/users/${encodeURIComponent(mailbox)}/messages`;
     const params = new URLSearchParams({
-        $select: "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink",
+        $select: MESSAGE_SELECT,
         $orderby: "receivedDateTime desc",
         $top: "25",
     });
     if (opts.sinceISO) {
         params.set("$filter", `receivedDateTime ge ${opts.sinceISO}`);
     }
-    // Ask Graph to convert the body to plain text server-side (default is
-    // HTML) — keeps keyword matching simple and avoids fetching markup we'd
-    // otherwise have to strip ourselves.
-    const headers = { Prefer: 'outlook.body-content-type="text"' };
-    let url = `${base}?${params.toString()}`;
-    const messages = [];
-    while (url) {
-        const res = await graphFetch(url, headers);
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`outlook.searchMailboxMessages failed for ${mailbox} (${res.status}): ${text}`);
-        }
-        const data = (await res.json());
-        for (const m of data.value) {
-            messages.push({
-                id: m.id,
-                mailbox,
-                subject: m.subject ?? "",
-                from: {
-                    name: m.from?.emailAddress?.name ?? "",
-                    email: m.from?.emailAddress?.address ?? "",
-                },
-                to: (m.toRecipients ?? []).map((r) => ({
-                    name: r.emailAddress?.name ?? "",
-                    email: r.emailAddress?.address ?? "",
-                })),
-                receivedDateTime: m.receivedDateTime,
-                bodyPreview: m.bodyPreview ?? "",
-                body: m.body?.content ?? m.bodyPreview ?? "",
-                webLink: m.webLink ?? "",
-            });
-        }
-        url = data["@odata.nextLink"];
-    }
+    const messages = await fetchAllMessages(`${mailboxBase(mailbox)}/messages?${params.toString()}`, mailbox);
     log.info("outlook.mailbox_scanned", {
         mailbox,
         count: messages.length,
         since: opts.sinceISO ?? "all",
     });
     return messages;
+}
+/**
+ * Lists messages currently sitting in a mailbox's Inbox folder (not the
+ * whole mailbox) — used by the tidy-mailboxes cron, where "still in Inbox"
+ * IS the to-do queue: archiving a message is what removes it, so there's
+ * no separate checkpoint file to maintain.
+ */
+export async function listInboxMessages(mailbox) {
+    const params = new URLSearchParams({
+        $select: MESSAGE_SELECT,
+        $orderby: "receivedDateTime desc",
+        $top: "50",
+    });
+    return fetchAllMessages(`${mailboxBase(mailbox)}/mailFolders/inbox/messages?${params.toString()}`, mailbox);
+}
+/** Attachment metadata only (name/type/size) — never fetches file content. */
+export async function getMessageAttachments(mailbox, messageId) {
+    const url = `${mailboxBase(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=name,contentType,size`;
+    const res = await graphFetch(url);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`outlook.getMessageAttachments failed (${res.status}): ${text}`);
+    }
+    const data = (await res.json());
+    return data.value.map((a) => ({
+        name: a.name ?? "",
+        contentType: a.contentType ?? "",
+        size: a.size ?? 0,
+    }));
+}
+/**
+ * Moves a message to the mailbox's Archive folder. Not retried on failure
+ * (unlike graphFetch's GET helper) — a failed move should surface, not
+ * silently retry a mutating call.
+ */
+export async function archiveMessage(mailbox, messageId) {
+    const url = `${mailboxBase(mailbox)}/messages/${encodeURIComponent(messageId)}/move`;
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${await getAccessToken()}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ destinationId: "archive" }),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`outlook.archiveMessage failed (${res.status}): ${text}`);
+    }
+    log.info("outlook.message_archived", { mailbox, messageId });
+}
+/** Forwards a message as-is (with attachments) to the given recipient(s). */
+export async function forwardMessage(mailbox, messageId, toEmails, comment = "") {
+    const url = `${mailboxBase(mailbox)}/messages/${encodeURIComponent(messageId)}/forward`;
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${await getAccessToken()}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            comment,
+            toRecipients: toEmails.map((address) => ({ emailAddress: { address } })),
+        }),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`outlook.forwardMessage failed (${res.status}): ${text}`);
+    }
+    log.info("outlook.message_forwarded", { mailbox, messageId, to: toEmails });
 }
