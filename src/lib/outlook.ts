@@ -164,7 +164,7 @@ export async function exchangeCodeForToken(codeOrUrl: string): Promise<void> {
 // is persisted to the file and used from then on, so a long-running
 // container doesn't get stuck on a stale env var after the first rotation
 // invalidates it.
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   const now = Date.now();
   if (_cached && _cached.expires_at - now > 60_000) {
     return _cached.access_token;
