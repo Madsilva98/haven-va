@@ -8,7 +8,7 @@
 import { log } from "./log.js";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_GROUP_ID = process.env.TELEGRAM_GROUP_ID;
-async function sendMessage(chatId, text, parseMode) {
+async function sendMessage(chatId, text, parseMode, replyMarkup) {
     if (!TELEGRAM_BOT_TOKEN) {
         throw new Error("telegram: TELEGRAM_BOT_TOKEN is not set");
     }
@@ -20,6 +20,8 @@ async function sendMessage(chatId, text, parseMode) {
     };
     if (parseMode)
         body.parse_mode = parseMode;
+    if (replyMarkup)
+        body.reply_markup = replyMarkup;
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -43,6 +45,6 @@ export async function sendGroupMessage(text, parseMode) {
     }
     return sendMessage(TELEGRAM_GROUP_ID, text, parseMode);
 }
-export async function sendDM(telegramUserId, text, parseMode) {
-    return sendMessage(telegramUserId, text, parseMode);
+export async function sendDM(telegramUserId, text, parseMode, replyMarkup) {
+    return sendMessage(telegramUserId, text, parseMode, replyMarkup);
 }

@@ -1,6 +1,6 @@
 import { log } from "../lib/log.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel, mondayOf } from "../lib/week.js";
+import { currentWeekLabel, mondayOf, weekOfYear } from "../lib/week.js";
 import { formatFridayBalance } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 export async function run() {
@@ -10,7 +10,7 @@ export async function run() {
         notion.getWeeklyPriorities(weekLabel),
         notion.getWeeklyCompletedSince(mondayIso),
         notion.getWeeklyOverdueTasks(),
-        safeFounderFocus(weekLabel),
+        safeFounderFocus(weekOfYear()),
     ]);
     const text = formatFridayBalance({ weekLabel, priorities, completed, overdue, focus });
     const messageId = await sendGroupMessage(text, "MarkdownV2");
@@ -22,9 +22,9 @@ export async function run() {
         focusEntries: focus.length,
     });
 }
-async function safeFounderFocus(weekLabel) {
+async function safeFounderFocus(weekNumber) {
     try {
-        return await notion.getFounderFocusForWeek(weekLabel);
+        return await notion.getFounderFocusForWeek(weekNumber);
     }
     catch (err) {
         log.warn("cron.friday_balance.focus_unavailable", {

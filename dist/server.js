@@ -3,9 +3,11 @@ import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runDailyMadalena } from "./crons/daily-madalena.js";
 import { run as runFridayBalance } from "./crons/friday-balance.js";
+import { runSundayAsk, runMondayReask } from "./crons/founder-focus-cycle.js";
 import { run as runMondayPriorities } from "./crons/monday-priorities.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
+import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
 import { run as runWeekendBrief } from "./crons/weekend-brief.js";
 import { log } from "./lib/log.js";
 import * as notion from "./notion.js";
@@ -22,7 +24,10 @@ const tasks = [
     cron.schedule("0 17 * * 5", () => runFridayBalance().catch((e) => log.error("cron.friday", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 * * 6", () => runWeekendBrief().catch((e) => log.error("cron.weekend", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 */4 * * 1-5", () => runPipelineAlerts().catch((e) => log.error("cron.pipeline", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("0 * * * *", () => runTidyMailboxes().catch((e) => log.error("cron.tidy_mailboxes", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("0 18 * * 0", () => runSundayAsk().catch((e) => log.error("cron.focus_cycle.sunday", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("0 8 * * 1", () => runMondayReask().catch((e) => log.error("cron.focus_cycle.monday", { e: String(e) })), { timezone: TZ }),
 ];
 log.info("server.crons_registered", { count: tasks.length });
 const bot = buildBot();

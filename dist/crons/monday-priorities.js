@@ -1,7 +1,7 @@
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM, sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel } from "../lib/week.js";
+import { currentWeekLabel, weekOfYear } from "../lib/week.js";
 import { formatDailyMadalenaPlaceholder, formatMondayPriorities, } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 const FOUNDERS = ["Madalena", "Mafalda", "Beatriz"];
@@ -9,7 +9,7 @@ export async function run() {
     const weekLabel = currentWeekLabel();
     const [priorities, focus] = await Promise.all([
         notion.getWeeklyPriorities(weekLabel),
-        safeFounderFocus(weekLabel),
+        safeFounderFocus(weekOfYear()),
     ]);
     const prioritiesByFounder = {
         Madalena: [],
@@ -35,7 +35,6 @@ export async function run() {
         const dmText = formatDailyMadalenaPlaceholder({ tasks: prioritiesByFounder[founder] });
         try {
             await sendDM(tgId, dmText, "MarkdownV2");
-            await sendDM(tgId, "qual é o teu foco operacional esta semana?");
             dmsSent++;
         }
         catch (err) {
@@ -51,9 +50,9 @@ export async function run() {
         priorities: priorities.length,
     });
 }
-async function safeFounderFocus(weekLabel) {
+async function safeFounderFocus(weekNumber) {
     try {
-        return await notion.getFounderFocusForWeek(weekLabel);
+        return await notion.getFounderFocusForWeek(weekNumber);
     }
     catch (err) {
         log.warn("cron.monday_priorities.focus_unavailable", {

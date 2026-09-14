@@ -19,6 +19,19 @@ export function nowInLisbon() {
     return TZDate.from(new Date());
 }
 /**
+ * Formats a Date as "dd/mm/aaaa às HH:mm" in Europe/Lisbon wall-clock time —
+ * used for human-readable "added by X" notes.
+ */
+export function formatLisbonDateTime(date) {
+    const datePart = date.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+    const timePart = date.toLocaleTimeString("pt-PT", {
+        timeZone: "Europe/Lisbon",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+    return `${datePart} às ${timePart}`;
+}
+/**
  * Converts a naive "YYYY-MM-DDTHH:mm[:ss]" string, understood as
  * Europe/Lisbon wall-clock time, into a full UTC ISO string ("...Z").
  *

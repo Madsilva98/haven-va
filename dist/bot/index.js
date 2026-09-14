@@ -24,6 +24,7 @@ import { handleWeek } from "./week.js";
 import { handleFocus } from "./focus.js";
 import { handleRemind } from "./remind.js";
 import { handleToDiscussCommand, handleToDiscussCallback, } from "./todiscuss.js";
+import { handleFocusCallback } from "./focusCallbacks.js";
 const errorLimit = new ErrorRateLimit();
 const pendingFileByUser = new Map();
 const PENDING_FILE_TTL_MS = 5 * 60 * 1000;
@@ -79,6 +80,10 @@ async function callbackRouter(ctx) {
         }
         if (scope === "todiscuss") {
             await handleToDiscussCallback(ctx);
+            return;
+        }
+        if (scope === "focusask") {
+            await handleFocusCallback(ctx);
             return;
         }
         log.warn("callback.unknown_scope", { scope, data });
