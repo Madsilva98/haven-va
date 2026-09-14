@@ -103,6 +103,7 @@ const partnerProperties = {
   "Último contacto": { date: {} },
   "Próximo passo": { rich_text: {} },
   Notas: { rich_text: {} },
+  Email: { email: {} },
   Origem: { rich_text: {} },
   "Criado em": { created_time: {} },
 };

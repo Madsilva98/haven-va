@@ -1,0 +1,77 @@
+# Outlook → Notion Partner Pipeline sync
+
+Scans configured Outlook mailboxes for partnership mentions and, after human review, writes them into the Notion Partner Pipeline database that `haven-va` already manages (`src/notion.ts`'s `createPartner`/`RECORD_DB_CONFIGS.partners`).
+
+**This is not part of the live bot.** It doesn't touch `src/bot/`, `src/crons/`, or the Telegram message pipeline documented in [`bot-architecture.md`](bot-architecture.md). It's a set of local scripts plus a Claude Code skill (`.claude/skills/sync-partnerships/SKILL.md`) that a founder runs on demand, always with a human-review step before any Notion write — there is no unattended/auto-write path.
+
+## Why two separate scripts
+
+`scripts/scan-outlook-partnerships.mjs` (read-only) and `scripts/apply-outlook-findings.mjs` (the only Notion-write path) are deliberately separate. This makes "never write without review" a structural property of the code, not just a prompt instruction — there's no code path from "scan Outlook" to "create a Notion page" that skips a human looking at a report in between.
+
+## Setup
+
+### 1. Azure app registration (must be done outside Claude Code)
+
+1. portal.azure.com → **Microsoft Entra ID → App registrations → New registration**. Single-tenant, Web redirect URI `http://localhost:3000` (a placeholder — never an actually-running server, we just read `?code=` off the URL pasted back, same pattern as `GOOGLE_REDIRECT_URI`).
+2. Copy the **Application (client) ID** and **Directory (tenant) ID** from Overview.
+3. **Certificates & secrets → New client secret** — copy the value immediately, it's shown once.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated permissions**: `Mail.Read`, `Mail.Read.Shared`, `offline_access`.
+5. **Grant admin consent** for the tenant (may need a Global/Application Administrator).
+6. **Separately confirm with the M365 admin**: the account that will authenticate has **Full Access** Exchange delegate permission on every non-`me` mailbox to be scanned (`Add-MailboxPermission -Identity "shared@domain" -User "you@domain" -AccessRights FullAccess`, or Exchange Admin Center → Mailbox delegation). **This is the single most likely setup failure** — without it, Graph calls to `/users/{mailbox}/messages` 403 even with `Mail.Read.Shared` consented, and the error looks like a bug rather than a missing permission grant.
+
+### 2. Env vars
+
+See `.env.example`'s `# Outlook / Microsoft Graph` block: `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI`, `MICROSOFT_REFRESH_TOKEN_MADALENA` (prod-only override, see gotcha below), `OUTLOOK_MAILBOXES` (comma-separated, `me` implicit), `OUTLOOK_PARTNERSHIP_KEYWORDS` (optional extra keywords).
+
+### 3. Authenticate once
+
+```bash
+npm run build
+node --env-file=.env.local scripts/outlook-auth.mjs
+```
+
+Writes `outlook-tokens.json` under `DATA_DIR` (mirrors `google-tokens.json`'s role for Google Calendar).
+
+## Running it
+
+Use the `sync-partnerships` skill (`.claude/skills/sync-partnerships/SKILL.md`) — it walks through checkpointed scanning, review, and apply. For a one-off manual run, see the `Usage:` header comments in `scripts/scan-outlook-partnerships.mjs` and `scripts/apply-outlook-findings.mjs` directly.
+
+## Design decisions worth knowing
+
+- **`$filter`, not Graph `$search`.** Graph's `$search` on messages is relevance-ranked and has known quirks combining with pagination/filters (requires `ConsistencyLevel: eventual`). Instead: pull messages in a date range via the cheap, deterministic, indexed `$filter=receivedDateTime ge …`, then keyword-match `subject`+`bodyPreview` client-side (accent-folded, case-insensitive). Simpler to reason about, trivially extensible via `OUTLOOK_PARTNERSHIP_KEYWORDS`.
+- **JSON scan report, not CSV or a Notion staging page.** CSV loses the structured metadata (matched keywords, matched-partner info) the apply step needs. A Notion staging page would mean writing to Notion during the supposedly read-only phase, and adds a second schema to maintain.
+- **Guessed partner name falls back to the recipient when the Haven itself sent the message.** A reply from `partners@thehavenpilates.pt`/`hello@`/`geral@` would otherwise guess "Partners"/"The Haven"/"Geral" as the partner name — useless, since those are the Haven's own addresses. `scan-outlook-partnerships.mjs` calls `outlook.getMyEmail()` once per run plus the domains of `OUTLOOK_MAILBOXES` to build an "own domains" set; when `from`'s domain is in that set, it uses the first external `to` recipient instead. Confirmed against real data during initial setup (2026-09-14) — see the "Last touched" entry below.
+- **Dedup is approximate by design.** There's no email/domain field on Partner Pipeline rows — matching relies on `notion.ts`'s existing fuzzy title search (`findPageInDb`/`findRecordByTitle`). A "possible match" is a suggestion for the human reviewer, never auto-applied.
+- **`update` decisions never touch `Status`.** Only `Último contacto` and `Notas` — pipeline-stage changes are a human call this feature deliberately doesn't make.
+- **No new npm dependencies.** Plain `fetch` against Graph REST + the OAuth v2.0 token endpoint (`src/lib/outlook.ts`) — the actual surface needed is ~4 endpoints, not worth `@azure/msal-node` + `@microsoft/microsoft-graph-client` on a codebase with zero prior Microsoft dependencies.
+
+## Gotchas
+
+- **Microsoft rotates refresh tokens on every use — unlike Google's, which stay valid indefinitely.** `outlook.ts`'s `getAccessToken()` therefore treats `MICROSOFT_REFRESH_TOKEN_MADALENA` as a one-time bootstrap only: once the first refresh succeeds, the rotated token is written to `outlook-tokens.json` and used from then on. If you ever delete the token file, the env var works again as a fresh bootstrap — but don't rely on the env var staying valid indefinitely the way `GOOGLE_REFRESH_TOKEN_MADALENA` does.
+- **`updateRecord()`'s rich_text writes overwrite, they don't append** — see [`notion-api-gotchas.md`](notion-api-gotchas.md). `Notas` is deliberately left untouched by this pipeline (not auto-filled on create or update) precisely to avoid this trap; only page-body sections accumulate content, via `appendToPageSection`, which does append.
+- **A 403 on one specific mailbox and not others** almost always means that mailbox is missing the Exchange Full Access delegate grant — it's not a code bug, see setup step 6.
+- **The scan's dedup check runs against the *guessed* name, before a human corrects it during review** — so `apply-outlook-findings.mjs` re-checks `findPageInDb("partners", nome)` against the FINAL name right before every `create`, not just trusting the scan-time bucket. Without this, correcting a guessed name (e.g. a contact's personal name → the actual company name) during review can silently turn an existing partner into a duplicate. This happened for real on 2026-09-14: the scan guessed "Ana Luisa Silva" for a Track & Field email (matched no existing row), a human corrected it to "Track & Field" during review, and the apply script created a second "Track & Field" page alongside an existing one it never re-checked against. Fixed by adding the re-check; the duplicate was merged back into the original page by hand.
+
+## Checkpoint state
+
+`data/outlook-sync-state.json` (gitignored, same `DATA_DIR`-relative convention as the token file): `{ "<mailbox>": { "lastSyncedISO": "..." } }`. The `sync-partnerships` skill reads/advances this so re-running doesn't re-surface already-reviewed emails; a 1-day overlap buffer is applied on the `--since` used for each scan to tolerate any consistency lag near the boundary.
+
+## File map
+
+| File | Role |
+|---|---|
+| `src/lib/outlook.ts` | Graph OAuth (delegated, single identity) + mailbox message search |
+| `scripts/outlook-auth.mjs` | One-time interactive OAuth setup |
+| `scripts/scan-outlook-partnerships.mjs` | Read-only: scans mailboxes, writes a JSON report. Never touches Notion. |
+| `scripts/apply-outlook-findings.mjs` | The only script that writes to Notion — takes a scan report + human-reviewed decisions |
+| `.claude/skills/sync-partnerships/SKILL.md` | The on-demand, checkpointed procedure a founder invokes |
+
+## Last touched
+
+2026-09-14 — Initial build + first real test run (30-day scan, own mailbox), then a full real apply run (5 partners created: Track & Field, Chio Studio, FLÉX, NX Dynamics, Wanderlust). Fixes made along the way:
+- Scripts were missing `await notion.initialize()` (every `dsId()` call throws without it — same requirement as the `test-*.mjs` scripts).
+- The guessed-partner-name heuristic was always wrong for messages the Haven itself sent (fixed by falling back to the external recipient — see Design decisions above).
+- Keyword matching against `bodyPreview` only (not the full body) missed mentions past the first ~255 characters — switched to full `body` (plain text via the `Prefer: outlook.body-content-type="text"` header).
+- The `create` path didn't re-check dedup against the human-corrected final name, only the scan-time guess — created a real duplicate Partner Pipeline row, since fixed (see Gotchas).
+- Unrelated but discovered and fixed in the same session: `createPartner()`/`createTask()`/`createInfluencer()` were failing in production entirely (Status property type mismatch) — see [`notion-api-gotchas.md`](notion-api-gotchas.md) TL;DR item 9. This blocked `create` until fixed.
+- Partner Pipeline had two redundant `created_time` properties, "Criado em" (the one `scripts/setup-notion-dbs.mjs` and the codebase actually reference) and an orphaned "Data Criação" duplicate — always identical values, nothing read the second one. Removed "Data Criação" via `dataSources.update()`; not present on any other DB.

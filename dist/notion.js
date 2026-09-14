@@ -15,6 +15,7 @@ import { Client, APIResponseError } from "@notionhq/client";
 import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
 import { isValidRecurrence } from "./types.js";
 import { log } from "./lib/log.js";
+import { formatLisbonDateTime } from "./lib/tz.js";
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
 const NOTION_BACKLOG_DB_ID = process.env.NOTION_BACKLOG_DB_ID;
@@ -221,6 +222,14 @@ function readStatusName(prop) {
     }
     return null;
 }
+// A few DBs' "Status" column is actually a plain select property in Notion,
+// not the status type the name suggests (schema drift from manual edits in
+// Notion's UI — see docs/knowledge-base/notion-api-gotchas.md). Reading with
+// this combined helper is safe everywhere: whichever shape is actually
+// present matches, the other is simply absent.
+function readStatusOrSelectName(prop) {
+    return readStatusName(prop) ?? readSelectName(prop);
+}
 function readDateStart(prop) {
     if (prop &&
         typeof prop === "object" &&
@@ -274,11 +283,22 @@ function readFormulaString(prop) {
     }
     return null;
 }
+function readNumber(prop) {
+    if (prop &&
+        typeof prop === "object" &&
+        "number" in prop &&
+        typeof prop.number === "number") {
+        return prop.number;
+    }
+    return null;
+}
 function buildEditPatch(field, newValue) {
     const property = FIELD_TO_PROPERTY[field];
     switch (field) {
         case "status":
-            return { [property]: { status: { name: newValue } } };
+            // Backlog's live "Status" property is a select, not Notion's status
+            // type, despite the name — see docs/knowledge-base/notion-api-gotchas.md.
+            return { [property]: { select: { name: newValue } } };
         case "owner":
             return { [property]: { select: { name: newValue } } };
         case "prioridade":
@@ -337,7 +357,7 @@ async function createTask(extraction, priority, originalMsg, sender, entityRef, 
         Owner: { select: { name: extraction.owner } },
         "Área": { select: { name: extraction.area } },
         Prioridade: { select: { name: priority } },
-        Status: { status: { name: "To do" } },
+        Status: { select: { name: "To do" } },
         Origem: richText(originalMsg),
         ...relProps,
     };
@@ -389,15 +409,22 @@ const RECORD_DB_CONFIGS = {
         dbId: () => NOTION_PARTNER_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "status" },
+            // Live property is a select, not Notion's status type, despite the
+            // name — see docs/knowledge-base/notion-api-gotchas.md.
+            status: { notionProp: "Status", type: "select" },
             owner: { notionProp: "Owner", type: "select" },
+            ultimoContacto: { notionProp: "Último contacto", type: "date" },
+            notas: { notionProp: "Notas", type: "rich_text" },
+            email: { notionProp: "Email", type: "email" },
         },
     },
     influencers: {
         dbId: () => NOTION_INFLUENCER_DB_ID,
         titleProp: "Name",
         fields: {
-            status: { notionProp: "Status", type: "status" },
+            // Live property is a select, not Notion's status type — same drift as
+            // Partner Pipeline, see docs/knowledge-base/notion-api-gotchas.md.
+            status: { notionProp: "Status", type: "select" },
             owner: { notionProp: "Owner", type: "select" },
         },
     },
@@ -589,7 +616,7 @@ async function searchRecords(db, query) {
             id: row.id,
             title: readPlainText(row.properties["Título"]),
             owner: readSelectName(row.properties["Owner"]) ?? "Unassigned",
-            status: readStatusName(row.properties["Status"]) ?? "To do",
+            status: readStatusOrSelectName(row.properties["Status"]) ?? "To do",
             area: readSelectName(row.properties["Área"]) ?? undefined,
             priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
             deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
@@ -640,6 +667,9 @@ async function updateRecord(db, itemTitle, field, newValue) {
         case "rich_text":
             propValue = richText(newValue);
             break;
+        case "email":
+            propValue = { email: newValue };
+            break;
     }
     await withRetry("updateRecord", () => client.pages.update({
         page_id: found.id,
@@ -667,8 +697,8 @@ async function getOpenTasks() {
             data_source_id: dsId(NOTION_BACKLOG_DB_ID),
             filter: {
                 and: [
-                    { property: "Status", status: { does_not_equal: "Feito" } },
-                    { property: "Status", status: { does_not_equal: "Cancelado" } },
+                    { property: "Status", select: { does_not_equal: "Feito" } },
+                    { property: "Status", select: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -685,7 +715,7 @@ async function getOpenTasks() {
                 ? priorityName
                 : null;
             const deadline = readDateStart(props["Deadline"]);
-            const statusName = readStatusName(props["Status"]) ?? "To do";
+            const statusName = readStatusOrSelectName(props["Status"]) ?? "To do";
             const status = statusName;
             tasks.push({
                 id: row.id,
@@ -726,7 +756,7 @@ function rowToOpenTask(row) {
     const area = (readSelectName(props["Área"]) ?? "Outro");
     const priority = normalizePriority(readSelectName(props["Prioridade"]));
     const deadline = readDateStart(props["Deadline"]);
-    const statusName = readStatusName(props["Status"]) ?? "To do";
+    const statusName = readStatusOrSelectName(props["Status"]) ?? "To do";
     return {
         id: row.id,
         title,
@@ -756,8 +786,8 @@ async function getWeeklyPriorities(week) {
             filter: {
                 and: [
                     { property: "Prioridade semanal", checkbox: { equals: true } },
-                    { property: "Status", status: { does_not_equal: "Feito" } },
-                    { property: "Status", status: { does_not_equal: "Cancelado" } },
+                    { property: "Status", select: { does_not_equal: "Feito" } },
+                    { property: "Status", select: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -801,7 +831,7 @@ async function getWeeklyCompletedSince(date) {
             filter: {
                 and: [
                     { property: "Prioridade semanal", checkbox: { equals: true } },
-                    { property: "Status", status: { equals: "Feito" } },
+                    { property: "Status", select: { equals: "Feito" } },
                     {
                         timestamp: "last_edited_time",
                         last_edited_time: { on_or_after: date },
@@ -838,8 +868,8 @@ async function getWeeklyOverdueTasks() {
                 and: [
                     { property: "Prioridade semanal", checkbox: { equals: true } },
                     { property: "Deadline", date: { before: today } },
-                    { property: "Status", status: { does_not_equal: "Feito" } },
-                    { property: "Status", status: { does_not_equal: "Cancelado" } },
+                    { property: "Status", select: { does_not_equal: "Feito" } },
+                    { property: "Status", select: { does_not_equal: "Cancelado" } },
                 ],
             },
             start_cursor: cursor,
@@ -880,29 +910,58 @@ async function deactivatePreviousFocus(founder) {
     }
     log.info("notion.founder_focus_deactivated", { founder, count: res.results.length });
 }
+// Founder Focus is a weekly tracker: one row per founder per week. If the active row
+// already belongs to the current week (goals edited mid-week), update it in place —
+// this preserves any "Cumprido"/"Comentários" already filled in manually for that week.
+// Otherwise (new week) deactivate the old row and create a fresh one.
 async function setFounderFocus(entry) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID) {
         throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
     }
+    const res = await withRetry("setFounderFocus.query", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
+        filter: {
+            and: [
+                { property: "Founder", select: { equals: entry.founder } },
+                { property: "Ativo", checkbox: { equals: true } },
+            ],
+        },
+    }));
+    const activeRow = res.results.find((row) => "properties" in row);
+    const activeWeek = activeRow && "properties" in activeRow
+        ? readNumber(activeRow.properties["Semana"])
+        : undefined;
+    if (activeRow && activeWeek === entry.weekNumber) {
+        await withRetry("setFounderFocus.update", () => client.pages.update({
+            page_id: activeRow.id,
+            properties: {
+                Nome: { title: [{ text: { content: founderFocusTitle(entry.founder, entry.weekNumber) } }] },
+                Objetivos: richText(entry.focoOperacional),
+            },
+        }));
+        log.info("notion.founder_focus_updated", { founder: entry.founder, weekNumber: entry.weekNumber });
+        return;
+    }
     // Only one active (Ativo=true) row per founder — deactivate any existing before creating the new one.
     await deactivatePreviousFocus(entry.founder);
-    await withRetry("setFounderFocus", () => client.pages.create({
+    await withRetry("setFounderFocus.create", () => client.pages.create({
         parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID) },
         properties: {
-            Name: { title: [{ text: { content: `${entry.founder} Focus` } }] },
+            Nome: { title: [{ text: { content: founderFocusTitle(entry.founder, entry.weekNumber) } }] },
             Founder: { select: { name: entry.founder } },
-            "Foco operacional": richText(entry.focoOperacional),
+            Semana: { number: entry.weekNumber },
+            Objetivos: richText(entry.focoOperacional),
             Ativo: { checkbox: true },
         },
     }));
-    log.info("notion.founder_focus_created", { founder: entry.founder, semana: entry.semana });
+    log.info("notion.founder_focus_created", { founder: entry.founder, weekNumber: entry.weekNumber });
 }
-async function getFounderFocusForWeek(week) {
+async function getFounderFocusForWeek(weekNumber) {
     if (!NOTION_FOUNDER_FOCUS_DB_ID)
         return [];
     const res = await withRetry("getFounderFocusForWeek", () => client.dataSources.query({
         data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
-        filter: { property: "Semana", formula: { string: { equals: week } } },
+        filter: { property: "Semana", number: { equals: weekNumber } },
         sorts: [{ timestamp: "created_time", direction: "descending" }],
     }));
     // Latest entry per founder is the active focus.
@@ -920,11 +979,11 @@ async function getFounderFocusForWeek(week) {
         seen.add(founderName);
         entries.push({
             founder: founderName,
-            semana: readPlainText(props["Semana"]) || week,
-            focoOperacional: readPlainText(props["Foco operacional"]),
+            weekNumber: readNumber(props["Semana"]) ?? weekNumber,
+            focoOperacional: readPlainText(props["Objetivos"]),
         });
     }
-    log.debug("notion.founder_focus_fetched", { week, count: entries.length });
+    log.debug("notion.founder_focus_fetched", { weekNumber, count: entries.length });
     return entries;
 }
 async function getActiveFounderFocuses() {
@@ -951,12 +1010,147 @@ async function getActiveFounderFocuses() {
         seen.add(founderName);
         entries.push({
             founder: founderName,
-            semana: readFormulaString(props["Semana"]) ?? "",
-            focoOperacional: readPlainText(props["Foco operacional"]),
+            weekNumber: readNumber(props["Semana"]) ?? 0,
+            focoOperacional: readPlainText(props["Objetivos"]),
         });
     }
     log.debug("notion.active_founder_focus_fetched", { count: entries.length });
     return entries;
+}
+function founderFocusTitle(founder, weekNumber) {
+    return `Objetivos ${founder} W${weekNumber}`;
+}
+/**
+ * Finds (or creates) the Founder Focus row for `founder`/`weekNumber`.
+ * Used by the body-append/edit tools (to get-or-create the "this week" or
+ * "next week" row without touching Ativo) and by the weekly rollover (which
+ * explicitly asks to activate the row it lands on).
+ */
+async function getOrCreateFounderFocusRow(founder, weekNumber, opts) {
+    if (!NOTION_FOUNDER_FOCUS_DB_ID) {
+        throw new Error("NOTION_FOUNDER_FOCUS_DB_ID not set");
+    }
+    const res = await withRetry("getOrCreateFounderFocusRow.query", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID),
+        filter: {
+            and: [
+                { property: "Founder", select: { equals: founder } },
+                { property: "Semana", number: { equals: weekNumber } },
+            ],
+        },
+    }));
+    const existing = res.results.find((row) => "properties" in row);
+    if (existing) {
+        if (opts.activate) {
+            await withRetry("getOrCreateFounderFocusRow.activate", () => client.pages.update({
+                page_id: existing.id,
+                properties: { Ativo: { checkbox: true } },
+            }));
+        }
+        return existing.id;
+    }
+    const page = await withRetry("getOrCreateFounderFocusRow.create", () => client.pages.create({
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID) },
+        properties: {
+            Nome: { title: [{ text: { content: founderFocusTitle(founder, weekNumber) } }] },
+            Founder: { select: { name: founder } },
+            Semana: { number: weekNumber },
+            Ativo: { checkbox: opts.activate },
+        },
+    }));
+    log.info("notion.founder_focus_row_created", { founder, weekNumber, activate: opts.activate });
+    return page.id;
+}
+async function getFounderFocusRow(pageId) {
+    const page = await withRetry("getFounderFocusRow", () => client.pages.retrieve({ page_id: pageId }));
+    if (!("properties" in page))
+        return null;
+    const props = page.properties;
+    const founderName = readSelectName(props["Founder"]);
+    if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz")
+        return null;
+    return {
+        founder: founderName,
+        weekNumber: readNumber(props["Semana"]) ?? 0,
+        focoOperacional: readPlainText(props["Objetivos"]),
+        ativo: readCheckbox(props["Ativo"]),
+    };
+}
+async function setFounderFocusCumprido(pageId, cumprido, comentario) {
+    const properties = {
+        Cumprido: { select: { name: cumprido ? "Sim" : "Não" } },
+    };
+    if (comentario !== undefined) {
+        properties["Comentários"] = richText(comentario);
+    }
+    await withRetry("setFounderFocusCumprido", () => client.pages.update({
+        page_id: pageId,
+        properties: properties,
+    }));
+    log.info("notion.founder_focus_cumprido_set", { pageId, cumprido, hasComentario: comentario !== undefined });
+}
+/**
+ * Closes the current week's cycle for `founder`: deactivates the active row
+ * and activates (creating if necessary) the row for the following ISO week.
+ * If a "next week" row was already pre-written via `add_to_focus_body`, it's
+ * reused instead of creating a duplicate.
+ */
+async function rolloverFounderFocusWeek(founder, nextWeekNumber) {
+    await deactivatePreviousFocus(founder);
+    return getOrCreateFounderFocusRow(founder, nextWeekNumber, { activate: true });
+}
+/**
+ * Appends free text to a Founder Focus page body. `meta` is set when
+ * writing to a founder's page on someone else's behalf — it's rendered as
+ * a leading note so the founder knows who added it and when.
+ */
+async function appendFounderFocusBody(pageId, content, meta) {
+    const prefixed = meta
+        ? `adicionado por ${meta.addedBy} em ${formatLisbonDateTime(meta.when)}\n${content}`
+        : content;
+    await appendToPageSection(pageId, prefixed);
+}
+/**
+ * Finds the body block whose text best matches `searchText` (case-insensitive
+ * substring, either direction) and either edits it in place (`newText` set)
+ * or deletes it (`newText` omitted). Throws if zero or more-than-one blocks
+ * match equally well, so the caller can ask the user to be more specific.
+ */
+async function editFounderFocusBodyItem(pageId, searchText, newText) {
+    const listRes = await withRetry("editFounderFocusBodyItem.list", () => client.blocks.children.list({ block_id: pageId, page_size: 100 }));
+    const needle = searchText.trim().toLowerCase();
+    const candidates = [];
+    for (const block of listRes.results) {
+        if (!("type" in block))
+            continue;
+        const b = block;
+        if (!["paragraph", "bulleted_list_item", "to_do"].includes(b.type))
+            continue;
+        const bData = b[b.type];
+        const text = (bData.rich_text ?? []).map((rt) => rt.plain_text ?? "").join("");
+        const haystack = text.toLowerCase();
+        if (haystack.includes(needle) || needle.includes(haystack)) {
+            candidates.push({ id: b.id, type: b.type, text });
+        }
+    }
+    if (candidates.length === 0) {
+        throw new Error(`não encontrei nada parecido com "${searchText}"`);
+    }
+    if (candidates.length > 1) {
+        const list = candidates.map((c) => `"${c.text}"`).join(", ");
+        throw new Error(`encontrei várias linhas parecidas: ${list} — sê mais específico`);
+    }
+    const match = candidates[0];
+    if (newText === undefined) {
+        await withRetry("editFounderFocusBodyItem.delete", () => client.blocks.delete({ block_id: match.id }));
+        log.info("notion.founder_focus_body_item_removed", { pageId, blockId: match.id });
+        return;
+    }
+    await withRetry("editFounderFocusBodyItem.update", () => client.blocks.update({
+        block_id: match.id,
+        [match.type]: { rich_text: [{ type: "text", text: { content: newText } }] },
+    }));
+    log.info("notion.founder_focus_body_item_edited", { pageId, blockId: match.id });
 }
 // ============================================================
 // Phase 3 — Partners / Influencers / Content / Reminders
@@ -978,11 +1172,11 @@ async function getPartnersStale(category) {
     const statusFilter = category === "no_response"
         ? {
             or: [
-                { property: "Status", status: { equals: "Contactado" } },
-                { property: "Status", status: { equals: "A aguardar resposta" } },
+                { property: "Status", select: { equals: "Contactado" } },
+                { property: "Status", select: { equals: "A aguardar resposta" } },
             ],
         }
-        : { property: "Status", status: { equals: "Em negociação" } };
+        : { property: "Status", select: { equals: "Em negociação" } };
     const rows = [];
     let cursor;
     do {
@@ -1001,7 +1195,7 @@ async function getPartnersStale(category) {
                 continue;
             const props = row.properties;
             const cat = readSelectName(props["Categoria"]);
-            const status = readStatusName(props["Status"]);
+            const status = readStatusOrSelectName(props["Status"]);
             rows.push({
                 id: row.id,
                 nome: readPlainText(props["Name"]),
@@ -1030,8 +1224,8 @@ async function getInfluencersStale(category) {
     // Influencer does not have a literal "A aguardar resposta" status; map
     // "no_response" → Contactado (no reply), "no_progress" → Em conversa stalled.
     const statusFilter = category === "no_response"
-        ? { property: "Status", status: { equals: "Contactado" } }
-        : { property: "Status", status: { equals: "Em conversa" } };
+        ? { property: "Status", select: { equals: "Contactado" } }
+        : { property: "Status", select: { equals: "Em conversa" } };
     const rows = [];
     let cursor;
     do {
@@ -1049,7 +1243,7 @@ async function getInfluencersStale(category) {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            const status = readStatusName(props["Status"]);
+            const status = readStatusOrSelectName(props["Status"]);
             rows.push({
                 id: row.id,
                 nome: readPlainText(props["Name"]),
@@ -1419,7 +1613,7 @@ async function getDependentTasks(prerequisiteId) {
         filter: {
             and: [
                 { property: "Depende de", relation: { contains: prerequisiteId } },
-                { property: "Status", status: { equals: "Bloqueado" } },
+                { property: "Status", select: { equals: "Bloqueado" } },
             ],
         },
     }));
@@ -1547,7 +1741,7 @@ async function createPartner(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { status: { name: "A contactar" } },
+            Status: { select: { name: "A contactar" } },
             Origem: richText(originalMsg),
         },
     }));
@@ -1575,7 +1769,7 @@ async function createInfluencer(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { status: { name: "A contactar" } },
+            Status: { select: { name: "A contactar" } },
             Origem: richText(originalMsg),
         },
     }));
@@ -1958,7 +2152,7 @@ async function getEntitiesForOwner(dbKey, owner) {
     const mapRow = (r) => ({
         id: r.id,
         name: readPlainText(r.properties["Name"]) || "—",
-        status: readStatusName(r.properties["Status"]) ?? null,
+        status: readStatusOrSelectName(r.properties["Status"]) ?? null,
     });
     try {
         const res = await client.dataSources.query({
@@ -1999,8 +2193,8 @@ async function getTasksForEntity(entityField, entityPageId) {
             filter: {
                 and: [
                     { property: entityField, relation: { contains: entityPageId } },
-                    { property: "Status", status: { does_not_equal: "Feito" } },
-                    { property: "Status", status: { does_not_equal: "Cancelado" } },
+                    { property: "Status", select: { does_not_equal: "Feito" } },
+                    { property: "Status", select: { does_not_equal: "Cancelado" } },
                 ],
             },
             page_size: 10,
@@ -2019,7 +2213,7 @@ async function getTasksForEntity(entityField, entityPageId) {
 // Named exports so callers can use either `import * as notion` or `import { notion }`.
 export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archivePage, 
 // Phase 2
-getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, getActiveFounderFocuses, 
+getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, getActiveFounderFocuses, getOrCreateFounderFocusRow, getFounderFocusRow, setFounderFocusCumprido, rolloverFounderFocusWeek, appendFounderFocusBody, editFounderFocusBodyItem, 
 // Phase 3
 getPartnersStale, getInfluencersStale, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
@@ -2053,6 +2247,12 @@ export const notion = {
     setFounderFocus,
     getFounderFocusForWeek,
     getActiveFounderFocuses,
+    getOrCreateFounderFocusRow,
+    getFounderFocusRow,
+    setFounderFocusCumprido,
+    rolloverFounderFocusWeek,
+    appendFounderFocusBody,
+    editFounderFocusBodyItem,
     // Phase 3
     getPartnersStale,
     getInfluencersStale,

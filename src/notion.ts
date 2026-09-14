@@ -281,6 +281,15 @@ function readStatusName(prop: unknown): string | null {
   return null;
 }
 
+// A few DBs' "Status" column is actually a plain select property in Notion,
+// not the status type the name suggests (schema drift from manual edits in
+// Notion's UI — see docs/knowledge-base/notion-api-gotchas.md). Reading with
+// this combined helper is safe everywhere: whichever shape is actually
+// present matches, the other is simply absent.
+function readStatusOrSelectName(prop: unknown): string | null {
+  return readStatusName(prop) ?? readSelectName(prop);
+}
+
 function readDateStart(prop: unknown): string | null {
   if (
     prop &&
@@ -366,7 +375,9 @@ function buildEditPatch(field: EditableField, newValue: string): Record<string, 
   const property = FIELD_TO_PROPERTY[field];
   switch (field) {
     case "status":
-      return { [property]: { status: { name: newValue } } };
+      // Backlog's live "Status" property is a select, not Notion's status
+      // type, despite the name — see docs/knowledge-base/notion-api-gotchas.md.
+      return { [property]: { select: { name: newValue } } };
     case "owner":
       return { [property]: { select: { name: newValue } } };
     case "prioridade":
@@ -438,7 +449,7 @@ async function createTask(
     Owner: { select: { name: extraction.owner } },
     "Área": { select: { name: extraction.area } },
     Prioridade: { select: { name: priority } },
-    Status: { status: { name: "To do" satisfies Status } },
+    Status: { select: { name: "To do" satisfies Status } },
     Origem: richText(originalMsg),
     ...relProps,
   };
@@ -479,7 +490,7 @@ async function updateTask(
 
 type FieldConfig = {
   notionProp: string;
-  type: "select" | "multi_select" | "status" | "date" | "rich_text";
+  type: "select" | "multi_select" | "status" | "date" | "rich_text" | "email";
 };
 
 const RECORD_DB_CONFIGS: Record<string, {
@@ -510,15 +521,22 @@ const RECORD_DB_CONFIGS: Record<string, {
     dbId: () => NOTION_PARTNER_DB_ID,
     titleProp: "Name",
     fields: {
-      status: { notionProp: "Status", type: "status" },
+      // Live property is a select, not Notion's status type, despite the
+      // name — see docs/knowledge-base/notion-api-gotchas.md.
+      status: { notionProp: "Status", type: "select" },
       owner: { notionProp: "Owner", type: "select" },
+      ultimoContacto: { notionProp: "Último contacto", type: "date" },
+      notas: { notionProp: "Notas", type: "rich_text" },
+      email: { notionProp: "Email", type: "email" },
     },
   },
   influencers: {
     dbId: () => NOTION_INFLUENCER_DB_ID,
     titleProp: "Name",
     fields: {
-      status: { notionProp: "Status", type: "status" },
+      // Live property is a select, not Notion's status type — same drift as
+      // Partner Pipeline, see docs/knowledge-base/notion-api-gotchas.md.
+      status: { notionProp: "Status", type: "select" },
       owner: { notionProp: "Owner", type: "select" },
     },
   },
@@ -742,7 +760,7 @@ async function searchRecords(db: string, query: string): Promise<SearchResult[]>
       id: row.id,
       title: readPlainText(row.properties["Título"]),
       owner: readSelectName(row.properties["Owner"]) ?? "Unassigned",
-      status: readStatusName(row.properties["Status"]) ?? "To do",
+      status: readStatusOrSelectName(row.properties["Status"]) ?? "To do",
       area: readSelectName(row.properties["Área"]) ?? undefined,
       priority: readSelectName(row.properties["Prioridade"]) ?? undefined,
       deadline: readDateStart(row.properties["Deadline"]) ?? undefined,
@@ -789,6 +807,7 @@ async function updateRecord(
     case "status": propValue = { status: { name: newValue } }; break;
     case "date": propValue = { date: { start: newValue } }; break;
     case "rich_text": propValue = richText(newValue); break;
+    case "email": propValue = { email: newValue }; break;
   }
 
   await withRetry("updateRecord", () =>
@@ -826,8 +845,8 @@ async function getOpenTasks(): Promise<OpenTask[]> {
         data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
         filter: {
           and: [
-            { property: "Status", status: { does_not_equal: "Feito" } },
-            { property: "Status", status: { does_not_equal: "Cancelado" } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+            { property: "Status", select: { does_not_equal: "Cancelado" } },
           ],
         },
         start_cursor: cursor,
@@ -846,7 +865,7 @@ async function getOpenTasks(): Promise<OpenTask[]> {
           ? (priorityName as Priority)
           : null;
       const deadline = readDateStart(props["Deadline"]);
-      const statusName = readStatusName(props["Status"]) ?? "To do";
+      const statusName = readStatusOrSelectName(props["Status"]) ?? "To do";
       const status = statusName as Status;
 
       tasks.push({
@@ -893,7 +912,7 @@ function rowToOpenTask(row: { id: string; properties: Record<string, unknown> })
   const area = (readSelectName(props["Área"]) ?? "Outro") as Area;
   const priority = normalizePriority(readSelectName(props["Prioridade"]));
   const deadline = readDateStart(props["Deadline"]);
-  const statusName = readStatusName(props["Status"]) ?? "To do";
+  const statusName = readStatusOrSelectName(props["Status"]) ?? "To do";
   return {
     id: row.id,
     title,
@@ -929,8 +948,8 @@ async function getWeeklyPriorities(week: string): Promise<OpenTask[]> {
         filter: {
           and: [
             { property: "Prioridade semanal", checkbox: { equals: true } },
-            { property: "Status", status: { does_not_equal: "Feito" } },
-            { property: "Status", status: { does_not_equal: "Cancelado" } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+            { property: "Status", select: { does_not_equal: "Cancelado" } },
           ],
         },
         start_cursor: cursor,
@@ -981,7 +1000,7 @@ async function getWeeklyCompletedSince(date: string): Promise<OpenTask[]> {
         filter: {
           and: [
             { property: "Prioridade semanal", checkbox: { equals: true } },
-            { property: "Status", status: { equals: "Feito" } },
+            { property: "Status", select: { equals: "Feito" } },
             {
               timestamp: "last_edited_time",
               last_edited_time: { on_or_after: date },
@@ -1022,8 +1041,8 @@ async function getWeeklyOverdueTasks(): Promise<OpenTask[]> {
           and: [
             { property: "Prioridade semanal", checkbox: { equals: true } },
             { property: "Deadline", date: { before: today } },
-            { property: "Status", status: { does_not_equal: "Feito" } },
-            { property: "Status", status: { does_not_equal: "Cancelado" } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+            { property: "Status", select: { does_not_equal: "Cancelado" } },
           ],
         },
         start_cursor: cursor,
@@ -1389,11 +1408,11 @@ async function getPartnersStale(
     category === "no_response"
       ? {
           or: [
-            { property: "Status", status: { equals: "Contactado" } },
-            { property: "Status", status: { equals: "A aguardar resposta" } },
+            { property: "Status", select: { equals: "Contactado" } },
+            { property: "Status", select: { equals: "A aguardar resposta" } },
           ],
         }
-      : { property: "Status", status: { equals: "Em negociação" } };
+      : { property: "Status", select: { equals: "Em negociação" } };
 
   const rows: PartnerRow[] = [];
   let cursor: string | undefined;
@@ -1414,7 +1433,7 @@ async function getPartnersStale(
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
       const cat = readSelectName(props["Categoria"]) as PartnerCategory | null;
-      const status = readStatusName(props["Status"]) as PartnerStatus | null;
+      const status = readStatusOrSelectName(props["Status"]) as PartnerStatus | null;
       rows.push({
         id: row.id,
         nome: readPlainText(props["Name"]),
@@ -1453,8 +1472,8 @@ async function getInfluencersStale(
   // "no_response" → Contactado (no reply), "no_progress" → Em conversa stalled.
   const statusFilter =
     category === "no_response"
-      ? { property: "Status", status: { equals: "Contactado" } }
-      : { property: "Status", status: { equals: "Em conversa" } };
+      ? { property: "Status", select: { equals: "Contactado" } }
+      : { property: "Status", select: { equals: "Em conversa" } };
 
   const rows: InfluencerRow[] = [];
   let cursor: string | undefined;
@@ -1474,7 +1493,7 @@ async function getInfluencersStale(
     for (const row of res.results) {
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
-      const status = readStatusName(props["Status"]) as InfluencerStatus | null;
+      const status = readStatusOrSelectName(props["Status"]) as InfluencerStatus | null;
       rows.push({
         id: row.id,
         nome: readPlainText(props["Name"]),
@@ -1909,7 +1928,7 @@ async function getDependentTasks(prerequisiteId: string): Promise<OpenTask[]> {
       filter: {
         and: [
           { property: "Depende de", relation: { contains: prerequisiteId } },
-          { property: "Status", status: { equals: "Bloqueado" } },
+          { property: "Status", select: { equals: "Bloqueado" } },
         ],
       },
     }),
@@ -2059,7 +2078,7 @@ async function createPartner(nome: string, owner: OwnerValue, originalMsg: strin
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { status: { name: "A contactar" satisfies PartnerStatus } },
+        Status: { select: { name: "A contactar" satisfies PartnerStatus } },
         Origem: richText(originalMsg),
       },
     }),
@@ -2092,7 +2111,7 @@ async function createInfluencer(nome: string, owner: OwnerValue, originalMsg: st
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { status: { name: "A contactar" satisfies InfluencerStatus } },
+        Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
         Origem: richText(originalMsg),
       },
     }),
@@ -2545,7 +2564,7 @@ async function getEntitiesForOwner(
   const mapRow = (r: { id: string; properties: Record<string, unknown> }): EntitySummary => ({
     id: r.id,
     name: readPlainText(r.properties["Name"]) || "—",
-    status: readStatusName(r.properties["Status"]) ?? null,
+    status: readStatusOrSelectName(r.properties["Status"]) ?? null,
   });
 
   try {
@@ -2591,8 +2610,8 @@ async function getTasksForEntity(
         filter: {
           and: [
             { property: entityField, relation: { contains: entityPageId } },
-            { property: "Status", status: { does_not_equal: "Feito" } },
-            { property: "Status", status: { does_not_equal: "Cancelado" } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+            { property: "Status", select: { does_not_equal: "Cancelado" } },
           ],
         } as Parameters<typeof client.dataSources.query>[0]["filter"],
         page_size: 10,

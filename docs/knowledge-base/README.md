@@ -26,6 +26,7 @@ Three problems this folder solves:
 | [`deploy-and-access.md`](deploy-and-access.md) | NAS access (Tailscale, DSM, admin vs non-admin), deploy command, Container Manager, rollback | When access paths change or you discover a new "I couldn't reach X" gotcha |
 | [`notion-api-gotchas.md`](notion-api-gotchas.md) | Notion data model (databases vs data sources), property type quirks, rate limits, retry strategy, deprecations | When Notion releases a new API version, you hit a 4xx error worth remembering, or a schema migration is needed |
 | [`testing.md`](testing.md) | The two test tiers (vitest unit tests vs. `scripts/test-*.mjs` manual integration), what each covers, how to add a test | When a test tier's scope or convention changes |
+| [`outlook-partnerships-sync.md`](outlook-partnerships-sync.md) | Outlook → Notion Partner Pipeline sync: Azure setup, design decisions, gotchas. Adjacent tooling, not part of the live bot | When the Graph integration, keyword list, or checkpoint mechanism changes |
 | [`failure-modes-2026-05-15.md`](failure-modes-2026-05-15.md) | Catalog of 30+ failure modes ranked Critical → Low | Frozen — start a new dated file when you do the next audit |
 | [`cost-and-latency-2026-05-15.md`](cost-and-latency-2026-05-15.md) | Anthropic + Notion cost baseline, optimization ROI table | Frozen — start a new dated file when costs grow or pricing changes |
 

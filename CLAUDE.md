@@ -9,6 +9,7 @@ The `docs/knowledge-base/` folder is the durable memory of "how this bot actuall
 - [`bot-architecture.md`](docs/knowledge-base/bot-architecture.md) — 10-minute mental model: message flow, file map, cron schedule, state model
 - [`deploy-and-access.md`](docs/knowledge-base/deploy-and-access.md) — NAS access (Tailscale, DSM, Container Manager), deploy pipeline, rollback, secret hygiene
 - [`notion-api-gotchas.md`](docs/knowledge-base/notion-api-gotchas.md) — data sources vs databases, schema brittleness, retry strategy, property type quirks
+- [`outlook-partnerships-sync.md`](docs/knowledge-base/outlook-partnerships-sync.md) — Outlook → Notion Partner Pipeline sync (adjacent tooling, not the live bot): Azure setup, gotchas, checkpoint mechanism
 - [`failure-modes-YYYY-MM-DD.md`](docs/knowledge-base/) — point-in-time failure-mode audits (cumulative; one per audit run)
 - [`cost-and-latency-YYYY-MM-DD.md`](docs/knowledge-base/) — Anthropic + Notion cost baselines and optimization ROI
 

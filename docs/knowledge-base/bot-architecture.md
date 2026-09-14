@@ -122,6 +122,12 @@ Convention: `log.info("notion.thing_done", { id, ... })` — dotted label first,
 - **No webhooks.** Long-polling only. Webhook mode requires HTTPS reachable from Telegram → non-trivial from Synology behind home router. Defer until needed.
 - **No external monitoring.** If the bot dies silently (long-polling stops, OAuth token revoked, etc.), no alerting today.
 
+## Adjacent tooling (not part of the live pipeline)
+
+Not every script in this repo runs inside the bot. The Outlook → Notion partnerships sync (`src/lib/outlook.ts`, `scripts/{outlook-auth,scan-outlook-partnerships,apply-outlook-findings}.mjs`, `.claude/skills/sync-partnerships/`) is a Claude-Code/skill-driven procedure a founder runs on demand — it deliberately isn't a cron, so it's not in the schedule table above. See [`outlook-partnerships-sync.md`](outlook-partnerships-sync.md).
+
 ## Last touched
+
+2026-09-14 — Noted the Outlook partnerships sync as adjacent tooling (not in the live message pipeline or cron registry).
 
 2026-05-15 — Initial knowledge base seed during the cost/audit session.
