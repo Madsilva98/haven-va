@@ -89,6 +89,16 @@ const DEFAULT_AUTO_ARCHIVE_SENDERS = [
     "confirmar-envio@amazon.es",
     "auto-confirm@amazon.es",
     "devolucion@amazon.es",
+    // Wellhub's dedicated marketing/nurture-drip addresses — every message
+    // seen from these is an automated signup nag ("assinatura", "contrato
+    // pronto", "falta pouco para ativar", etc.), unlike support@wellhub.com
+    // which also carries the real partnership negotiation thread. Subject
+    // keyword matching (AUTO_ARCHIVE_RULES below) missed several of these
+    // because the wording varies ("assine" vs "assinatura" vs no sign-related
+    // word at all) — sender-address matching is more robust here than trying
+    // to enumerate every phrasing.
+    "partners.signup@wellhub.com",
+    "globalpartners@email.wellhub.com",
 ];
 function autoArchiveSenders() {
     const extra = (process.env.TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS ?? "")

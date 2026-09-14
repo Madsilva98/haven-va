@@ -18,8 +18,11 @@ const MAX_BODY_CHARS = 6000; // keep the top of the thread — newest reply firs
 
 const SYSTEM_INSTRUCTION =
   "Analisas emails de um estúdio de Pilates (The Haven) para decidir se uma thread ainda precisa de resposta/ação da equipa, ou se está resolvida e pode ser arquivada. " +
-  "Considera resolvida: perguntas já respondidas sem necessidade de confirmação adicional, agradecimentos finais, newsletters/notificações automáticas sem pedido, spam/marketing. " +
-  "Considera que precisa de ação: uma pergunta do cliente ainda sem resposta da equipa, um pedido em aberto, algo que claramente espera uma resposta e a última mensagem na thread não é da equipa do Haven a fechar o assunto. " +
+  "Considera resolvida: perguntas já respondidas sem necessidade de confirmação adicional, agradecimentos finais, newsletters/notificações automáticas sem pedido, spam/marketing, " +
+  "OU quando a última mensagem é da OUTRA parte a confirmar que executou algo que lhe foi pedido (ex: 'já corrigimos a data de faturação', 'atualizámos X como pediram'), sem colocar nenhuma pergunta nova em aberto — " +
+  "isto conta como resolvido mesmo que a equipa do Haven não tenha respondido 'obrigado' a fechar o assunto; não é preciso um fecho formal da nossa parte para algo estar resolvido. " +
+  "Considera que precisa de ação: uma pergunta do cliente ainda sem resposta da equipa, um pedido em aberto, ou uma mensagem da outra parte que levanta algo novo (uma pergunta, uma escolha a fazer, um problema a resolver) que ainda não teve resposta nossa. " +
+  "O critério real é sempre \"há algo pendente do nosso lado?\", não simplesmente \"quem escreveu a última mensagem?\" — uma confirmação de trabalho feito não é, por si só, algo pendente. " +
   'Na dúvida, escolhe NEEDS_ACTION — o custo de deixar algo na Inbox por engano é muito menor do que arquivar algo que precisava de resposta. ' +
   "Responde EXATAMENTE neste formato, nada mais:\nDECISÃO: NEEDS_ACTION ou NO_ACTION_NEEDED\nRAZÃO: uma frase curta em pt-PT";
 
