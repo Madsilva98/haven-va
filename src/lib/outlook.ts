@@ -35,6 +35,9 @@ export interface OutlookMessage {
   categories: string[];
   isRead: boolean;
   lastModifiedDateTime: string;
+  conversationId: string;
+  /** Only meaningful for Sent Items — when the message was actually sent. */
+  sentDateTime: string;
 }
 
 export interface OutlookAttachment {
@@ -227,6 +230,8 @@ interface GraphMessage {
   categories?: string[] | null;
   isRead?: boolean | null;
   lastModifiedDateTime?: string | null;
+  conversationId?: string | null;
+  sentDateTime?: string | null;
 }
 
 interface GraphMessagesPage {
@@ -235,7 +240,7 @@ interface GraphMessagesPage {
 }
 
 const MESSAGE_SELECT =
-  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime";
+  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime,conversationId,sentDateTime";
 
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
@@ -272,6 +277,8 @@ function mapGraphMessage(m: GraphMessage, mailbox: string): OutlookMessage {
     // toward inaction, not toward a mutation.
     isRead: m.isRead ?? false,
     lastModifiedDateTime: m.lastModifiedDateTime ?? m.receivedDateTime,
+    conversationId: m.conversationId ?? "",
+    sentDateTime: m.sentDateTime ?? m.receivedDateTime,
   };
 }
 
@@ -353,6 +360,25 @@ export async function listInboxMessages(mailbox: "me" | string): Promise<Outlook
   });
   return fetchAllMessages(
     `${mailboxBase(mailbox)}/mailFolders/inbox/messages?${params.toString()}`,
+    mailbox,
+  );
+}
+
+/**
+ * Lists messages in a mailbox's Sent Items — used to tell whether the Haven
+ * has already replied to a given conversation (see conversationId on
+ * OutlookMessage). Reply-quoting means a customer's *next* inbound message
+ * usually shows a prior reply's content anyway, but if they never write
+ * back, the reply only ever exists here, never in the Inbox.
+ */
+export async function listSentMessages(mailbox: "me" | string): Promise<OutlookMessage[]> {
+  const params = new URLSearchParams({
+    $select: MESSAGE_SELECT,
+    $orderby: "receivedDateTime desc",
+    $top: "50",
+  });
+  return fetchAllMessages(
+    `${mailboxBase(mailbox)}/mailFolders/sentitems/messages?${params.toString()}`,
     mailbox,
   );
 }

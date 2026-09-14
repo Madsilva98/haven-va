@@ -217,6 +217,7 @@ async function handleMessage(
   mailbox: string,
   msg: OutlookMessage,
   forwardTo: string,
+  latestSentByConversation: Map<string, OutlookMessage>,
 ): Promise<MessageOutcome> {
   const dryRun = isDryRun();
   const outcome: MessageOutcome = { forwarded: false, archived: false, autoArchived: false };
@@ -278,12 +279,27 @@ async function handleMessage(
     }
   }
 
+  // If the Haven has already replied more recently than this message
+  // arrived, classify using OUR reply's content instead of the original —
+  // a customer's Inbox message never updates itself with a later outbound
+  // reply, so classifying it in isolation would see an unanswered request
+  // forever, even when Sent Items shows it was answered days ago. Only
+  // relevant when the customer never wrote back again (their next inbound
+  // message would already quote our reply and get classified on its own).
+  const latestReply = msg.conversationId
+    ? latestSentByConversation.get(msg.conversationId)
+    : undefined;
+  const supersededByReply = Boolean(
+    latestReply && new Date(latestReply.sentDateTime) > new Date(msg.receivedDateTime),
+  );
+  const classifyTarget = supersededByReply && latestReply ? latestReply : msg;
+
   const { needsAction, reason } = await classifyMailboxThread({
     mailbox,
-    subject: msg.subject,
-    fromName: msg.from.name,
-    fromEmail: msg.from.email,
-    body: msg.body,
+    subject: classifyTarget.subject,
+    fromName: classifyTarget.from.name,
+    fromEmail: classifyTarget.from.email,
+    body: classifyTarget.body,
   });
 
   if (needsAction) {
@@ -295,6 +311,7 @@ async function handleMessage(
       messageId: msg.id,
       subject: msg.subject,
       reason,
+      classifiedFromReply: supersededByReply,
     });
     return outcome;
   }
@@ -308,6 +325,7 @@ async function handleMessage(
     subject: msg.subject,
     from: msg.from.email,
     reason,
+    classifiedFromReply: supersededByReply,
   });
   outcome.archived = true;
   return outcome;
@@ -354,6 +372,26 @@ export async function run(): Promise<void> {
       continue;
     }
 
+    // Non-fatal if this fails — worst case we just lose the "already
+    // replied via Sent Items" optimization for this run and classify
+    // messages in isolation as before, not skip the mailbox entirely.
+    const latestSentByConversation = new Map<string, OutlookMessage>();
+    try {
+      const sent = await outlook.listSentMessages(mailbox);
+      for (const s of sent) {
+        if (!s.conversationId) continue;
+        const existing = latestSentByConversation.get(s.conversationId);
+        if (!existing || new Date(s.sentDateTime) > new Date(existing.sentDateTime)) {
+          latestSentByConversation.set(s.conversationId, s);
+        }
+      }
+    } catch (err) {
+      log.warn("tidy_mailboxes.sent_list_failed", {
+        mailbox,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     for (const msg of messages) {
       // Untouched until a human has actually opened it — no classification,
       // no invoice-forward, no tag. Once read, it's picked up
@@ -378,7 +416,7 @@ export async function run(): Promise<void> {
         counts.rechecked++;
       }
       try {
-        const outcome = await handleMessage(mailbox, msg, forwardTo);
+        const outcome = await handleMessage(mailbox, msg, forwardTo, latestSentByConversation);
         if (outcome.forwarded) counts.forwarded++;
         if (outcome.autoArchived) counts.autoArchived++;
         else if (outcome.archived) counts.archived++;

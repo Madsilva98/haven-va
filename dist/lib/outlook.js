@@ -151,7 +151,7 @@ async function graphFetch(url, extraHeaders = {}, attempt = 1) {
     }
     return res;
 }
-const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime";
+const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime,conversationId,sentDateTime";
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
 // otherwise have to strip ourselves.
@@ -185,6 +185,8 @@ function mapGraphMessage(m, mailbox) {
         // toward inaction, not toward a mutation.
         isRead: m.isRead ?? false,
         lastModifiedDateTime: m.lastModifiedDateTime ?? m.receivedDateTime,
+        conversationId: m.conversationId ?? "",
+        sentDateTime: m.sentDateTime ?? m.receivedDateTime,
     };
 }
 async function fetchAllMessages(startUrl, mailbox) {
@@ -249,6 +251,21 @@ export async function listInboxMessages(mailbox) {
         $top: "50",
     });
     return fetchAllMessages(`${mailboxBase(mailbox)}/mailFolders/inbox/messages?${params.toString()}`, mailbox);
+}
+/**
+ * Lists messages in a mailbox's Sent Items — used to tell whether the Haven
+ * has already replied to a given conversation (see conversationId on
+ * OutlookMessage). Reply-quoting means a customer's *next* inbound message
+ * usually shows a prior reply's content anyway, but if they never write
+ * back, the reply only ever exists here, never in the Inbox.
+ */
+export async function listSentMessages(mailbox) {
+    const params = new URLSearchParams({
+        $select: MESSAGE_SELECT,
+        $orderby: "receivedDateTime desc",
+        $top: "50",
+    });
+    return fetchAllMessages(`${mailboxBase(mailbox)}/mailFolders/sentitems/messages?${params.toString()}`, mailbox);
 }
 /** Attachment metadata only (name/type/size) — never fetches file content. */
 export async function getMessageAttachments(mailbox, messageId) {
