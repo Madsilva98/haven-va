@@ -77,6 +77,19 @@ function mentionsInvoice(text) {
 function isPdfOrImage(contentType) {
     return /^application\/pdf$/i.test(contentType) || /^image\//i.test(contentType);
 }
+// Only a bill someone sent US should go to faturas@ — an invoice the Haven
+// itself sent to a customer (e.g. attached to a reply to "pode enviar-me a
+// fatura?") is never something finance needs forwarded, even though it can
+// still land in the Inbox (a self-CC, or a shared-mailbox send-as copy).
+// Approximated by sender domain: mail from the same domain as the mailbox
+// being tidied is treated as sent by the Haven itself, not received.
+function isFromOwnDomain(mailbox, fromEmail) {
+    const at = mailbox.indexOf("@");
+    if (at === -1)
+        return false; // "me" — not a domain-based shared mailbox, never the sender-check target
+    const ownDomain = mailbox.slice(at + 1).toLowerCase();
+    return fromEmail.toLowerCase().endsWith(`@${ownDomain}`);
+}
 /**
  * Returns the attachment(s) that made this look like an invoice, or null.
  * Requires a PDF/image attachment AND (its filename OR the email's
@@ -218,7 +231,7 @@ async function handleMessage(mailbox, msg, forwardTo, latestSentByConversation) 
         outcome.autoArchived = true;
         return outcome;
     }
-    if (msg.hasAttachments) {
+    if (msg.hasAttachments && !isFromOwnDomain(mailbox, msg.from.email)) {
         const attachments = await outlook.getMessageAttachments(mailbox, msg.id);
         const matched = invoiceAttachments(msg.subject, msg.body, attachments);
         if (matched) {
