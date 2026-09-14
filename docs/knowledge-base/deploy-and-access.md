@@ -171,7 +171,12 @@ The container's **General** tab in DSM shows every env var in plaintext. **Do no
 - **Telegram**: BotFather → /revoke → new token. Update `.env`, recreate container, run `setWebhook`/`deleteWebhook` as needed.
 - **Anthropic**: console.anthropic.com → API Keys → rotate. Update `.env`, recreate container.
 - **Google Calendar refresh token**: re-run the `/auth` flow in Madalena's DM with the bot.
+- **Microsoft/Outlook client secret**: Azure Portal → app registration → Certificates & secrets → rotate. Full procedure in the `rotate-secret` skill.
+
+**Second incident, 2026-09-14**: `MICROSOFT_CLIENT_SECRET` was printed into a tool output while checking a NAS `.env` file for duplicate entries after appending new env vars — a plain `grep` of the file echoed the full line, secret value included, into a visible result. Rotated same-session (new secret generated, both `.env.local` and the NAS `.env` updated without echoing the value back, verified with a real authenticated Graph call before deleting the old secret). Lesson now baked into the `rotate-secret` skill's Microsoft/Outlook section: never `grep`/`cat` a secret-bearing line to "just check" something — use a count or existence check (`grep -c`) instead, even for routine verification, not just during the rotation itself.
 
 ## Last touched
+
+2026-09-14 — Logged the MICROSOFT_CLIENT_SECRET exposure incident and its rotation.
 
 2026-05-15 — Seeded from the cost/audit session. Captures the Tailscale + admin-vs-non-admin discoveries.
