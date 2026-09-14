@@ -44,6 +44,7 @@ Use the `sync-partnerships` skill (`.claude/skills/sync-partnerships/SKILL.md`) 
 - **Dedup is approximate by design.** There's no email/domain field on Partner Pipeline rows — matching relies on `notion.ts`'s existing fuzzy title search (`findPageInDb`/`findRecordByTitle`). A "possible match" is a suggestion for the human reviewer, never auto-applied.
 - **`update` decisions never touch `Status`.** Only `Último contacto` and `Notas` — pipeline-stage changes are a human call this feature deliberately doesn't make.
 - **No new npm dependencies.** Plain `fetch` against Graph REST + the OAuth v2.0 token endpoint (`src/lib/outlook.ts`) — the actual surface needed is ~4 endpoints, not worth `@azure/msal-node` + `@microsoft/microsoft-graph-client` on a codebase with zero prior Microsoft dependencies.
+- **Confirmed emails get forwarded + archived out of the shared inboxes, but only after review, not on a mere keyword match.** `apply-outlook-findings.mjs` forwards the original email to `OUTLOOK_PARTNERSHIP_FORWARD_TO` (e.g. `partners@thehavenpilates.pt`) and archives it, but only for a finding whose `mailbox` is in `OUTLOOK_PARTNERSHIP_ARCHIVE_MAILBOXES` (the shared team inboxes, e.g. `geral@`/`hello@` — never `me` or a colleague's personal mailbox), and only once the founder's decision actually applies (`create`/`update`, not `skip`). This mirrors tidy-mailboxes.ts's invoice forward+archive (same Graph calls, same mailbox-scoping instinct) but stays a deliberate, reviewed action here — the read-only/write-only script split (see above) still holds: a false-positive keyword match in the scan report never touches the mailbox, because nothing happens until a human's decision reaches the apply step. Both env vars are optional and independent of `OUTLOOK_TIDY_MAILBOXES` — the two features can have shared inboxes at different rollout stages (e.g. `hello@` in scope here before it's live in the tidy cron).
 
 ## Gotchas
 
@@ -67,6 +68,8 @@ Use the `sync-partnerships` skill (`.claude/skills/sync-partnerships/SKILL.md`) 
 | `.claude/skills/sync-partnerships/SKILL.md` | The on-demand, checkpointed procedure a founder invokes |
 
 ## Last touched
+
+2026-09-14 — Added forward+archive after a confirmed decision (see Design decisions above): `apply-outlook-findings.mjs` now forwards to `OUTLOOK_PARTNERSHIP_FORWARD_TO` and archives from `OUTLOOK_PARTNERSHIP_ARCHIVE_MAILBOXES`-listed mailboxes on `create`/`update`. Required adding `messageId` to the finding object in `scan-outlook-partnerships.mjs` (it previously only used `msg.id` internally to compute `findingId`, never stored it) — a scan report from before this change has no `messageId`, so applying against an old report just skips the forward/archive step with a warning rather than failing.
 
 2026-09-14 — Initial build + first real test run (30-day scan, own mailbox), then a full real apply run (5 partners created: Track & Field, Chio Studio, FLÉX, NX Dynamics, Wanderlust). Fixes made along the way:
 - Scripts were missing `await notion.initialize()` (every `dsId()` call throws without it — same requirement as the `test-*.mjs` scripts).

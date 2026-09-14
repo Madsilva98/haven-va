@@ -164,6 +164,7 @@ async function main() {
 
       const finding = {
         findingId: findingId(mailbox, msg.id),
+        messageId: msg.id,
         mailbox,
         from: msg.from,
         to: msg.to,
