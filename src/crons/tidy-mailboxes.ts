@@ -22,13 +22,20 @@
  * sanity-check behavior on real inbox content before trusting it live.
  *
  * Cost note: every message left in the Inbox (needs a reply) gets tagged
- * with the TIDY_CATEGORY Outlook category and is skipped on every
- * subsequent run without calling Claude or re-forwarding anything — this
- * cron only ever pays for genuinely new arrivals, not for re-litigating
- * the same still-open thread every single run. On top of that,
- * known pure-notification senders (DEFAULT_AUTO_ARCHIVE_SENDERS, extend via
- * TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS) skip the Haiku call AND the invoice
- * check entirely — archived on sender match alone.
+ * with a dated "TidyBot: revisto YYYY-MM-DD" Outlook category and is
+ * skipped on every subsequent run without calling Claude or re-forwarding
+ * anything — this cron only ever pays for genuinely new arrivals, not for
+ * re-litigating the same still-open thread every single run. On top of
+ * that, known pure-notification senders (DEFAULT_AUTO_ARCHIVE_SENDERS,
+ * extend via TIDY_MAILBOXES_AUTO_ARCHIVE_SENDERS) skip the Haiku call AND
+ * the invoice check entirely — archived on sender match alone.
+ *
+ * The tag isn't permanent, though: once it's older than
+ * TIDY_MAILBOXES_RECHECK_AFTER_DAYS (default 7), the message is treated as
+ * due for a fresh look rather than skipped — a "needs action" verdict from
+ * a week ago might be stale (e.g. resolved outside email entirely, on a
+ * vendor's own platform), and nothing else would ever prompt a re-check
+ * without a human manually removing the tag.
  */
 
 import { classifyMailboxThread } from "../bot/classify-mailbox-thread.js";
@@ -43,7 +50,34 @@ import type { OutlookAttachment, OutlookMessage } from "../lib/outlook.js";
 // human. Without this, the cron re-pays the full LLM cost (and duplicates
 // any forward) for every message still open, for as long as it stays open
 // — the real cost driver, not the one-time backlog of a first run.
-const TIDY_CATEGORY = "TidyBot: revisto";
+//
+// The date is encoded in the tag itself (not a separate state file — this
+// cron deliberately has none, see docs/knowledge-base/tidy-mailboxes.md) so
+// a stale verdict can be told apart from a fresh one and re-checked instead
+// of skipped forever.
+const TIDY_CATEGORY_PREFIX = "TidyBot: revisto";
+
+function buildTidyCategory(date = new Date()): string {
+  return `${TIDY_CATEGORY_PREFIX} ${date.toISOString().slice(0, 10)}`;
+}
+
+function findTidyCategory(categories: string[]): string | undefined {
+  return categories.find((c) => c.startsWith(TIDY_CATEGORY_PREFIX));
+}
+
+function recheckAfterDays(): number {
+  const raw = Number(process.env.TIDY_MAILBOXES_RECHECK_AFTER_DAYS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 7;
+}
+
+/** True if the tag is still "fresh" (within the recheck window) and should be skipped. */
+function isTidyCategoryFresh(tag: string): boolean {
+  const dateStr = tag.slice(TIDY_CATEGORY_PREFIX.length).trim();
+  const tagged = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(tagged.getTime())) return false; // unparseable — treat as stale, re-check rather than skip forever
+  const ageDays = (Date.now() - tagged.getTime()) / (1000 * 60 * 60 * 24);
+  return ageDays < recheckAfterDays();
+}
 
 const INVOICE_WORDS = ["fatura", "invoice", "recibo", "receipt"];
 
@@ -263,7 +297,8 @@ async function handleMessage(
 
   if (needsAction) {
     if (!dryRun) {
-      await outlook.setMessageCategories(mailbox, msg.id, [...msg.categories, TIDY_CATEGORY]);
+      const others = msg.categories.filter((c) => !c.startsWith(TIDY_CATEGORY_PREFIX));
+      await outlook.setMessageCategories(mailbox, msg.id, [...others, buildTidyCategory()]);
     }
     log.debug("tidy_mailboxes.left_in_inbox", {
       mailbox,
@@ -305,7 +340,16 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const counts = { forwarded: 0, archived: 0, autoArchived: 0, left: 0, skipped: 0, unread: 0, errors: 0 };
+  const counts = {
+    forwarded: 0,
+    archived: 0,
+    autoArchived: 0,
+    left: 0,
+    skipped: 0,
+    unread: 0,
+    rechecked: 0,
+    errors: 0,
+  };
 
   for (const mailbox of mailboxes) {
     let messages: OutlookMessage[];
@@ -322,7 +366,7 @@ export async function run(): Promise<void> {
 
     for (const msg of messages) {
       // Untouched until a human has actually opened it — no classification,
-      // no invoice-forward, no TIDY_CATEGORY tag. Once read, it's picked up
+      // no invoice-forward, no tag. Once read, it's picked up
       // fresh on the next run like any other message. This is deliberate:
       // archiving (or even just judging) something nobody has seen yet is a
       // different, riskier thing than archiving something a founder already
@@ -331,9 +375,16 @@ export async function run(): Promise<void> {
         counts.unread++;
         continue;
       }
-      if (msg.categories.includes(TIDY_CATEGORY)) {
+      const existingTag = findTidyCategory(msg.categories);
+      if (existingTag && isTidyCategoryFresh(existingTag)) {
         counts.skipped++;
         continue;
+      }
+      if (existingTag) {
+        // Tag is stale (older than TIDY_MAILBOXES_RECHECK_AFTER_DAYS) —
+        // don't skip, but do count it separately so the summary shows how
+        // much of a run's work is a re-check vs. a genuinely new message.
+        counts.rechecked++;
       }
       try {
         const outcome = await handleMessage(mailbox, msg, forwardTo);
