@@ -97,6 +97,40 @@ function autoArchiveSenders() {
         .filter(Boolean);
     return new Set([...DEFAULT_AUTO_ARCHIVE_SENDERS, ...extra]);
 }
+// Sender+subject combo rules — for senders that ALSO send things that
+// genuinely need a look (e.g. support@wellhub.com sends both these signup
+// nags AND the real Wellhub partnership negotiation thread), so the sender
+// alone isn't a safe enough signal — the subject narrows it to only the
+// specific automated pattern. All conditions in a rule must match (sender
+// AND subject); any one rule matching is enough to archive.
+const AUTO_ARCHIVE_RULES = [
+    {
+        description: "Wellhub/ClassPass automated signup reminder",
+        senderContainsAny: ["wellhub.com", "gympass.com", "classpass.com"],
+        subjectContainsAny: ["assine"],
+    },
+    {
+        description: "Kenko Luna approvals pending notification",
+        senderContainsAny: ["bookeeapp.com"],
+        subjectContainsAny: ["luna approvals pending"],
+    },
+    {
+        description: "Kenko AI new-message notification",
+        senderContainsAny: ["bookeeapp.com"],
+        subjectContainsAny: ["new message from"],
+    },
+];
+function matchingAutoArchiveRule(fromEmail, subject) {
+    const from = fromEmail.toLowerCase();
+    const subj = subject.toLowerCase();
+    for (const rule of AUTO_ARCHIVE_RULES) {
+        const senderMatch = rule.senderContainsAny.some((s) => from.includes(s.toLowerCase()));
+        const subjectMatch = rule.subjectContainsAny.some((s) => subj.includes(s.toLowerCase()));
+        if (senderMatch && subjectMatch)
+            return rule;
+    }
+    return null;
+}
 function isDryRun() {
     return process.env.TIDY_MAILBOXES_DRY_RUN === "true";
 }
@@ -128,6 +162,23 @@ async function handleMessage(mailbox, msg, forwardTo) {
             messageId: msg.id,
             subject: msg.subject,
             from: msg.from.email,
+            rule: "exact sender match",
+        });
+        outcome.archived = true;
+        outcome.autoArchived = true;
+        return outcome;
+    }
+    const matchedRule = matchingAutoArchiveRule(msg.from.email, msg.subject);
+    if (matchedRule) {
+        if (!dryRun) {
+            await outlook.archiveMessage(mailbox, msg.id);
+        }
+        log.info(dryRun ? "tidy_mailboxes.would_auto_archive" : "tidy_mailboxes.auto_archived", {
+            mailbox,
+            messageId: msg.id,
+            subject: msg.subject,
+            from: msg.from.email,
+            rule: matchedRule.description,
         });
         outcome.archived = true;
         outcome.autoArchived = true;
