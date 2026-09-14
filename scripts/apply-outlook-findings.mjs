@@ -35,19 +35,14 @@
  *   re-syncing. Notas is deliberately left untouched (not auto-filled).
  * - skip: no-op, just marks the finding reviewed.
  *
- * After a successful create/update (never on skip), if the finding's
- * mailbox is listed in OUTLOOK_PARTNERSHIP_ARCHIVE_MAILBOXES, the original
- * email is also forwarded to OUTLOOK_PARTNERSHIP_FORWARD_TO and archived
- * from that mailbox — clearing confirmed partner emails out of the shared
- * inboxes (geral@/hello@) once they've been reviewed and registered, same
- * forward+archive Graph calls tidy-mailboxes.ts uses for invoices. Scoped
- * to specific mailboxes (not every mailbox the scan covers) because a
- * personal mailbox (`me`, a colleague's) isn't something this pipeline
- * should be silently moving mail around in — only the shared team inboxes
- * where "someone reviewed and archived it" is the expected norm. Both env
- * vars are optional; leaving OUTLOOK_PARTNERSHIP_FORWARD_TO unset disables
- * this step entirely (existing behavior — create/update only) rather than
- * failing.
+ * After a successful create/update (never on skip), the original email is
+ * also forwarded to OUTLOOK_PARTNERSHIP_FORWARD_TO and archived from
+ * whichever configured mailbox it came from — clearing confirmed partner
+ * emails out of every mailbox this pipeline scans (personal or shared)
+ * once they've been reviewed and registered, same forward+archive Graph
+ * calls tidy-mailboxes.ts uses for invoices. Leaving
+ * OUTLOOK_PARTNERSHIP_FORWARD_TO unset disables this step entirely
+ * (existing behavior — create/update only) rather than failing.
  *
  * See docs/knowledge-base/outlook-partnerships-sync.md.
  */
@@ -113,19 +108,9 @@ async function applyBodySections(pageId, bodySections) {
   }
 }
 
-function archiveMailboxes() {
-  return new Set(
-    (process.env.OUTLOOK_PARTNERSHIP_ARCHIVE_MAILBOXES ?? "")
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
 async function forwardAndArchiveIfConfigured(finding) {
   const forwardTo = process.env.OUTLOOK_PARTNERSHIP_FORWARD_TO;
   if (!forwardTo) return;
-  if (!archiveMailboxes().has(finding.mailbox.toLowerCase())) return;
   if (!finding.messageId) {
     console.error(
       `    ⚠ no messageId on this finding (from a scan run before this feature existed) — re-scan to pick it up. Not forwarded/archived.`,
