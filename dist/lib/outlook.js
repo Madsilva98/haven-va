@@ -151,7 +151,7 @@ async function graphFetch(url, extraHeaders = {}, attempt = 1) {
     }
     return res;
 }
-const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories";
+const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead";
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
 // otherwise have to strip ourselves.
@@ -180,6 +180,10 @@ function mapGraphMessage(m, mailbox) {
         webLink: m.webLink ?? "",
         hasAttachments: m.hasAttachments ?? false,
         categories: m.categories ?? [],
+        // Defaults to false (treated as unread → skipped) rather than true if
+        // Graph ever omits this field — matching this whole feature's fail
+        // toward inaction, not toward a mutation.
+        isRead: m.isRead ?? false,
     };
 }
 async function fetchAllMessages(startUrl, mailbox) {

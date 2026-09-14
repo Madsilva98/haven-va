@@ -33,6 +33,7 @@ export interface OutlookMessage {
   webLink: string;
   hasAttachments: boolean;
   categories: string[];
+  isRead: boolean;
 }
 
 export interface OutlookAttachment {
@@ -223,6 +224,7 @@ interface GraphMessage {
   webLink?: string | null;
   hasAttachments?: boolean | null;
   categories?: string[] | null;
+  isRead?: boolean | null;
 }
 
 interface GraphMessagesPage {
@@ -231,7 +233,7 @@ interface GraphMessagesPage {
 }
 
 const MESSAGE_SELECT =
-  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories";
+  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead";
 
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
@@ -263,6 +265,10 @@ function mapGraphMessage(m: GraphMessage, mailbox: string): OutlookMessage {
     webLink: m.webLink ?? "",
     hasAttachments: m.hasAttachments ?? false,
     categories: m.categories ?? [],
+    // Defaults to false (treated as unread → skipped) rather than true if
+    // Graph ever omits this field — matching this whole feature's fail
+    // toward inaction, not toward a mutation.
+    isRead: m.isRead ?? false,
   };
 }
 

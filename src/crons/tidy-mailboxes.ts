@@ -9,6 +9,10 @@
  * anything). See docs/knowledge-base/tidy-mailboxes.md for the design,
  * the fail-safe defaults, and how to audit what it's done.
  *
+ * Unread messages are untouched entirely — no classification, no invoice
+ * forward, no category tag — until a human has actually opened them. Once
+ * read, they're picked up fresh on the very next run.
+ *
  * Gracefully disabled if OUTLOOK_TIDY_MAILBOXES or the Microsoft/Outlook
  * env vars aren't set — same pattern as every other optional feature here.
  *
@@ -232,7 +236,7 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const counts = { forwarded: 0, archived: 0, autoArchived: 0, left: 0, skipped: 0, errors: 0 };
+  const counts = { forwarded: 0, archived: 0, autoArchived: 0, left: 0, skipped: 0, unread: 0, errors: 0 };
 
   for (const mailbox of mailboxes) {
     let messages: OutlookMessage[];
@@ -248,6 +252,16 @@ export async function run(): Promise<void> {
     }
 
     for (const msg of messages) {
+      // Untouched until a human has actually opened it — no classification,
+      // no invoice-forward, no TIDY_CATEGORY tag. Once read, it's picked up
+      // fresh on the next run like any other message. This is deliberate:
+      // archiving (or even just judging) something nobody has seen yet is a
+      // different, riskier thing than archiving something a founder already
+      // looked at, even if an LLM would judge the content the same either way.
+      if (!msg.isRead) {
+        counts.unread++;
+        continue;
+      }
       if (msg.categories.includes(TIDY_CATEGORY)) {
         counts.skipped++;
         continue;
