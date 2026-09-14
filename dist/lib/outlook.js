@@ -151,7 +151,7 @@ async function graphFetch(url, extraHeaders = {}, attempt = 1) {
     }
     return res;
 }
-const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead";
+const MESSAGE_SELECT = "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime";
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
 // otherwise have to strip ourselves.
@@ -184,6 +184,7 @@ function mapGraphMessage(m, mailbox) {
         // Graph ever omits this field — matching this whole feature's fail
         // toward inaction, not toward a mutation.
         isRead: m.isRead ?? false,
+        lastModifiedDateTime: m.lastModifiedDateTime ?? m.receivedDateTime,
     };
 }
 async function fetchAllMessages(startUrl, mailbox) {
