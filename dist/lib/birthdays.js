@@ -3,10 +3,61 @@
  * table. Year-agnostic: matches month+day of date_of_birth against a
  * reference date or range.
  *
+ * Only customers with an active membership or active credit pack are
+ * included — kenko_customers has no active/inactive flag of its own and
+ * includes Leads alongside real customers, so without this filter the
+ * digest would wish happy birthday to leads and churned customers too
+ * (confirmed for real, 2026-09-16 — see docs/knowledge-base/
+ * bot-architecture.md). Active intro-pack holders are a real third
+ * category the founders want included too, but the only source for that
+ * (a Supabase view keyed by an opaque member_id with no discoverable
+ * mapping back to contact_email/kenko_customers) can't be joined against
+ * anything else in this database — deliberately deferred, not forgotten.
+ *
  * Used by the daily birthdays cron — see src/crons/birthdays.ts.
  */
 import { log } from "./log.js";
 import { studioSupabase } from "./studio-supabase.js";
+// membership_type values seen on kenko_memberships besides these two:
+// null (used for add-on "Top-up" packs, not a standalone active state —
+// deliberately excluded, not an oversight).
+const ACTIVE_MEMBERSHIP_TYPES = ["Subscription", "Credit pack"];
+/**
+ * Every contact_email with a currently active membership (recurring
+ * subscription or a standalone "Subscription"-type membership row) or an
+ * active credit pack, lowercased. Two tables because kenko_subscriptions
+ * (billing/recurring) and kenko_memberships (broader grant records,
+ * including credit packs) aren't the same data — a Set naturally
+ * dedupes any real overlap between them.
+ */
+async function fetchActiveContactEmails() {
+    if (!studioSupabase)
+        return new Set();
+    const [subs, memberships] = await Promise.all([
+        studioSupabase.from("kenko_subscriptions").select("contact_email").eq("subscription_status", "Active"),
+        studioSupabase
+            .from("kenko_memberships")
+            .select("contact_email")
+            .eq("membership_status", "Active")
+            .in("membership_type", ACTIVE_MEMBERSHIP_TYPES),
+    ]);
+    if (subs.error) {
+        throw new Error(`Studio Supabase active-subscriptions query failed: ${subs.error.message}`);
+    }
+    if (memberships.error) {
+        throw new Error(`Studio Supabase active-memberships query failed: ${memberships.error.message}`);
+    }
+    const emails = new Set();
+    for (const row of subs.data ?? []) {
+        if (row.contact_email)
+            emails.add(row.contact_email.toLowerCase());
+    }
+    for (const row of memberships.data ?? []) {
+        if (row.contact_email)
+            emails.add(row.contact_email.toLowerCase());
+    }
+    return emails;
+}
 /**
  * Returns the birthdays falling between `from` (inclusive) and
  * `from + daysAhead` (inclusive), sorted by daysUntil ascending.
@@ -33,8 +84,10 @@ export async function fetchUpcomingBirthdays(from, daysAhead) {
         log.error("birthdays.query_failed", { message: error.message, code: error.code });
         throw new Error(`Studio Supabase query failed: ${error.message}`);
     }
-    const rows = (data ?? []);
-    log.debug("birthdays.rows_fetched", { count: rows.length });
+    const allRows = (data ?? []);
+    const activeEmails = await fetchActiveContactEmails();
+    const rows = allRows.filter((r) => activeEmails.has(r.contact_email.toLowerCase()));
+    log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length });
     return filterUpcomingBirthdays(rows, from, daysAhead);
 }
 /**
