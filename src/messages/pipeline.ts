@@ -7,61 +7,8 @@
 
 import type {
   ContentCalendarNeedsSchedulingRow,
-  InfluencerRow,
-  PartnerRow,
   ReminderRow,
 } from "../types.js";
-
-function statusOrDash(s: string | null | undefined): string {
-  return s && s.trim().length > 0 ? s.toLowerCase() : "—";
-}
-
-function quoteDraft(draft: string): string {
-  // Telegram-friendly blockquote-ish formatting using "> " line prefix.
-  const trimmed = draft.trim();
-  if (trimmed.length === 0) return "";
-  return trimmed
-    .split(/\r?\n/)
-    .map((line) => `> ${line}`)
-    .join("\n");
-}
-
-export function formatPartnerAlert(
-  row: PartnerRow,
-  daysSinceContact: number,
-  suggestedFollowup: string,
-): string {
-  const lines: string[] = [];
-  lines.push(`🤝 parceria parada: ${row.nome}`);
-  lines.push(`status: ${statusOrDash(row.status)} · ${daysSinceContact}d sem contacto`);
-  if (row.proximoPasso && row.proximoPasso.trim().length > 0) {
-    lines.push(`próximo passo: ${row.proximoPasso}`);
-  }
-  lines.push("");
-  lines.push("sugestão de follow-up:");
-  lines.push(quoteDraft(suggestedFollowup));
-  return lines.join("\n");
-}
-
-export function formatInfluencerAlert(
-  row: InfluencerRow,
-  daysSinceContact: number,
-  suggestedFollowup: string,
-): string {
-  const lines: string[] = [];
-  const handle = row.instagram ? ` (${row.instagram})` : "";
-  lines.push(`📸 influencer parada: ${row.nome}${handle}`);
-  lines.push(
-    `status: ${statusOrDash(row.status)} · ${daysSinceContact}d sem contacto`,
-  );
-  if (row.proximoPasso && row.proximoPasso.trim().length > 0) {
-    lines.push(`próximo passo: ${row.proximoPasso}`);
-  }
-  lines.push("");
-  lines.push("sugestão de follow-up:");
-  lines.push(quoteDraft(suggestedFollowup));
-  return lines.join("\n");
-}
 
 export function formatContentAlert(
   rows: ContentCalendarNeedsSchedulingRow[],

@@ -163,6 +163,14 @@ sudo docker compose build --no-cache && sudo docker compose up -d
 
 Or, faster, redeploy the previous image without rebuilding — but `docker-compose.yml` uses `build:` not `image:`, so there's no image registry to roll back to. Practically: rollback = git checkout + rebuild.
 
+## Known-missing credential: Studio Supabase
+
+`STUDIO_SUPABASE_URL` / `STUDIO_SUPABASE_KEY` are **not set** in the NAS `.env` (confirmed 2026-09-15 via container logs — `studio_supabase.disabled` fires at every boot). The birthday cron (`src/crons/birthdays.ts`, see `bot-architecture.md` outbound-messages row 8) has therefore never sent anything.
+
+⚠️ **Do not just add the credentials to the current deployed image.** Doing exactly that on 2026-09-15 crashed the bot at startup — `@supabase/supabase-js`'s `createClient()` always builds a `RealtimeClient` internally, which throws on Node 20 without a WebSocket implementation. Fixed in code (`src/lib/studio-supabase.ts` now passes the `ws` package as `realtime.transport` — see `bot-architecture.md`'s Last-touched log for 2026-09-15), but that fix has to actually be **deployed** (`git pull && npm run build && sudo docker compose build --no-cache && sudo docker compose up -d`) before the credentials go back in, or the same crash repeats. Sequence: 1) deploy the code fix, 2) confirm the bot is up and healthy on the *old* (still-missing-credentials) config, 3) only then add `STUDIO_SUPABASE_URL`/`STUDIO_SUPABASE_KEY` to `/volume1/docker/haven-va/data/.env`, 4) `docker compose up -d --force-recreate` (per the "`.env` changes don't reload" gotcha above — a plain `restart` won't pick them up), 5) verify with `docker logs haven-va-haven-va-1 | grep studio_supabase` — should read `studio_supabase.configured`, not `.disabled`, with no crash after it.
+
+The project is likely `leddqmselxsjamlvxvyk` (there's already an MCP connector named `haven-studio-supabase` configured against that project ref on this machine) — get the Project URL + the "Publishable key" (Settings → API Keys in the Supabase dashboard; newer projects split this off from the old combined "API" settings page) from there.
+
 ## Secret hygiene
 
 The container's **General** tab in DSM shows every env var in plaintext. **Do not screenshot it. Do not paste env var values into chat.** If a token leaks (incident on 2026-05-15: NOTION_TOKEN for `family-va` was visible in a screenshot during this knowledge-base session), rotate:
@@ -176,6 +184,10 @@ The container's **General** tab in DSM shows every env var in plaintext. **Do no
 **Second incident, 2026-09-14**: `MICROSOFT_CLIENT_SECRET` was printed into a tool output while checking a NAS `.env` file for duplicate entries after appending new env vars — a plain `grep` of the file echoed the full line, secret value included, into a visible result. Rotated same-session (new secret generated, both `.env.local` and the NAS `.env` updated without echoing the value back, verified with a real authenticated Graph call before deleting the old secret). Lesson now baked into the `rotate-secret` skill's Microsoft/Outlook section: never `grep`/`cat` a secret-bearing line to "just check" something — use a count or existence check (`grep -c`) instead, even for routine verification, not just during the rotation itself.
 
 ## Last touched
+
+2026-09-15 — Updated after a real incident: adding the Studio Supabase credentials to the live (pre-fix) NAS deployment crashed the bot (see the warning in the section above and `bot-architecture.md`'s Last-touched log). Recovered by removing the env vars and recreating the container. The actual code fix (`ws` transport) is written and tested locally but **not yet deployed to the NAS** — documented the correct order of operations (deploy fix first, add credentials after) so this doesn't repeat.
+
+2026-09-15 — Confirmed and documented that `STUDIO_SUPABASE_URL`/`STUDIO_SUPABASE_KEY` are missing from the NAS `.env`, via `studio_supabase.disabled` in the container logs — root cause of the birthday cron never sending anything. Not yet fixed (needs real credentials from the founder).
 
 2026-09-14 — Logged the MICROSOFT_CLIENT_SECRET exposure incident and its rotation.
 

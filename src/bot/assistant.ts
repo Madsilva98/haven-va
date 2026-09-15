@@ -585,7 +585,7 @@ async function execCreateReminder(
     targets.map((paraQuem) =>
       notion.createReminder({
         texto: text,
-        paraQuem,
+        paraQuem: [paraQuem],
         quando,
         origem: ctx.message?.text ?? "",
         recurrence,

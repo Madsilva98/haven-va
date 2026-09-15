@@ -14,9 +14,6 @@
 export function escapeMd(s) {
     return s.replace(/[_*\[\]()~`>#+\-=|{}.!\\]/g, (m) => `\\${m}`);
 }
-function indent(line) {
-    return `  ${line}`;
-}
 function fmtTask(t) {
     const title = escapeMd(t.title);
     const owner = escapeMd(t.owner);
@@ -36,16 +33,6 @@ function fmtTaskNoOwner(t) {
         parts.push(escapeMd(t.deadline));
     const tail = parts.length ? ` \\(${parts.join(", ")}\\)` : "";
     return `• ${title}${tail}`;
-}
-function groupByOwner(tasks) {
-    const map = new Map();
-    for (const t of tasks) {
-        const key = t.owner;
-        const arr = map.get(key) ?? [];
-        arr.push(t);
-        map.set(key, arr);
-    }
-    return map;
 }
 export function formatFridayBalance(args) {
     const lines = [];
@@ -89,44 +76,6 @@ export function formatFridayBalance(args) {
             lines.push(fmtTask(t));
         if (args.overdue.length > 10) {
             lines.push(escapeMd(`... +${args.overdue.length - 10} outras`));
-        }
-    }
-    return lines.join("\n");
-}
-export function formatWeekendBrief(args) {
-    const lines = [];
-    lines.push(`*preparação para a reunião — ${escapeMd(args.weekLabel)}*`);
-    lines.push("");
-    lines.push("*foco operacional desta semana*");
-    if (args.focusByFounder.length === 0) {
-        lines.push(escapeMd("(ninguém escreveu foco)"));
-    }
-    else {
-        for (const f of args.focusByFounder) {
-            lines.push(`• ${escapeMd(f.founder)}: ${escapeMd(f.focoOperacional)}`);
-        }
-    }
-    lines.push("");
-    lines.push(`*prioridades semanais por fechar \\(${args.openTasks.length}\\)*`);
-    if (args.openTasks.length === 0) {
-        lines.push(escapeMd("nada — todas as prioridades semanais em dia"));
-    }
-    else {
-        const grouped = groupByOwner(args.openTasks);
-        for (const [owner, tasks] of grouped) {
-            lines.push(`_${escapeMd(owner)}_`);
-            for (const t of tasks.slice(0, 8))
-                lines.push(indent(fmtTaskNoOwner(t)));
-            if (tasks.length > 8) {
-                lines.push(indent(escapeMd(`... +${tasks.length - 8} outras`)));
-            }
-        }
-    }
-    if (args.toDiscuss && args.toDiscuss.length > 0) {
-        lines.push("");
-        lines.push("*para discutir*");
-        for (const td of args.toDiscuss) {
-            lines.push(`• ${escapeMd(td.tema)} — ${escapeMd(td.adicionadoPor)}`);
         }
     }
     return lines.join("\n");
@@ -187,76 +136,6 @@ export function formatWeeklyPriorities(args) {
     }
     for (const t of args.tasks) {
         lines.push(`${fmtTaskNoOwner(t)} — _${escapeMd(t.status)}_`);
-    }
-    return lines.join("\n");
-}
-// ----- Task ranking + traffic lights (shared by daily DM) -----
-const PRIORITY_RANK = { "Alta": 0, "Média": 1, "Baixa": 2 };
-export function rankTasks(tasks) {
-    return [...tasks].sort((a, b) => {
-        const pa = a.priority ? (PRIORITY_RANK[a.priority] ?? 3) : 3;
-        const pb = b.priority ? (PRIORITY_RANK[b.priority] ?? 3) : 3;
-        if (pa !== pb)
-            return pa - pb;
-        const da = a.deadline ?? "9999-12-31";
-        const db = b.deadline ?? "9999-12-31";
-        return da < db ? -1 : da > db ? 1 : 0;
-    });
-}
-export function trafficLight(task) {
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
-    if (task.deadline && task.deadline <= today)
-        return "red";
-    if (task.priority === "Alta")
-        return "yellow";
-    return "green";
-}
-const LIGHT_EMOJI = {
-    red: "🔴",
-    yellow: "🟡",
-    green: "🟢",
-};
-export function formatDailyDM(args) {
-    const lines = [];
-    lines.push(`Bom dia, ${escapeMd(args.founder)}\\!`);
-    lines.push("");
-    if (args.tasks.length === 0) {
-        lines.push(escapeMd("nada no backlog — descansa um bocado"));
-        return lines.join("\n");
-    }
-    const reds = args.tasks.filter((t) => trafficLight(t) === "red");
-    const yellows = args.tasks.filter((t) => trafficLight(t) === "yellow");
-    const medias = args.tasks.filter((t) => trafficLight(t) === "green" && t.priority === "Média");
-    if (reds.length > 0) {
-        lines.push("🔴 *atrasadas / hoje*");
-        for (const t of reds) {
-            const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
-            lines.push(`• ${escapeMd(t.title)}${deadline}`);
-        }
-        lines.push("");
-    }
-    if (yellows.length > 0) {
-        lines.push("🟡 *alta prioridade*");
-        for (const t of yellows) {
-            const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
-            lines.push(`• ${escapeMd(t.title)}${deadline}`);
-        }
-        lines.push("");
-    }
-    if (medias.length > 0) {
-        lines.push("*média prioridade*");
-        for (const t of medias) {
-            const deadline = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
-            lines.push(`• ${escapeMd(t.title)}${deadline}`);
-        }
-        lines.push("");
-    }
-    const emCurso = args.tasks.filter((t) => t.status === "Em curso" && trafficLight(t) === "green" && t.priority !== "Média");
-    if (emCurso.length > 0) {
-        lines.push("*em curso*");
-        for (const t of emCurso) {
-            lines.push(`• ${escapeMd(t.title)}`);
-        }
     }
     return lines.join("\n");
 }

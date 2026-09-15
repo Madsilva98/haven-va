@@ -202,16 +202,6 @@ function readSelectName(prop) {
     }
     return null;
 }
-function readMultiSelectFirst(prop) {
-    if (prop &&
-        typeof prop === "object" &&
-        "multi_select" in prop &&
-        Array.isArray(prop.multi_select)) {
-        const first = prop.multi_select[0];
-        return first?.name ?? null;
-    }
-    return null;
-}
 function readStatusName(prop) {
     if (prop &&
         typeof prop === "object" &&
@@ -272,16 +262,6 @@ function readUrl(prop) {
 function readDateTime(prop) {
     // Same as readDateStart but kept for clarity
     return readDateStart(prop);
-}
-function readFormulaString(prop) {
-    if (prop &&
-        typeof prop === "object" &&
-        "formula" in prop &&
-        prop.formula &&
-        typeof prop.formula === "object") {
-        return prop.formula.string ?? null;
-    }
-    return null;
 }
 function readNumber(prop) {
     if (prop &&
@@ -801,11 +781,16 @@ async function getWeeklyPriorities(week) {
         for (const row of res.results) {
             if (!("properties" in row))
                 continue;
-            // Match by Semana formula string
+            // No "created this week" check here on purpose: "Semana" is a formula
+            // frozen at task creation (concat("Semana ", formatDate(prop("Criado
+            // em"), "W")) — see scripts/setup-notion-dbs.mjs), not "week this
+            // priority applies to". Nothing ever clears "Prioridade semanal"
+            // between weeks either, so a real ongoing priority created in an
+            // earlier week used to vanish from every weekly digest and from
+            // /week the moment the calendar rolled over — even though it was
+            // still flagged and still open. The checkbox + open status is
+            // already the correct "current weekly priorities" filter on its own.
             const props = row.properties;
-            const semana = readFormulaString(props["Semana"]);
-            if (semana !== null && semana !== week)
-                continue;
             tasks.push(rowToOpenTask({ id: row.id, properties: props }));
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -1158,113 +1143,35 @@ async function editFounderFocusBodyItem(pageId, searchText, newText) {
     }));
     log.info("notion.founder_focus_body_item_edited", { pageId, blockId: match.id });
 }
-// ============================================================
-// Phase 3 — Partners / Influencers / Content / Reminders
-// ============================================================
-const PARTNER_NO_RESPONSE_DAYS = 7;
-const PARTNER_NO_PROGRESS_DAYS = 3;
-function daysAgo(n) {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - n);
-    return d.toISOString().slice(0, 10);
-}
-async function getPartnersStale(category) {
+// Every partner's id/name/email, no filter — used by scan-outlook-partnerships.mjs
+// to match an incoming sender against a KNOWN partner by email/domain, instead of
+// guessing a name and fuzzy-matching titles. Full cursor loop, not the unpaginated
+// SMALL_DBS shortcut used elsewhere for this DB — a matching table that decides
+// identity shouldn't silently truncate past 100 rows.
+async function getAllPartnerContacts() {
     if (!NOTION_PARTNER_DB_ID) {
-        throw new Error("NOTION_PARTNER_DB_ID not set — Phase 3 partner features disabled");
+        throw new Error("NOTION_PARTNER_DB_ID not set");
     }
-    const cutoff = category === "no_response"
-        ? daysAgo(PARTNER_NO_RESPONSE_DAYS)
-        : daysAgo(PARTNER_NO_PROGRESS_DAYS);
-    const statusFilter = category === "no_response"
-        ? {
-            or: [
-                { property: "Status", select: { equals: "Contactado" } },
-                { property: "Status", select: { equals: "A aguardar resposta" } },
-            ],
-        }
-        : { property: "Status", select: { equals: "Em negociação" } };
     const rows = [];
     let cursor;
     do {
-        const res = await withRetry("getPartnersStale", () => client.dataSources.query({
+        const res = await withRetry("getAllPartnerContacts", () => client.dataSources.query({
             data_source_id: dsId(NOTION_PARTNER_DB_ID),
-            filter: {
-                and: [
-                    statusFilter,
-                    { property: "Último contacto", date: { before: cutoff } },
-                ],
-            },
             start_cursor: cursor,
         }));
         for (const row of res.results) {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            const cat = readSelectName(props["Categoria"]);
-            const status = readStatusOrSelectName(props["Status"]);
             rows.push({
                 id: row.id,
-                nome: readPlainText(props["Name"]),
-                categoria: cat,
-                owner: (readSelectName(props["Owner"]) ?? "Unassigned"),
-                status,
-                ultimoContacto: readDateStart(props["Último contacto"]),
-                proximoPasso: readPlainText(props["Próximo passo"]),
-                notas: readPlainText(props["Notas"]),
+                name: readPlainText(props["Name"]),
+                email: props["Email"]?.email ?? null,
             });
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
-    log.debug("notion.partners_stale_fetched", { category, count: rows.length });
-    return rows;
-}
-const INFLUENCER_NO_RESPONSE_DAYS = 7;
-const INFLUENCER_NO_PROGRESS_DAYS = 3;
-async function getInfluencersStale(category) {
-    if (!NOTION_INFLUENCER_DB_ID) {
-        throw new Error("NOTION_INFLUENCER_DB_ID not set — Phase 3 influencer features disabled");
-    }
-    const cutoff = category === "no_response"
-        ? daysAgo(INFLUENCER_NO_RESPONSE_DAYS)
-        : daysAgo(INFLUENCER_NO_PROGRESS_DAYS);
-    // Influencer does not have a literal "A aguardar resposta" status; map
-    // "no_response" → Contactado (no reply), "no_progress" → Em conversa stalled.
-    const statusFilter = category === "no_response"
-        ? { property: "Status", select: { equals: "Contactado" } }
-        : { property: "Status", select: { equals: "Em conversa" } };
-    const rows = [];
-    let cursor;
-    do {
-        const res = await withRetry("getInfluencersStale", () => client.dataSources.query({
-            data_source_id: dsId(NOTION_INFLUENCER_DB_ID),
-            filter: {
-                and: [
-                    statusFilter,
-                    { property: "Último contacto", date: { before: cutoff } },
-                ],
-            },
-            start_cursor: cursor,
-        }));
-        for (const row of res.results) {
-            if (!("properties" in row))
-                continue;
-            const props = row.properties;
-            const status = readStatusOrSelectName(props["Status"]);
-            rows.push({
-                id: row.id,
-                nome: readPlainText(props["Name"]),
-                instagram: readUrl(props["Instagram"]),
-                owner: (readSelectName(props["Owner"]) ?? "Unassigned"),
-                status,
-                ultimoContacto: readDateStart(props["Último contacto"]),
-                proximoPasso: readPlainText(props["Próximo passo"]),
-                notas: readPlainText(props["Notas"]),
-                origem: readPlainText(props["Origem"]),
-            });
-        }
-        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
-    } while (cursor);
-    log.debug("notion.influencers_stale_fetched", { category, count: rows.length });
+    log.debug("notion.all_partner_contacts_fetched", { count: rows.length });
     return rows;
 }
 // Alerts founders when a content-calendar item is due to publish within
@@ -1326,7 +1233,7 @@ async function createReminder(r, taskPageId) {
     }
     const properties = {
         Reminder: { title: [{ text: { content: r.texto.slice(0, 80) } }] },
-        "Para quem": { multi_select: [{ name: r.paraQuem }] },
+        "Para quem": { multi_select: r.paraQuem.map((name) => ({ name })) },
         Quando: { date: { start: r.quando } },
         Origem: richText(r.origem),
         Enviado: { checkbox: false },
@@ -1375,12 +1282,9 @@ async function getDueReminders() {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            const paraQuem = readMultiSelectFirst(props["Para quem"]);
-            if (paraQuem !== "Madalena" &&
-                paraQuem !== "Mafalda" &&
-                paraQuem !== "Beatriz") {
+            const paraQuem = readMultiSelectNames(props["Para quem"]).filter((n) => n === "Madalena" || n === "Mafalda" || n === "Beatriz");
+            if (paraQuem.length === 0)
                 continue;
-            }
             const recurrenceRaw = readSelectName(props["Recorrência"]);
             let recurrence;
             if (recurrenceRaw == null) {
@@ -2222,7 +2126,7 @@ export { createTask, updateTask, getOpenTasks, invalidateOpenTasksCache, archive
 // Phase 2
 getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince, getWeeklyOverdueTasks, setFounderFocus, getFounderFocusForWeek, getActiveFounderFocuses, getOrCreateFounderFocusRow, getFounderFocusRow, setFounderFocusCumprido, rolloverFounderFocusWeek, appendFounderFocusBody, editFounderFocusBodyItem, 
 // Phase 3
-getPartnersStale, getInfluencersStale, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
+getAllPartnerContacts, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Dependencies
@@ -2261,8 +2165,7 @@ export const notion = {
     appendFounderFocusBody,
     editFounderFocusBodyItem,
     // Phase 3
-    getPartnersStale,
-    getInfluencersStale,
+    getAllPartnerContacts,
     getContentCalendarNeedsScheduling,
     createReminder,
     getDueReminders,

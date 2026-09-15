@@ -27,7 +27,7 @@ Lembrete a repetir-se duas vezes na mesma janela de 5 min → falta de mutex na 
 ## Mensagem rejeitada pelo Telegram (brief semanal/dashboard não chega)
 
 Duas causas conhecidas (`knowledge-base/failure-modes-2026-05-15.md`, secção High):
-- **Texto >4096 caracteres** — Telegram rejeita com HTTP 400. As crons semanais (`weekend-brief`, `friday-balance`, `monday-priorities`) constroem mensagens a partir de resultados Notion sem limite superior; se o backlog crescer muito, isto pode acontecer.
+- **Texto >4096 caracteres** — Telegram rejeita com HTTP 400. As crons semanais (`week-balance` — renomeada de `friday-balance` a 2026-09-15 —, `weekly-priorities` — renomeada de `monday-priorities` a 2026-09-15; `weekend-brief` foi removida a 2026-09-15) constroem mensagens a partir de resultados Notion sem limite superior; se o backlog crescer muito, isto pode acontecer. Verificado a 2026-09-15 contra o volume real (≤10 tasks abertas): não é um risco prático hoje, mas o código continua sem limite explícito.
 - **Caracteres MarkdownV2 não escapados** — título ou texto de foco com `(`, `)`, `.`, `-`, `!`, `+`, `=` que não passou por `escapeMd` (`src/messages/cycle.ts`) faz o Telegram rejeitar a mensagem inteira.
 
 Diagnóstico: procura `error` nos logs perto da hora agendada da cron em causa.

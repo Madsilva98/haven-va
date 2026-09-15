@@ -43,3 +43,12 @@ export function fridayOf(date: Date = new Date()): Date {
   friday.setDate(monday.getDate() + 4);
   return friday;
 }
+
+/** Sunday 23:59:59.999 Europe/Lisbon for the week containing `date`. */
+export function sundayOf(date: Date = new Date()): Date {
+  const monday = mondayOf(date);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return sunday;
+}

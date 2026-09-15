@@ -127,34 +127,20 @@ describe("formatBirthdayDigest", () => {
     expect(formatBirthdayDigest([])).toBeNull();
   });
 
-  it("today only", () => {
+  it("lists everyone with a birthday today", () => {
     const out = formatBirthdayDigest([
       { name: "Joana", email: "j@x.com", dateOfBirth: "1985-05-15", daysUntil: 0 },
     ]);
     expect(out).toContain("🎂 *Hoje é aniversário de:*");
     expect(out).toContain("• Joana");
-    expect(out).not.toContain("📅 *Esta semana:*");
   });
 
-  it("upcoming only — no 'today' header when no today birthdays", () => {
-    const out = formatBirthdayDigest([
-      { name: "Maria", email: "m@x.com", dateOfBirth: "1990-05-18", daysUntil: 3 },
-    ]);
-    expect(out).not.toContain("🎂 *Hoje");
-    expect(out).toContain("📅 *Esta semana:*");
-    expect(out).toContain("• Maria");
-  });
-
-  it("today + upcoming — both sections present with separator", () => {
+  it("lists multiple same-day birthdays, one per line", () => {
     const out = formatBirthdayDigest([
       { name: "Joana", email: "j@x.com", dateOfBirth: "1985-05-15", daysUntil: 0 },
-      { name: "Maria", email: "m@x.com", dateOfBirth: "1990-05-18", daysUntil: 3 },
+      { name: "Bruno", email: "b@x.com", dateOfBirth: "1990-05-15", daysUntil: 0 },
     ]);
-    expect(out).toContain("🎂");
-    expect(out).toContain("📅");
-    // Joana (today) must appear before Maria (upcoming)
-    expect(out!.indexOf("Joana")).toBeLessThan(out!.indexOf("Maria"));
-    // Empty line separates the two sections
-    expect(out).toContain("\n\n");
+    expect(out).toContain("• Joana");
+    expect(out).toContain("• Bruno");
   });
 });

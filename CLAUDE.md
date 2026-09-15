@@ -75,11 +75,12 @@ Single file, ~2400 lines. Singleton `client`. All writes use `withRetry` (3 atte
 | File | Schedule | What |
 |---|---|---|
 | `reminders.ts` | every 5 min | Fetches due reminders from Notion, sends via Telegram |
-| `daily-madalena.ts` | 08:00 daily | Daily digest for Madalena |
-| `monday-priorities.ts` | 08:00 Monday | Weekly priorities message |
-| `friday-balance.ts` | 17:00 Friday | End-of-week summary |
-| `weekend-brief.ts` | 09:00 Saturday | Weekend brief |
-| `pipeline-alerts.ts` | every 4h Mon–Fri | Stale partner/influencer pipeline alerts |
+| `founder-meeting-check.ts` | 08:00 daily | Sends `weekly-priorities.ts`'s message the morning after the "Founders Meeting" calendar event, falling back to Monday if none is scheduled that week |
+| `weekly-priorities.ts` | (called by `founder-meeting-check.ts`, not scheduled directly) | Builds and sends the weekly priorities message (group + per-founder DMs) |
+| `founder-meeting-balance-check.ts` | 08:00 daily | Sends `week-balance.ts`'s message the morning OF the "Founders Meeting" calendar event, falling back to Sunday if none is scheduled that week |
+| `week-balance.ts` | (called by `founder-meeting-balance-check.ts`, not scheduled directly) | Builds and sends the end-of-week balance message (group) |
+| `pipeline-alerts.ts` | 08:00 Mon–Fri | Content-calendar-needs-scheduling alerts, to Madalena + Mafalda only (Beatriz opted out). Was every 4h and all 3 founders; narrowed to once/morning 2026-09-15. Used to also cover stale partner/influencer pipeline alerts — removed 2026-09-15, founder's call ("too much"). |
+| `birthdays.ts` | 08:00 daily | Posts to the group if any Studio Supabase `kenko_customers` row has a birthday **today** (simplified from a 7-day-ahead preview 2026-09-15). **`STUDIO_SUPABASE_URL`/`STUDIO_SUPABASE_KEY` are not set in production as of 2026-09-15** (confirmed via NAS logs: `studio_supabase.disabled`) — this cron silently no-ops every day until those are configured. Not a code bug; check `docs/knowledge-base/bot-architecture.md` before assuming otherwise. |
 | `tidy-mailboxes.ts` | 07:00 daily | Fully automatic Outlook inbox tidying (archive/forward) — disabled unless `OUTLOOK_TIDY_MAILBOXES` is set |
 
 ### Types (`src/types.ts`)
@@ -101,4 +102,4 @@ Founders identified by Telegram user ID → name via `src/lib/founders.ts`. IDs 
 
 ## Environment variables
 
-See `.env.example`. Notion DB IDs are all optional except `NOTION_BACKLOG_DB_ID` — missing IDs disable the corresponding feature gracefully. `FOUNDER_CADENCE` is a JSON object controlling cron frequency per founder.
+See `.env.example`. Notion DB IDs are all optional except `NOTION_BACKLOG_DB_ID` — missing IDs disable the corresponding feature gracefully.

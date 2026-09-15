@@ -58,19 +58,6 @@ export type PartnerStatus =
   | "Fechado"
   | "Arquivado";
 
-export type PartnerCategory = "Corporate" | "Eventos" | "Parceria";
-
-export interface PartnerRow {
-  id: string;
-  nome: string;
-  categoria: PartnerCategory | null;
-  owner: OwnerValue;
-  status: PartnerStatus | null;
-  ultimoContacto: string | null;
-  proximoPasso: string;
-  notas: string;
-}
-
 export type InfluencerStatus =
   | "A identificar"
   | "A contactar"
@@ -79,18 +66,6 @@ export type InfluencerStatus =
   | "Proposta enviada"
   | "Fechado"
   | "Arquivado";
-
-export interface InfluencerRow {
-  id: string;
-  nome: string;
-  instagram: string | null;
-  owner: OwnerValue;
-  status: InfluencerStatus | null;
-  ultimoContacto: string | null;
-  proximoPasso: string;
-  notas: string;
-  origem?: string;
-}
 
 export type ReminderRecurrence = "diária" | "semanal" | "mensal" | "anual";
 
@@ -111,7 +86,7 @@ export function isValidRecurrence(value: unknown): value is ReminderRecurrence {
 export interface ReminderRow {
   id: string;
   texto: string;
-  paraQuem: FounderName;
+  paraQuem: FounderName[];
   quando: string; // ISO datetime
   origem: string; // original message
   enviado: boolean;

@@ -1,3 +1,12 @@
+/**
+ * Builds and sends the weekly priorities message (group post + per-founder
+ * DMs) right now. Used to be a fixed Monday-08:00 cron; as of 2026-09 the
+ * *decision* of when to call this lives in `founder-meeting-check.ts`
+ * instead, which fires this the morning after the "Founders Meeting"
+ * calendar event (where priorities/foco actually get set), falling back to
+ * Monday only if no such meeting is scheduled that week. This file only
+ * knows how to send the message, not when.
+ */
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM, sendGroupMessage } from "../lib/telegram.js";

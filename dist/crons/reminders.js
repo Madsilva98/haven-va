@@ -19,26 +19,52 @@ export async function run() {
     let skipped = 0;
     let failed = 0;
     for (const r of due) {
-        const tgId = getTelegramId(r.paraQuem);
-        if (tgId === null) {
-            log.warn("reminders.no_telegram_id", { id: r.id, paraQuem: r.paraQuem });
+        const recipients = r.paraQuem.map((name) => ({ name, tgId: getTelegramId(name) }));
+        for (const rec of recipients) {
+            if (rec.tgId === null) {
+                log.warn("reminders.no_telegram_id", { id: r.id, paraQuem: rec.name });
+            }
+        }
+        const valid = recipients.filter((rec) => rec.tgId !== null);
+        if (valid.length === 0) {
             skipped++;
             continue;
         }
+        // Mark sent BEFORE sending the DM(s): if this write fails, we skip
+        // sending entirely and retry the whole reminder next tick — no
+        // duplicate DM. The trade-off is the opposite failure mode (a DM send
+        // failing after this succeeds means that reminder won't be retried),
+        // which is the rarer and less annoying of the two to a founder.
         try {
-            await sendDM(tgId, formatReminderMessage(r));
+            await notion.markReminderSent(r.id);
         }
         catch (err) {
-            log.error("reminders.dm_failed", {
+            log.error("reminders.mark_sent_failed", {
                 id: r.id,
                 message: err instanceof Error ? err.message : String(err),
             });
             failed++;
             continue;
         }
-        try {
-            await notion.markReminderSent(r.id);
-            if (r.recurrence && !r.feito) {
+        let anySent = false;
+        for (const rec of valid) {
+            try {
+                await sendDM(rec.tgId, formatReminderMessage(r));
+                anySent = true;
+            }
+            catch (err) {
+                log.error("reminders.dm_failed", {
+                    id: r.id,
+                    paraQuem: rec.name,
+                    message: err instanceof Error ? err.message : String(err),
+                });
+                failed++;
+            }
+        }
+        if (!anySent)
+            continue; // already marked sent; won't be retried — logged above for follow-up
+        if (r.recurrence && !r.feito) {
+            try {
                 const nextWhen = nextOccurrence(r.quando, r.recurrence);
                 await notion.createReminder({
                     texto: r.texto,
@@ -49,15 +75,16 @@ export async function run() {
                 });
                 log.info("reminders.next_scheduled", { id: r.id, recurrence: r.recurrence, nextWhen });
             }
-            sent++;
+            catch (err) {
+                log.error("reminders.recurrence_reschedule_failed", {
+                    id: r.id,
+                    message: err instanceof Error ? err.message : String(err),
+                });
+                failed++;
+                continue;
+            }
         }
-        catch (err) {
-            log.error("reminders.mark_sent_failed", {
-                id: r.id,
-                message: err instanceof Error ? err.message : String(err),
-            });
-            failed++;
-        }
+        sent++;
     }
     log.info("reminders.done", { total: due.length, sent, skipped, failed });
 }

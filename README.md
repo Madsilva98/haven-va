@@ -7,7 +7,7 @@ Telegram bot for the founders of [The Haven Pilates](https://thehavenpilates.pt)
 - **Conversational Notion writes.** *"cria task para a Beatriz: rever proposta WellHub"* → task created in the right Notion DB with the right owner/area/priority. No commands, no forms — just talk like to a colleague.
 - **Reminders.** *"lembra-me amanhã às 10h de testar"*, *"todos os anos no aniversário da empresa"*, *"avisa todas hoje às 23h59"*. One-shot, daily, weekly, monthly, annual.
 - **Daily birthday digest** at 08:00 — queries the Studio Supabase for customer birthdays today + next 7 days.
-- **Scheduled briefs** — daily-for-Madalena, Monday priorities, Friday end-of-week, Saturday weekend prep, every-4h pipeline alerts.
+- **Scheduled briefs** — weekly priorities the morning after the founders' calendar meeting, an end-of-week balance the morning of it (each falls back to a fixed day if no meeting's scheduled that week), content-calendar-needs-scheduling alerts every 4h.
 - **Entity tracking** — partners, projects, events, influencers each have their own Notion DB with structured fields.
 
 ## Stack
@@ -63,7 +63,7 @@ In short:
 - `src/bot/index.ts` — message routing
 - `src/bot/assistant.ts` — Haiku call with tool-use (13 tools)
 - `src/notion.ts` — Notion wrapper, ~2400 lines, the single source of DB access
-- `src/crons/` — 7 scheduled tasks (reminders every 5 min, daily-madalena, monday/friday/saturday weekly cycles, pipeline alerts, birthdays)
+- `src/crons/` — scheduled tasks: reminders every 5 min, daily checks that send the week-balance message the morning of the founders' calendar meeting and the weekly priorities message the morning after (each with its own weekend fallback), pipeline alerts, birthdays
 - `src/prompts/assistant.md` — system prompt (cached at the Anthropic prompt-cache tier)
 
 For the full mental model, read [`docs/knowledge-base/bot-architecture.md`](docs/knowledge-base/bot-architecture.md).

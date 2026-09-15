@@ -1,15 +1,13 @@
 import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
-import { run as runDailyMadalena } from "./crons/daily-madalena.js";
-import { run as runFridayBalance } from "./crons/friday-balance.js";
+import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
+import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { runSundayAsk, runMondayReask } from "./crons/founder-focus-cycle.js";
-import { run as runMondayPriorities } from "./crons/monday-priorities.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
-import { run as runWeekendBrief } from "./crons/weekend-brief.js";
 import { log } from "./lib/log.js";
 import * as notion from "./notion.js";
 
@@ -30,37 +28,21 @@ const tasks = [
   cron.schedule(
     "0 8 * * *",
     () =>
-      runDailyMadalena().catch((e) =>
-        log.error("cron.daily_madalena", { e: String(e) }),
+      runFounderMeetingCheck().catch((e) =>
+        log.error("cron.founder_meeting_check", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
   cron.schedule(
-    "0 8 * * 1",
+    "0 8 * * *",
     () =>
-      runMondayPriorities().catch((e) =>
-        log.error("cron.monday", { e: String(e) }),
+      runFounderMeetingBalanceCheck().catch((e) =>
+        log.error("cron.founder_meeting_balance_check", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
   cron.schedule(
-    "0 17 * * 5",
-    () =>
-      runFridayBalance().catch((e) =>
-        log.error("cron.friday", { e: String(e) }),
-      ),
-    { timezone: TZ },
-  ),
-  cron.schedule(
-    "0 9 * * 6",
-    () =>
-      runWeekendBrief().catch((e) =>
-        log.error("cron.weekend", { e: String(e) }),
-      ),
-    { timezone: TZ },
-  ),
-  cron.schedule(
-    "0 */4 * * 1-5",
+    "0 8 * * 1-5",
     () =>
       runPipelineAlerts().catch((e) =>
         log.error("cron.pipeline", { e: String(e) }),

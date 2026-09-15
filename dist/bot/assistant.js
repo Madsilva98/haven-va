@@ -513,7 +513,7 @@ async function execCreateReminder(input, sender, ctx, collector) {
     }
     await Promise.all(targets.map((paraQuem) => notion.createReminder({
         texto: text,
-        paraQuem,
+        paraQuem: [paraQuem],
         quando,
         origem: ctx.message?.text ?? "",
         recurrence,

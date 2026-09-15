@@ -170,23 +170,28 @@ function normalizeEvent(
   };
 }
 
-export async function listEvents(days = 7): Promise<CalendarEvent[]> {
-  const now = Date.now();
-  if (_eventsCache.data.length && now - _eventsCache.ts < CACHE_TTL) {
-    return _eventsCache.data;
-  }
+function configuredCalendarIds(): string[] {
+  return (process.env.GOOGLE_CALENDAR_IDS ?? "primary")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
+/**
+ * Fetches events across every configured calendar for an arbitrary
+ * [timeMin, timeMax] range (past ranges included — unlike `listEvents`,
+ * which is pinned to "from now"). Never cached: callers needing repeated
+ * lookups in the same window should cache at their own call site.
+ */
+async function fetchEventsInRange(
+  timeMin: string,
+  timeMax: string,
+): Promise<CalendarEvent[]> {
   const auth = await getAuthenticatedClient();
   if (!auth) return [];
 
   const cal = google.calendar({ version: "v3", auth });
-  const calIds = (process.env.GOOGLE_CALENDAR_IDS ?? "primary")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const timeMin = new Date().toISOString();
-  const timeMax = new Date(now + days * 86_400_000).toISOString();
+  const calIds = configuredCalendarIds();
 
   const results = await Promise.all(
     calIds.map(async (calId) => {
@@ -211,12 +216,35 @@ export async function listEvents(days = 7): Promise<CalendarEvent[]> {
     }),
   );
 
-  const all = results
+  return results
     .flat()
     .filter((e) => !Number.isNaN(e.start.getTime()))
     .sort((a, b) => a.start.getTime() - b.start.getTime());
+}
+
+export async function listEvents(days = 7): Promise<CalendarEvent[]> {
+  const now = Date.now();
+  if (_eventsCache.data.length && now - _eventsCache.ts < CACHE_TTL) {
+    return _eventsCache.data;
+  }
+
+  const timeMin = new Date().toISOString();
+  const timeMax = new Date(now + days * 86_400_000).toISOString();
+  const all = await fetchEventsInRange(timeMin, timeMax);
   _eventsCache = { data: all, ts: now };
   return all;
+}
+
+/**
+ * Like `listEvents`, but for an arbitrary [from, to] range — including
+ * ranges entirely in the past. Used by `founder-meeting-check.ts` to look
+ * back for a meeting that already happened. Not cached.
+ */
+export async function listEventsInRange(
+  from: Date,
+  to: Date,
+): Promise<CalendarEvent[]> {
+  return fetchEventsInRange(from.toISOString(), to.toISOString());
 }
 
 export async function createEvent(params: {

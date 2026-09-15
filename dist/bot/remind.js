@@ -20,6 +20,7 @@
  */
 import { getFounderName } from "../lib/founders.js";
 import { log } from "../lib/log.js";
+import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as notion from "../notion.js";
 const RECURRENCE_PATTERNS = [
     [/\btodos\s+os\s+dias\b|\bdiariamente\b|\btodo\s+o\s+dia\b/i, "diária"],
@@ -67,23 +68,25 @@ function stripCommand(text) {
 function pad2(n) {
     return n < 10 ? `0${n}` : String(n);
 }
-function utcNoZ(date) {
-    return (`${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}` +
-        `T${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`);
-}
-function lisbonOffsetMs(d) {
-    // Returns Europe/Lisbon offset relative to UTC in ms (positive = ahead of UTC).
-    const lisbonStr = d.toLocaleString("en-US", { timeZone: "Europe/Lisbon" });
-    const utcStr = d.toLocaleString("en-US", { timeZone: "UTC" });
-    return new Date(lisbonStr).getTime() - new Date(utcStr).getTime();
-}
 function at9amLisbon(approxDate) {
-    // Returns the real UTC Date representing 09:00:00 Europe/Lisbon on the same
-    // Lisbon calendar day as approxDate. approxDate should be near UTC midnight.
-    const lisbonFake = new Date(approxDate.toLocaleString("en-US", { timeZone: "Europe/Lisbon" }));
-    lisbonFake.setHours(9, 0, 0, 0);
-    const offsetMs = lisbonOffsetMs(approxDate);
-    return new Date(lisbonFake.getTime() - offsetMs);
+    // Returns the real UTC Date representing 09:00:00 Europe/Lisbon on
+    // whatever Lisbon calendar day approxDate falls on.
+    //
+    // Reads the Lisbon calendar date via Intl (container-TZ-independent),
+    // then converts "that date at 09:00 Lisbon wall-clock" to UTC through
+    // lisbonNaiveToUtcIso — the same routine every other Lisbon->UTC
+    // conversion in this codebase uses (src/lib/tz.ts).
+    //
+    // Previous version reparsed a Lisbon-formatted string as the
+    // container's OWN local time (only equivalent to Lisbon time when the
+    // container's TZ happens to be Europe/Lisbon — true in production, see
+    // docker-compose.yml) and then ALSO subtracted the Lisbon/UTC offset on
+    // top of that, double-correcting. Under the real deployment (TZ=Europe/
+    // Lisbon), that made every DST-affected "amanhã"/weekday reminder
+    // (`tomorrow9am`, `nextDayOfWeek`) fire exactly one hour early during
+    // summer time — invisible in winter, when the offset is 0.
+    const lisbonDate = approxDate.toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
+    return new Date(lisbonNaiveToUtcIso(`${lisbonDate}T09:00:00`));
 }
 function describeWhen(target) {
     // Short pt-PT label showing Lisbon wall-clock time, e.g. "amanhã às 09:00" or "30/04 às 14:30".
@@ -113,7 +116,7 @@ function describeWhen(target) {
 function nextDayOfWeek(now, targetDow) {
     // Returns next occurrence of targetDow at 09:00 Europe/Lisbon, strictly in the future.
     const result = new Date(now);
-    result.setHours(0, 0, 0, 0); // UTC midnight — used as approx anchor for at9amLisbon
+    result.setHours(0, 0, 0, 0); // local midnight (container TZ=Europe/Lisbon) — anchor for at9amLisbon
     const currentDow = now.getDay();
     let delta = (targetDow - currentDow + 7) % 7;
     if (delta === 0)
@@ -177,8 +180,8 @@ export function parseRemindCommand(text, sender) {
         parsed: true,
         reminder: {
             texto: message,
-            paraQuem: sender,
-            quando: utcNoZ(target),
+            paraQuem: [sender],
+            quando: target.toISOString(),
             origem: text,
             recurrence,
         },
@@ -224,7 +227,7 @@ export async function createReminderFromIntent(tgCtx, sender, intent) {
     const targets = intent.for === "all" ? ["Madalena", "Mafalda", "Beatriz"] : [intent.for];
     const origem = tgCtx.message?.text ?? "";
     try {
-        await Promise.all(targets.map((paraQuem) => notion.createReminder({ texto: intent.text, paraQuem, quando: intent.when, origem })));
+        await Promise.all(targets.map((paraQuem) => notion.createReminder({ texto: intent.text, paraQuem: [paraQuem], quando: intent.when, origem })));
         const when = new Date(intent.when).toLocaleString("pt-PT", {
             timeZone: "Europe/Lisbon",
             weekday: "long",
