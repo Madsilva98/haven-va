@@ -139,14 +139,28 @@ function buildContactLookups(contacts, ownDomains) {
 function lookupContact(email, emailToContact, domainToContact) {
   if (!email) return null;
   const lower = email.trim().toLowerCase();
-  return emailToContact.get(lower) ?? domainToContact.get(domainOf(lower)) ?? null;
+  const exact = emailToContact.get(lower);
+  if (exact) return { contact: exact, matchBasis: "exact_email" };
+  const byDomain = domainToContact.get(domainOf(lower));
+  if (byDomain) return { contact: byDomain, matchBasis: "domain" };
+  return null;
 }
 
 // Independent of keyword matching: a message from (or, when the Haven sent
 // it, addressed to) an address already on file for an existing partner is a
-// certain identity match — catches ongoing correspondence that never
+// strong identity signal — catches ongoing correspondence that never
 // happens to use a partnership-sounding word ("posso mudar a call para
 // 5ª feira?"), which the keyword scan alone would silently miss.
+//
+// Returns { contact, matchBasis } or null. matchBasis matters downstream:
+// an EXACT email match is the literal same person emailing again — certain.
+// A DOMAIN match only proves "same organization", never "same initiative" —
+// confirmed wrong for real (76256@novasbe.pt, a student address, domain-
+// matched to the existing "Nova SBE (Well-Being)" partner for an unrelated
+// pitch, "Nova Thirst Project" — a different real-world partnership, not
+// the same one). A large organization can run many unrelated things under
+// one domain, so domain matches still need a human "does this actually
+// belong on that page" judgment call — see the sync-partnerships skill.
 function matchKnownContact(msg, ownDomains, emailToContact, domainToContact) {
   const direct = lookupContact(msg.from.email, emailToContact, domainToContact);
   if (direct) return direct;
@@ -259,12 +273,14 @@ async function main() {
 
       if (knownContact) {
         knownContactCount++;
+        const { contact, matchBasis } = knownContact;
         knownContactFindings.push({
           ...baseFinding,
           matchType: "known_contact",
-          guessedPartnerName: knownContact.name,
-          guessedPartnerEmail: knownContact.email,
-          matchedPage: { id: knownContact.id, title: knownContact.name },
+          matchBasis,
+          guessedPartnerName: contact.name,
+          guessedPartnerEmail: contact.email,
+          matchedPage: { id: contact.id, title: contact.name },
         });
         continue;
       }
