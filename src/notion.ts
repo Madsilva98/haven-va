@@ -2095,6 +2095,7 @@ async function createPartner(nome: string, owner: OwnerValue, originalMsg: strin
       children: [
         toggleHeading("🤝 Sobre o parceiro"),
         toggleHeading("💼 Deal e proposta"),
+        toggleHeading("📓 Log"),
         toggleHeading("✅ Tasks"),
         toggleHeading("💬 To Discuss"),
         toggleHeading("📋 Decisions"),

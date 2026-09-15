@@ -243,7 +243,7 @@ const TOOLS = [
                         "backlog: status|owner|deadline|prioridade|area|title. " +
                         "to_discuss: urgencia|status|area|resolucao. " +
                         "decisions: status|area|notas. " +
-                        "partners: status|owner|proximoPasso. " +
+                        "partners: status|owner|proximoPasso|ultimoContacto. " +
                         "influencers: status|owner. " +
                         "events|projects: status|owner.",
                 },
@@ -258,6 +258,7 @@ const TOOLS = [
                         "decisions status: Pendente implementação|Implementada. " +
                         "partners status: On hold|A contactar|Contactado|A aguardar resposta|Em negociação|Fechado|Arquivado. " +
                         "partners proximoPasso: uma frase curta e concreta em pt-PT com o próximo passo (ex: 'Ligar à Rita dia 20 para fechar valores'), ou 'Nenhum de momento — <razão>' se não houver nada pendente. " +
+                        "partners ultimoContacto: data de hoje (fornecida no contexto) em formato YYYY-MM-DD. " +
                         "influencers status: A identificar|A contactar|Contactado|Em conversa|Proposta enviada|Fechado|Arquivado. " +
                         "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
                         "projects status: Not started|In progress|Done.",
