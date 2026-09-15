@@ -16,8 +16,15 @@
  *    founder-meeting-check.ts's own Monday fallback the next morning —
  *    Sunday recap, Monday reset.)
  * 3. Otherwise, do nothing today.
+ *
+ * Whenever week-balance actually sends (either branch above), the
+ * personal Founder Focus "cumpriste?" check-in (`founder-focus-cycle.ts`)
+ * fires right after, same `now` — that used to be its own fixed Sunday
+ * 18:00 cron; merged here so both the team recap and the personal
+ * check-in land on the same day, whichever day the meeting actually is.
  */
 import { listEventsInRange } from "../lib/calendar.js";
+import { runFocusCumpridoAsk } from "./founder-focus-cycle.js";
 import { log } from "../lib/log.js";
 import { mondayOf, sundayOf } from "../lib/week.js";
 import { run as sendWeekBalance } from "./week-balance.js";
@@ -63,6 +70,7 @@ export async function run(now: Date = new Date()): Promise<void> {
   if (today) {
     log.info("founder_meeting_balance_check.meeting_today");
     await sendWeekBalance();
+    await runFocusCumpridoAsk(now);
     return;
   }
 
@@ -89,4 +97,5 @@ export async function run(now: Date = new Date()): Promise<void> {
 
   log.info("founder_meeting_balance_check.sunday_fallback_sent");
   await sendWeekBalance();
+  await runFocusCumpridoAsk(now);
 }

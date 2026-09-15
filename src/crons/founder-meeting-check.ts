@@ -18,8 +18,15 @@
  * rule 2 already sent a Monday fallback — if the meeting gets scheduled
  * or rescheduled after Monday and actually happens, the founders get the
  * fresh version too.
+ *
+ * Whenever weekly-priorities actually sends (either branch above), the
+ * personal Founder Focus rollover + "quais são os teus objetivos?" ask
+ * (`founder-focus-cycle.ts`) fires right after, same `now` — that used to
+ * be its own fixed Monday 08:00 cron; merged here so the personal reset
+ * always follows the same trigger as the team's new-week priorities.
  */
 import { listEventsInRange } from "../lib/calendar.js";
+import { runFocusRollover } from "./founder-focus-cycle.js";
 import { log } from "../lib/log.js";
 import { sundayOf } from "../lib/week.js";
 import { run as sendWeeklyPriorities } from "./weekly-priorities.js";
@@ -58,6 +65,7 @@ export async function run(now: Date = new Date()): Promise<void> {
   if (happened) {
     log.info("founder_meeting_check.meeting_detected");
     await sendWeeklyPriorities();
+    await runFocusRollover(now);
     return;
   }
 
@@ -86,4 +94,5 @@ export async function run(now: Date = new Date()): Promise<void> {
 
   log.info("founder_meeting_check.monday_fallback_sent");
   await sendWeeklyPriorities();
+  await runFocusRollover(now);
 }

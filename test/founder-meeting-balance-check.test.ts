@@ -10,6 +10,11 @@ vi.mock("../src/crons/week-balance.js", () => ({
   run: (...args: unknown[]) => sendWeekBalance(...args),
 }));
 
+const runFocusCumpridoAsk = vi.fn().mockResolvedValue(undefined);
+vi.mock("../src/crons/founder-focus-cycle.js", () => ({
+  runFocusCumpridoAsk: (...args: unknown[]) => runFocusCumpridoAsk(...args),
+}));
+
 import { run } from "../src/crons/founder-meeting-balance-check.js";
 
 interface FakeEvent {
@@ -46,6 +51,7 @@ describe("founder-meeting-balance-check", () => {
   afterEach(() => {
     listEventsInRange.mockReset();
     sendWeekBalance.mockClear();
+    runFocusCumpridoAsk.mockClear();
   });
 
   it("sends when the meeting is scheduled for today, even on a non-Sunday", async () => {
@@ -54,12 +60,16 @@ describe("founder-meeting-balance-check", () => {
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
     // Early return: never bothers checking "scheduled this week".
     expect(listEventsInRange).toHaveBeenCalledTimes(1);
+    // Focus ask fires together with the team message, same `now`.
+    expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
+    expect(runFocusCumpridoAsk).toHaveBeenCalledWith(TUESDAY);
   });
 
   it("does nothing on a non-Sunday when the meeting isn't today", async () => {
     listEventsInRange.mockResolvedValueOnce([]);
     await run(MONDAY);
     expect(sendWeekBalance).not.toHaveBeenCalled();
+    expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
   it("sends the Sunday fallback when no meeting happened today and none was scheduled this week", async () => {
@@ -68,6 +78,8 @@ describe("founder-meeting-balance-check", () => {
       .mockResolvedValueOnce([]); // nothing scheduled all week
     await run(SUNDAY);
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
+    expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
+    expect(runFocusCumpridoAsk).toHaveBeenCalledWith(SUNDAY);
   });
 
   it("skips the Sunday fallback when the meeting already happened earlier this week", async () => {
@@ -76,12 +88,14 @@ describe("founder-meeting-balance-check", () => {
       .mockResolvedValueOnce([meetingEvent("2026-09-15T13:30:00.000Z")]); // Tuesday meeting on the calendar
     await run(SUNDAY);
     expect(sendWeekBalance).not.toHaveBeenCalled();
+    expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
   it("ignores events that don't match the meeting title", async () => {
     listEventsInRange.mockResolvedValueOnce([meetingEvent("2026-09-15T13:30:00.000Z", "Dentist appointment")]);
     await run(TUESDAY);
     expect(sendWeekBalance).not.toHaveBeenCalled();
+    expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
   it("sends anyway on Sunday if the 'scheduled this week' lookup fails (fail-safe)", async () => {
@@ -90,5 +104,6 @@ describe("founder-meeting-balance-check", () => {
       .mockRejectedValueOnce(new Error("calendar API down"));
     await run(SUNDAY);
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
+    expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
   });
 });
