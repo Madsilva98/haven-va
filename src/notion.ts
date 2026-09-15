@@ -39,6 +39,9 @@ import type {
   ToDiscussState,
   DecisionRow,
   ContentCalendarNeedsSchedulingRow,
+  CompetitorSourceRow,
+  CompetitorSourceCategory,
+  CompetitorIntelFinding,
 } from "./types.js";
 import { log } from "./lib/log.js";
 import { formatLisbonDateTime } from "./lib/tz.js";
@@ -59,6 +62,8 @@ const NOTION_CONTENT_CALENDAR_DB_ID =
 const NOTION_PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
+const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
+const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
 if (!NOTION_API_KEY) {
   throw new Error("notion: NOTION_API_KEY is required");
@@ -92,6 +97,8 @@ export async function initialize(): Promise<void> {
     NOTION_PROJECTS_DB_ID,
     NOTION_EVENT_DB_ID,
     NOTION_LISTS_DB_ID,
+    NOTION_COMPETITOR_SOURCES_DB_ID,
+    NOTION_COMPETITOR_INTEL_DB_ID,
   ]);
 }
 
@@ -1457,6 +1464,63 @@ async function getPartnersStale(
   return rows;
 }
 
+// Fontes list for the competitor-intel Gmail pipeline — founder-maintained
+// in Notion so senders can be added/paused without a redeploy.
+async function getActiveCompetitorSources(): Promise<CompetitorSourceRow[]> {
+  if (!NOTION_COMPETITOR_SOURCES_DB_ID) return [];
+  const rows: CompetitorSourceRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getActiveCompetitorSources", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_COMPETITOR_SOURCES_DB_ID!),
+        filter: { property: "Ativo", checkbox: { equals: true } },
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        nome: readPlainText(props["Nome"]),
+        emailOuDominio: readPlainText(props["Email/Domínio"]),
+        categoria: readSelectName(props["Categoria"]) as CompetitorSourceCategory | null,
+        ativo: readCheckbox(props["Ativo"]),
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  log.debug("notion.competitor_sources_fetched", { count: rows.length });
+  return rows;
+}
+
+// Findings from the competitor-intel Gmail pipeline. Categoria is
+// deliberately left unset here — the founder classifies each finding by
+// hand in Notion rather than the bot guessing.
+async function createCompetitorIntelFinding(finding: CompetitorIntelFinding): Promise<void> {
+  if (!NOTION_COMPETITOR_INTEL_DB_ID) {
+    throw new Error("NOTION_COMPETITOR_INTEL_DB_ID not set");
+  }
+  await withRetry("createCompetitorIntelFinding", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_COMPETITOR_INTEL_DB_ID!) },
+      properties: {
+        Nome: { title: [{ text: { content: finding.nome } }] },
+        Fonte: richText(finding.fonte),
+        Tipo: { multi_select: finding.tipos.map((name) => ({ name })) },
+        Resumo: richText(finding.resumo),
+        ...(finding.dataEmail
+          ? { "Data do email": { date: { start: finding.dataEmail } } }
+          : {}),
+        "Assunto do email": richText(finding.assuntoEmail),
+        "Link Gmail": { url: finding.linkGmail },
+      } as Parameters<typeof client.pages.create>[0]["properties"],
+    }),
+  );
+  log.info("notion.competitor_intel_created", { nome: finding.nome, fonte: finding.fonte });
+}
+
 const INFLUENCER_NO_RESPONSE_DAYS = 7;
 const INFLUENCER_NO_PROGRESS_DAYS = 3;
 
@@ -2701,6 +2765,9 @@ export {
   // Entity dashboards
   getEntitiesForOwner,
   getTasksForEntity,
+  // Competitor intel
+  getActiveCompetitorSources,
+  createCompetitorIntelFinding,
 };
 
 export const notion = {
@@ -2765,4 +2832,7 @@ export const notion = {
   // Entity dashboards
   getEntitiesForOwner,
   getTasksForEntity,
+  // Competitor intel
+  getActiveCompetitorSources,
+  createCompetitorIntelFinding,
 };

@@ -335,3 +335,25 @@ export interface RecentAction {
   notionPageId: string | null;
   botMessageId: number | null;
 }
+
+// ----- Competitor intel (Gmail newsletters → Notion) -----
+
+export type CompetitorSourceCategory = "Concorrência" | "Inspiração";
+
+export interface CompetitorSourceRow {
+  id: string;
+  nome: string;
+  emailOuDominio: string;
+  categoria: CompetitorSourceCategory | null;
+  ativo: boolean;
+}
+
+export interface CompetitorIntelFinding {
+  nome: string;
+  fonte: string;
+  tipos: string[];
+  resumo: string;
+  dataEmail: string | null;
+  assuntoEmail: string;
+  linkGmail: string;
+}

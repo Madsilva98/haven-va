@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
+import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
 import { run as runDailyMadalena } from "./crons/daily-madalena.js";
 import { run as runFridayBalance } from "./crons/friday-balance.js";
 import { runSundayAsk, runMondayReask } from "./crons/founder-focus-cycle.js";
@@ -104,6 +105,14 @@ const tasks = [
     () =>
       runTidyMailboxesFeedbackReminder().catch((e) =>
         log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "30 8 * * 1",
+    () =>
+      runCompetitorIntel().catch((e) =>
+        log.error("cron.competitor_intel", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
