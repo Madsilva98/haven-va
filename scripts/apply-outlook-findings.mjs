@@ -42,7 +42,10 @@
  * once they've been reviewed and registered, same forward+archive Graph
  * calls tidy-mailboxes.ts uses for invoices. Leaving
  * OUTLOOK_PARTNERSHIP_FORWARD_TO unset disables this step entirely
- * (existing behavior — create/update only) rather than failing.
+ * (existing behavior — create/update only) rather than failing. A finding
+ * already sitting in the forward target's own mailbox is archived but not
+ * forwarded (see forwardAndArchiveIfConfigured) — Exchange delivers a
+ * self-forward as two near-simultaneous copies, confirmed for real.
  *
  * See docs/knowledge-base/outlook-partnerships-sync.md.
  */
@@ -117,14 +120,28 @@ async function forwardAndArchiveIfConfigured(finding) {
     );
     return;
   }
-  await outlook.forwardMessage(
-    finding.mailbox,
-    finding.messageId,
-    [forwardTo],
-    "Reencaminhado automaticamente — parceria confirmada e registada no Partner Pipeline.",
-  );
+  // A message that already lives in the forward target's own mailbox
+  // (e.g. a finding found in partners@ itself, forwarded to partners@)
+  // never needs forwarding — the mailbox already has it. Confirmed for
+  // real: forwarding it anyway made Exchange deliver two near-simultaneous
+  // copies (a self-forward quirk, not a script bug) — Chio Studio, Tribe
+  // Social, Nova Thirst Project, and Mindfulness Hub all hit this on
+  // 2026-09-15. Still archive it — that part's unaffected.
+  const isSelfForward = finding.mailbox.toLowerCase() === forwardTo.toLowerCase();
+  if (!isSelfForward) {
+    await outlook.forwardMessage(
+      finding.mailbox,
+      finding.messageId,
+      [forwardTo],
+      "Reencaminhado automaticamente — parceria confirmada e registada no Partner Pipeline.",
+    );
+  }
   await outlook.archiveMessage(finding.mailbox, finding.messageId);
-  console.log(`    → forwarded to ${forwardTo} and archived from ${finding.mailbox}`);
+  console.log(
+    isSelfForward
+      ? `    → already in ${finding.mailbox}, skipped forward — archived only`
+      : `    → forwarded to ${forwardTo} and archived from ${finding.mailbox}`,
+  );
 }
 
 async function main() {

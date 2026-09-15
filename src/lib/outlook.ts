@@ -38,6 +38,7 @@ export interface OutlookMessage {
   conversationId: string;
   /** Only meaningful for Sent Items — when the message was actually sent. */
   sentDateTime: string;
+  parentFolderId: string;
 }
 
 export interface OutlookAttachment {
@@ -232,6 +233,7 @@ interface GraphMessage {
   lastModifiedDateTime?: string | null;
   conversationId?: string | null;
   sentDateTime?: string | null;
+  parentFolderId?: string | null;
 }
 
 interface GraphMessagesPage {
@@ -240,7 +242,7 @@ interface GraphMessagesPage {
 }
 
 const MESSAGE_SELECT =
-  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime,conversationId,sentDateTime";
+  "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink,hasAttachments,categories,isRead,lastModifiedDateTime,conversationId,sentDateTime,parentFolderId";
 
 // Ask Graph to convert the body to plain text server-side (default is
 // HTML) — keeps keyword matching simple and avoids fetching markup we'd
@@ -279,6 +281,7 @@ function mapGraphMessage(m: GraphMessage, mailbox: string): OutlookMessage {
     lastModifiedDateTime: m.lastModifiedDateTime ?? m.receivedDateTime,
     conversationId: m.conversationId ?? "",
     sentDateTime: m.sentDateTime ?? m.receivedDateTime,
+    parentFolderId: m.parentFolderId ?? "",
   };
 }
 
@@ -316,10 +319,41 @@ export async function getMyEmail(): Promise<string> {
 }
 
 /**
+ * Resolves a well-known mail folder's real id for a mailbox (e.g.
+ * "archive"). Non-fatal on failure — returns null, and the caller should
+ * treat that as "couldn't determine, don't filter" rather than erroring
+ * out the whole scan over one lookup.
+ */
+async function resolveFolderId(mailbox: "me" | string, wellKnownName: string): Promise<string | null> {
+  try {
+    const res = await graphFetch(`${mailboxBase(mailbox)}/mailFolders/${wellKnownName}?$select=id`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { id?: string };
+    return data.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Lists messages for a mailbox ("me" for the authenticated account's own
  * inbox, or another address the authenticated account has Full Access
  * delegate permission to — see docs/knowledge-base/outlook-partnerships-sync.md).
  * Paginates through every page. Omitting `sinceISO` scans full history.
+ *
+ * Deliberately scans the WHOLE mailbox (not just Inbox) via the root
+ * `/messages` collection, so a partnership email filed into some other
+ * folder still gets caught — that's an intentional design choice, not an
+ * oversight, see docs/knowledge-base/outlook-partnerships-sync.md.
+ *
+ * Archive is the one folder explicitly excluded afterward. Confirmed for
+ * real (2026-09-15): root `/messages` includes Archive contents for the
+ * "me" mailbox (unlike shared mailboxes, where it's excluded) — so a
+ * message already archived by an earlier apply run was still found by a
+ * later scan and got forwarded a second time. Archive specifically means
+ * "already handled by this pipeline or tidy-mailboxes", never "missed
+ * detection surface", so excluding it loses nothing the broader-than-Inbox
+ * scan was actually meant to catch.
  */
 export async function searchMailboxMessages(
   mailbox: "me" | string,
@@ -334,16 +368,25 @@ export async function searchMailboxMessages(
     params.set("$filter", `receivedDateTime ge ${opts.sinceISO}`);
   }
 
-  const messages = await fetchAllMessages(
-    `${mailboxBase(mailbox)}/messages?${params.toString()}`,
-    mailbox,
-  );
+  const [messages, archiveFolderId] = await Promise.all([
+    fetchAllMessages(`${mailboxBase(mailbox)}/messages?${params.toString()}`, mailbox),
+    resolveFolderId(mailbox, "archive"),
+  ]);
+
+  const filtered = archiveFolderId
+    ? messages.filter((m) => m.parentFolderId !== archiveFolderId)
+    : messages;
+  const excludedCount = messages.length - filtered.length;
+  if (excludedCount > 0) {
+    log.info("outlook.archived_messages_excluded", { mailbox, count: excludedCount });
+  }
+
   log.info("outlook.mailbox_scanned", {
     mailbox,
-    count: messages.length,
+    count: filtered.length,
     since: opts.sinceISO ?? "all",
   });
-  return messages;
+  return filtered;
 }
 
 /**
