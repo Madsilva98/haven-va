@@ -140,7 +140,10 @@ async function main() {
   const decisions = JSON.parse(fs.readFileSync(args.approve, "utf8"));
 
   const allFindings = new Map(
-    [...report.new, ...report.possible_match].map((f) => [f.findingId, f]),
+    [...report.new, ...report.possible_match, ...(report.known_contact ?? [])].map((f) => [
+      f.findingId,
+      f,
+    ]),
   );
 
   for (const decision of decisions) {

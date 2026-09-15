@@ -1457,6 +1457,45 @@ async function getPartnersStale(
   return rows;
 }
 
+interface PartnerContact {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
+// Every partner's id/name/email, no filter — used by scan-outlook-partnerships.mjs
+// to match an incoming sender against a KNOWN partner by email/domain, instead of
+// guessing a name and fuzzy-matching titles. Full cursor loop, not the unpaginated
+// SMALL_DBS shortcut used elsewhere for this DB — a matching table that decides
+// identity shouldn't silently truncate past 100 rows.
+async function getAllPartnerContacts(): Promise<PartnerContact[]> {
+  if (!NOTION_PARTNER_DB_ID) {
+    throw new Error("NOTION_PARTNER_DB_ID not set");
+  }
+  const rows: PartnerContact[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getAllPartnerContacts", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_PARTNER_DB_ID),
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        name: readPlainText(props["Name"]),
+        email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  log.debug("notion.all_partner_contacts_fetched", { count: rows.length });
+  return rows;
+}
+
 const INFLUENCER_NO_RESPONSE_DAYS = 7;
 const INFLUENCER_NO_PROGRESS_DAYS = 3;
 
@@ -2662,6 +2701,7 @@ export {
   editFounderFocusBodyItem,
   // Phase 3
   getPartnersStale,
+  getAllPartnerContacts,
   getInfluencersStale,
   getContentCalendarNeedsScheduling,
   createReminder,
@@ -2726,6 +2766,7 @@ export const notion = {
   editFounderFocusBodyItem,
   // Phase 3
   getPartnersStale,
+  getAllPartnerContacts,
   getInfluencersStale,
   getContentCalendarNeedsScheduling,
   createReminder,
