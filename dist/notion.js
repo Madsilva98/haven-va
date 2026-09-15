@@ -408,6 +408,9 @@ const RECORD_DB_CONFIGS = {
     partners: {
         dbId: () => NOTION_PARTNER_DB_ID,
         titleProp: "Name",
+        // Verified against the live data source schema 2026-09-15 — every
+        // property except the title ("Name") and the read-only "Criado em"
+        // (created_time, not settable via the API) is mapped here.
         fields: {
             // Live property is a select, not Notion's status type, despite the
             // name — see docs/knowledge-base/notion-api-gotchas.md.
@@ -416,6 +419,9 @@ const RECORD_DB_CONFIGS = {
             ultimoContacto: { notionProp: "Último contacto", type: "date" },
             notas: { notionProp: "Notas", type: "rich_text" },
             email: { notionProp: "Email", type: "email" },
+            proximoPasso: { notionProp: "Próximo passo", type: "rich_text" },
+            categoria: { notionProp: "Categoria", type: "select" },
+            origem: { notionProp: "Origem", type: "rich_text" },
         },
     },
     influencers: {

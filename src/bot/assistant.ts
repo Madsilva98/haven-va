@@ -264,7 +264,8 @@ const TOOLS: Anthropic.Tool[] = [
             "backlog: status|owner|deadline|prioridade|area|title. " +
             "to_discuss: urgencia|status|area|resolucao. " +
             "decisions: status|area|notas. " +
-            "partners|influencers: status|owner. " +
+            "partners: status|owner|proximoPasso. " +
+            "influencers: status|owner. " +
             "events|projects: status|owner.",
         },
         new_value: {
@@ -278,6 +279,7 @@ const TOOLS: Anthropic.Tool[] = [
             "to_discuss status: Pendente|Discutido|Arquivado|Aberto. " +
             "decisions status: Pendente implementação|Implementada. " +
             "partners status: On hold|A contactar|Contactado|A aguardar resposta|Em negociação|Fechado|Arquivado. " +
+            "partners proximoPasso: uma frase curta e concreta em pt-PT com o próximo passo (ex: 'Ligar à Rita dia 20 para fechar valores'), ou 'Nenhum de momento — <razão>' se não houver nada pendente. " +
             "influencers status: A identificar|A contactar|Contactado|Em conversa|Proposta enviada|Fechado|Arquivado. " +
             "events status: Ideia|Planeado|Confirmado|Realizado|Cancelado. " +
             "projects status: Not started|In progress|Done.",
