@@ -124,6 +124,24 @@ export function hasConvertedAfter(email, after, subsByEmail, membershipsByEmail)
     const mems = membershipsByEmail.get(email) ?? [];
     return subs.some((d) => d > after) || mems.some((d) => d > after);
 }
+/**
+ * If the person visited again (an attended, checked-in booking) after
+ * their own pack's expiry date but never started a subscription/non-intro
+ * membership (hasConvertedAfter), that's a meaningfully different signal
+ * from total silence — a paid drop-in return, not silence — and reads as
+ * contradictory next to a plain "sem converter" if left unsaid (caught by
+ * the founder on Liza Kupriievych: pack expired 16/07, but she came back
+ * and paid for a one-off Yin Yoga drop-in on 24/08, attended 25/08 — she
+ * never bought a plan, so hasConvertedAfter is correctly false, but the
+ * Motivo text needs to say she came back rather than imply she vanished).
+ * Returns null when there's nothing to add.
+ */
+export function describePostExpiryVisit(c) {
+    if (!c.lastVisit || c.lastVisit <= c.expiresAt)
+        return null;
+    const formatted = c.lastVisit.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+    return `voltou depois disso (última visita a ${formatted}), mas sem fazer plano`;
+}
 // Exported for src/crons/leads-reconcile.ts, which needs the same
 // subs/memberships lookup to check "did this specific Intro Pack lead
 // convert after THEIR pack's expiry" — a per-email question hasRealPurchase

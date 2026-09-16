@@ -7,7 +7,7 @@
  * follow up with" list, not a separate tracker.
  */
 import { log } from "../lib/log.js";
-import { findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
+import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
 import { sendGroupMessage } from "../lib/telegram.js";
 import { formatLeadsDigest } from "../messages/leads.js";
@@ -38,7 +38,8 @@ export async function run() {
             const existing = await notion.findLeadByEmail(c.email);
             if (existing)
                 continue; // already an open lead for this person
-            const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade`;
+            const postExpiryNote = describePostExpiryVisit(c);
+            const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade${postExpiryNote ? ` — ${postExpiryNote}` : ""}`;
             const origem = `Intro pack "${c.packName}" terminado a ${c.expiresAt.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" })}`;
             await notion.createLead(c.name, c.email, "Intro Pack", motivo, "N/A", origem, {
                 telefone: c.phone,
