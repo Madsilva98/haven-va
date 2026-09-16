@@ -7,3 +7,10 @@ for (const f of fs.readdirSync("src/prompts")) {
     console.log(`copied: ${f}`);
   }
 }
+
+fs.mkdirSync("dist/knowledge-base", { recursive: true });
+fs.copyFileSync(
+  "docs/knowledge-base/tidy-mailboxes-feedback-log.md",
+  "dist/knowledge-base/tidy-mailboxes-feedback-log.md",
+);
+console.log("copied: tidy-mailboxes-feedback-log.md");
