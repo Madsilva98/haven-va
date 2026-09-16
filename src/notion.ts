@@ -2019,6 +2019,20 @@ async function updateLeadDetails(pageId: string, opts: CreateLeadOptions): Promi
   log.info("notion.lead_details_updated", { pageId });
 }
 
+// Sets a lead's Estado directly — used by the same one-off repair for
+// people who were written as leads under the pagination bug but had
+// actually already converted (the bug also under-counted
+// kenko_memberships, so the "did they convert" check missed real rows).
+async function setLeadEstado(pageId: string, estado: LeadStatus): Promise<void> {
+  await withRetry("setLeadEstado", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: { Estado: { select: { name: estado } } },
+    }),
+  );
+  log.info("notion.lead_estado_set", { pageId, estado });
+}
+
 // Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
 // any — used to avoid creating a duplicate row for the same person across
 // runs. A closed lead (already converted/lost) does not block a new one.
@@ -2685,6 +2699,7 @@ export {
   // Leads a contactar
   createLead,
   updateLeadDetails,
+  setLeadEstado,
   findLeadByEmail,
   // Clientes em risco de churn
   getChurnRowByEmail,
@@ -2754,6 +2769,7 @@ export const notion = {
   createLead,
   findLeadByEmail,
   updateLeadDetails,
+  setLeadEstado,
   // Clientes em risco de churn
   getChurnRowByEmail,
   createChurnFlag,
