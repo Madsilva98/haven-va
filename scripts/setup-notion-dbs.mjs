@@ -24,6 +24,8 @@ const REMINDERS_DB_ID        = process.env.NOTION_REMINDERS_DB_ID;
 const PROJECTS_DB_ID         = process.env.NOTION_PROJECTS_DB_ID;
 const EVENTS_DB_ID           = process.env.NOTION_EVENT_DB_ID;
 const LISTS_DB_ID            = process.env.NOTION_LISTS_DB_ID;
+const LEADS_DB_ID            = process.env.NOTION_LEADS_DB_ID;
+const CHURN_RISK_DB_ID       = process.env.NOTION_CHURN_RISK_DB_ID;
 
 if (!BACKLOG_DB_ID) {
   console.error("missing NOTION_BACKLOG_DB_ID env var — fill .env first");
@@ -220,6 +222,42 @@ const listasProperties = {
   Origem: { rich_text: {} },
 };
 
+// ── Leads a contactar ────────────────────────────────────────────────────────
+// Title property is "Nome". Fed by src/crons/leads-email-scan.ts (Canal=Email)
+// and src/crons/leads-intro-pack.ts (Canal="Intro Pack"); WhatsApp/Instagram
+// values are reserved for the still-blocked Meta webhook path.
+const leadsProperties = {
+  Email: { email: {} },
+  Canal: { select: { options: [
+    { name: "Email" }, { name: "WhatsApp" }, { name: "Instagram" }, { name: "Intro Pack" },
+  ] } },
+  Mensagem: { rich_text: {} },
+  "Verificação": { select: { options: [
+    { name: "Sem correspondência" }, { name: "Match incerto — rever manualmente" }, { name: "N/A" },
+  ] } },
+  Estado: { select: { options: [
+    { name: "Novo" }, { name: "Contactado" }, { name: "Convertido" }, { name: "Perdido" },
+  ] } },
+  Notas: { rich_text: {} },
+  Origem: { rich_text: {} },
+  "Criado em": { created_time: {} },
+};
+
+// ── Clientes em risco de churn ──────────────────────────────────────────────
+// Title property is "Nome". Fed by src/crons/churn-risk.ts.
+const churnRiskProperties = {
+  Email: { email: {} },
+  Sinais: { multi_select: { options: [
+    { name: "Sem reservas 21+ dias" }, { name: "Pagamento falhado" }, { name: "Baixa utilização" },
+  ] } },
+  Detalhes: { rich_text: {} },
+  Status: { select: { options: [
+    { name: "Aberto" }, { name: "Contactado" }, { name: "Resolvido" }, { name: "Arquivado" },
+  ] } },
+  "Última deteção": { date: {} },
+  "Criado em": { created_time: {} },
+};
+
 async function setup(label, dbId, props) {
   console.log(`\n→ ${label} (${dbId})`);
   try {
@@ -267,6 +305,10 @@ async function main() {
   else console.log("· Eventos DB id not set — skipping");
   if (LISTS_DB_ID)            await setup("Listas",           LISTS_DB_ID,            listasProperties);
   else console.log("· Listas DB id not set — skipping");
+  if (LEADS_DB_ID)            await setup("Leads a contactar", LEADS_DB_ID,           leadsProperties);
+  else console.log("· Leads a contactar DB id not set — skipping");
+  if (CHURN_RISK_DB_ID)       await setup("Clientes em risco", CHURN_RISK_DB_ID,      churnRiskProperties);
+  else console.log("· Clientes em risco DB id not set — skipping");
 }
 
 main().catch((err) => {

@@ -14,6 +14,7 @@
 import { Client, APIResponseError } from "@notionhq/client";
 import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
 import { isValidRecurrence } from "./types.js";
+import { scoreMatch, significantWords } from "./lib/fuzzy-match.js";
 import { log } from "./lib/log.js";
 import { formatLisbonDateTime } from "./lib/tz.js";
 // ----- env -----
@@ -30,6 +31,8 @@ const NOTION_CONTENT_CALENDAR_DB_ID = process.env.NOTION_CONTENT_CALENDAR_DB_ID;
 const NOTION_PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
+const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
+const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
 if (!NOTION_API_KEY) {
     throw new Error("notion: NOTION_API_KEY is required");
 }
@@ -60,6 +63,8 @@ export async function initialize() {
         NOTION_PROJECTS_DB_ID,
         NOTION_EVENT_DB_ID,
         NOTION_LISTS_DB_ID,
+        NOTION_LEADS_DB_ID,
+        NOTION_CHURN_RISK_DB_ID,
     ]);
 }
 // ----- retry helper -----
@@ -1509,36 +1514,9 @@ async function getRecentDecisions(n) {
 // silence unused-helper warning for readDateTime (kept for callers)
 void readDateTime;
 // ----- fuzzy / semantic search helpers -----
-const PT_STOPWORDS = new Set([
-    "o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das",
-    "e", "em", "no", "na", "nos", "nas", "para", "já", "com", "por",
-    "ao", "à", "que", "se", "não", "mas", "ou", "ao", "às",
-]);
+// normalizeText/scoreMatch/significantWords now live in ./lib/fuzzy-match.js
+// (pure, shared with src/lib/leads.ts's Supabase name matching).
 const SMALL_DBS = new Set(["projects", "partners", "events", "influencers"]);
-function normalizeText(s) {
-    return s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-}
-function scoreMatch(title, query) {
-    const t = normalizeText(title);
-    const q = normalizeText(query);
-    if (t === q)
-        return 1;
-    if (t.includes(q) || q.includes(t))
-        return 0.8;
-    const tWords = new Set(t.split(/\s+/).filter((w) => w.length > 2));
-    const qWords = q.split(/\s+/).filter((w) => w.length > 2);
-    if (qWords.length === 0 || tWords.size === 0)
-        return 0;
-    const overlap = qWords.filter((w) => tWords.has(w) || [...tWords].some((tw) => tw.includes(w) || w.includes(tw))).length;
-    return overlap > 0 ? overlap / Math.max(qWords.length, tWords.size) : 0;
-}
-function significantWords(query) {
-    return query
-        .toLowerCase()
-        .split(/\s+/)
-        .map((w) => w.replace(/[^\wàáâãéêíóôõúüç]/gi, ""))
-        .filter((w) => w.length > 2 && !PT_STOPWORDS.has(w));
-}
 // ============================================================
 // Feature D — Create entities (project / event / partner / influencer)
 // ============================================================
@@ -1662,6 +1640,109 @@ async function createInfluencer(nome, owner, originalMsg) {
     }));
     log.info("notion.influencer_created", { pageId: page.id, nome, owner });
     return page.id;
+}
+// ----- Leads a contactar -----
+async function createLead(nome, email, canal, mensagem, verificacao, origem) {
+    if (!NOTION_LEADS_DB_ID) {
+        throw new Error("NOTION_LEADS_DB_ID not set");
+    }
+    const page = await withRetry("createLead", () => client.pages.create({
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_LEADS_DB_ID) },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            ...(email ? { Email: { email } } : {}),
+            Canal: { select: { name: canal } },
+            Mensagem: richText(mensagem),
+            "Verificação": { select: { name: verificacao } },
+            Estado: { select: { name: "Novo" } },
+            Origem: richText(origem),
+        },
+    }));
+    log.info("notion.lead_created", { pageId: page.id, nome, canal });
+    return page.id;
+}
+// Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
+// any — used to avoid creating a duplicate row for the same person across
+// runs. A closed lead (already converted/lost) does not block a new one.
+async function findLeadByEmail(email) {
+    if (!NOTION_LEADS_DB_ID)
+        return null;
+    const res = await withRetry("findLeadByEmail", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_LEADS_DB_ID),
+        filter: {
+            and: [
+                { property: "Email", email: { equals: email } },
+                { property: "Estado", select: { does_not_equal: "Convertido" } },
+                { property: "Estado", select: { does_not_equal: "Perdido" } },
+            ],
+        },
+        page_size: 1,
+    }));
+    const row = res.results[0];
+    if (!row || !("properties" in row))
+        return null;
+    const props = row.properties;
+    return {
+        id: row.id,
+        estado: (readSelectName(props["Estado"]) ?? "Novo"),
+    };
+}
+// ----- Clientes em risco de churn -----
+// Returns an OPEN churn-risk row (Status not Resolvido/Arquivado) for this
+// email, if any.
+async function getChurnRowByEmail(email) {
+    if (!NOTION_CHURN_RISK_DB_ID)
+        return null;
+    const res = await withRetry("getChurnRowByEmail", () => client.dataSources.query({
+        data_source_id: dsId(NOTION_CHURN_RISK_DB_ID),
+        filter: {
+            and: [
+                { property: "Email", email: { equals: email } },
+                { property: "Status", select: { does_not_equal: "Resolvido" } },
+                { property: "Status", select: { does_not_equal: "Arquivado" } },
+            ],
+        },
+        page_size: 1,
+    }));
+    const row = res.results[0];
+    if (!row || !("properties" in row))
+        return null;
+    const props = row.properties;
+    return {
+        id: row.id,
+        sinais: readMultiSelectNames(props["Sinais"]),
+    };
+}
+async function createChurnFlag(nome, email, sinais, detalhes) {
+    if (!NOTION_CHURN_RISK_DB_ID) {
+        throw new Error("NOTION_CHURN_RISK_DB_ID not set");
+    }
+    const page = await withRetry("createChurnFlag", () => client.pages.create({
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_CHURN_RISK_DB_ID) },
+        properties: {
+            Nome: { title: [{ text: { content: nome } }] },
+            Email: { email },
+            Sinais: { multi_select: sinais.map((s) => ({ name: s })) },
+            Detalhes: richText(detalhes),
+            Status: { select: { name: "Aberto" } },
+            "Última deteção": { date: { start: new Date().toISOString() } },
+        },
+    }));
+    log.info("notion.churn_flag_created", { pageId: page.id, nome, sinais });
+    return page.id;
+}
+// multi_select writes overwrite the whole array — caller must pass the full
+// desired signal set (e.g. union of old+new), not just the newly-found ones.
+async function updateChurnFlag(pageId, sinais, detalhes) {
+    await withRetry("updateChurnFlag", () => client.pages.update({
+        page_id: pageId,
+        properties: {
+            Sinais: { multi_select: sinais.map((s) => ({ name: s })) },
+            Detalhes: richText(detalhes),
+            "Última deteção": { date: { start: new Date().toISOString() } },
+        },
+    }));
+    log.info("notion.churn_flag_updated", { pageId, sinais });
 }
 // ----- Page section editing -----
 function normalizeSectionName(text) {
@@ -2104,7 +2185,11 @@ updateRecord, findBacklogTask, searchRecords,
 // Page section editing
 findPageInDb, appendToPageSection, uploadAndAttachFile, 
 // Entity dashboards
-getEntitiesForOwner, getTasksForEntity, };
+getEntitiesForOwner, getTasksForEntity, 
+// Leads a contactar
+createLead, findLeadByEmail, 
+// Clientes em risco de churn
+getChurnRowByEmail, createChurnFlag, updateChurnFlag, };
 export const notion = {
     createTask,
     updateTask,
@@ -2163,4 +2248,11 @@ export const notion = {
     // Entity dashboards
     getEntitiesForOwner,
     getTasksForEntity,
+    // Leads a contactar
+    createLead,
+    findLeadByEmail,
+    // Clientes em risco de churn
+    getChurnRowByEmail,
+    createChurnFlag,
+    updateChurnFlag,
 };

@@ -1,8 +1,11 @@
 import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
+import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
+import { run as runLeadsEmailScan } from "./crons/leads-email-scan.js";
+import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
@@ -69,6 +72,30 @@ const tasks = [
     () =>
       runTidyMailboxesFeedbackReminder().catch((e) =>
         log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "15 8 * * 1",
+    () =>
+      runLeadsEmailScan().catch((e) =>
+        log.error("cron.leads_email_scan", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "20 8 * * 1",
+    () =>
+      runLeadsIntroPack().catch((e) =>
+        log.error("cron.leads_intro_pack", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "45 8 * * 1",
+    () =>
+      runChurnRisk().catch((e) =>
+        log.error("cron.churn_risk", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

@@ -1,0 +1,62 @@
+/**
+ * Weekly scan for intro packs that finished at least 21 days ago (the
+ * empirically validated day — see src/lib/intro-pack-conversion.ts) with
+ * no conversion since. Writes into the same "Leads a contactar" Notion DB
+ * as the email pipeline (Canal = "Intro Pack"), since the founder's goal
+ * here — ask for feedback, try to reconvert — is the same "someone to
+ * follow up with" list, not a separate tracker.
+ */
+import { log } from "../lib/log.js";
+import { findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
+import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
+import { sendGroupMessage } from "../lib/telegram.js";
+import { formatLeadsDigest } from "../messages/leads.js";
+import * as notion from "../notion.js";
+function errMsg(err) {
+    return err instanceof Error ? err.message : String(err);
+}
+export async function run() {
+    if (!process.env.NOTION_LEADS_DB_ID) {
+        log.debug("leads_intro_pack.skipped", { reason: "NOTION_LEADS_DB_ID not set" });
+        return;
+    }
+    if (!isStudioSupabaseAvailable()) {
+        log.debug("leads_intro_pack.skipped", { reason: "studio_supabase_not_configured" });
+        return;
+    }
+    let candidates;
+    try {
+        candidates = await findUnconvertedIntroPacks();
+    }
+    catch (err) {
+        log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
+        return;
+    }
+    const created = [];
+    for (const c of candidates) {
+        try {
+            const existing = await notion.findLeadByEmail(c.email);
+            if (existing)
+                continue; // already an open lead for this person
+            const detalhe = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade`;
+            const origem = `Intro pack "${c.packName}" terminado a ${c.expiresAt.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" })}`;
+            await notion.createLead(c.name, c.email, "Intro Pack", detalhe, "N/A", origem);
+            created.push({ nome: c.name, canal: "Intro Pack" });
+        }
+        catch (err) {
+            log.error("leads_intro_pack.write_failed", { email: c.email, message: errMsg(err) });
+        }
+    }
+    const message = formatLeadsDigest(created);
+    if (!message) {
+        log.info("leads_intro_pack.no_new", { totalCandidates: candidates.length });
+        return;
+    }
+    try {
+        const messageId = await sendGroupMessage(message);
+        log.info("leads_intro_pack.posted", { messageId, count: created.length });
+    }
+    catch (err) {
+        log.error("leads_intro_pack.send_failed", { message: errMsg(err) });
+    }
+}

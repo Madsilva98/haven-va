@@ -163,13 +163,11 @@ sudo docker compose build --no-cache && sudo docker compose up -d
 
 Or, faster, redeploy the previous image without rebuilding — but `docker-compose.yml` uses `build:` not `image:`, so there's no image registry to roll back to. Practically: rollback = git checkout + rebuild.
 
-## Known-missing credential: Studio Supabase
+## Studio Supabase credentials — resolved
 
-`STUDIO_SUPABASE_URL` / `STUDIO_SUPABASE_KEY` are **not set** in the NAS `.env` (confirmed 2026-09-15 via container logs — `studio_supabase.disabled` fires at every boot). The birthday cron (`src/crons/birthdays.ts`, see `bot-architecture.md` outbound-messages row 8) has therefore never sent anything.
+`STUDIO_SUPABASE_URL` / `STUDIO_SUPABASE_KEY` **are configured in the NAS `.env` and confirmed working** (fixed 2026-09-15/16 — see `docs/roadmap.md` "Resolvido"). The Node-20 `RealtimeClient`/WebSocket crash that originally blocked this (`@supabase/supabase-js`'s `createClient()` always builds a `RealtimeClient` internally, which throws on Node 20 without a WebSocket implementation) was fixed in code (`src/lib/studio-supabase.ts` passes the `ws` package as `realtime.transport`), deployed, and the credentials re-added — confirmed via `studio_supabase.configured` in container logs with no crash, and a real birthday digest sent. If you see `studio_supabase.disabled` in current logs, that's a regression (e.g. `.env` got reverted), not the expected state — don't assume it's still the known 2026-09-15 issue.
 
-⚠️ **Do not just add the credentials to the current deployed image.** Doing exactly that on 2026-09-15 crashed the bot at startup — `@supabase/supabase-js`'s `createClient()` always builds a `RealtimeClient` internally, which throws on Node 20 without a WebSocket implementation. Fixed in code (`src/lib/studio-supabase.ts` now passes the `ws` package as `realtime.transport` — see `bot-architecture.md`'s Last-touched log for 2026-09-15), but that fix has to actually be **deployed** (`git pull && npm run build && sudo docker compose build --no-cache && sudo docker compose up -d`) before the credentials go back in, or the same crash repeats. Sequence: 1) deploy the code fix, 2) confirm the bot is up and healthy on the *old* (still-missing-credentials) config, 3) only then add `STUDIO_SUPABASE_URL`/`STUDIO_SUPABASE_KEY` to `/volume1/docker/haven-va/data/.env`, 4) `docker compose up -d --force-recreate` (per the "`.env` changes don't reload" gotcha above — a plain `restart` won't pick them up), 5) verify with `docker logs haven-va-haven-va-1 | grep studio_supabase` — should read `studio_supabase.configured`, not `.disabled`, with no crash after it.
-
-The project is likely `leddqmselxsjamlvxvyk` (there's already an MCP connector named `haven-studio-supabase` configured against that project ref on this machine) — get the Project URL + the "Publishable key" (Settings → API Keys in the Supabase dashboard; newer projects split this off from the old combined "API" settings page) from there.
+Project ref `leddqmselxsjamlvxvyk` (MCP connector `haven-studio-supabase` on this machine points at it) if you need to check credentials again via the Supabase dashboard.
 
 ## Secret hygiene
 
@@ -184,6 +182,8 @@ The container's **General** tab in DSM shows every env var in plaintext. **Do no
 **Second incident, 2026-09-14**: `MICROSOFT_CLIENT_SECRET` was printed into a tool output while checking a NAS `.env` file for duplicate entries after appending new env vars — a plain `grep` of the file echoed the full line, secret value included, into a visible result. Rotated same-session (new secret generated, both `.env.local` and the NAS `.env` updated without echoing the value back, verified with a real authenticated Graph call before deleting the old secret). Lesson now baked into the `rotate-secret` skill's Microsoft/Outlook section: never `grep`/`cat` a secret-bearing line to "just check" something — use a count or existence check (`grep -c`) instead, even for routine verification, not just during the rotation itself.
 
 ## Last touched
+
+2026-09-16 — Corrected this doc and `CLAUDE.md`/`bot-architecture.md`, which all still claimed Studio Supabase credentials were missing/not deployed on the NAS. They were fixed and confirmed working 2026-09-15/16 (see `docs/roadmap.md` "Resolvido") — the entries below are historical record of the incident, not current state.
 
 2026-09-15 — Updated after a real incident: adding the Studio Supabase credentials to the live (pre-fix) NAS deployment crashed the bot (see the warning in the section above and `bot-architecture.md`'s Last-touched log). Recovered by removing the env vars and recreating the container. The actual code fix (`ws` transport) is written and tested locally but **not yet deployed to the NAS** — documented the correct order of operations (deploy fix first, add credentials after) so this doesn't repeat.
 

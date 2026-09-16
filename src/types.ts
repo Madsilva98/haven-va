@@ -301,3 +301,43 @@ export interface RecentAction {
   notionPageId: string | null;
   botMessageId: number | null;
 }
+
+// ----- Leads a contactar (email/WhatsApp/Instagram/Intro Pack) -----
+
+export type LeadChannel = "Email" | "WhatsApp" | "Instagram" | "Intro Pack";
+
+export type LeadVerification =
+  | "Sem correspondência"
+  | "Match incerto — rever manualmente"
+  | "N/A";
+
+export type LeadStatus = "Novo" | "Contactado" | "Convertido" | "Perdido";
+
+export interface LeadRow {
+  id: string;
+  nome: string;
+  email: string | null;
+  canal: LeadChannel;
+  mensagem: string;
+  verificacao: LeadVerification;
+  estado: LeadStatus;
+  origem: string;
+}
+
+// ----- Clientes em risco de churn -----
+
+export type ChurnSignalType =
+  | "Sem reservas 21+ dias"
+  | "Pagamento falhado"
+  | "Baixa utilização";
+
+export type ChurnStatus = "Aberto" | "Contactado" | "Resolvido" | "Arquivado";
+
+export interface ChurnRiskRow {
+  id: string;
+  nome: string;
+  email: string;
+  sinais: ChurnSignalType[];
+  detalhes: string;
+  status: ChurnStatus;
+}
