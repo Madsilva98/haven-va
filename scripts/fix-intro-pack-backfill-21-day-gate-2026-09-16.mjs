@@ -78,7 +78,9 @@ async function main() {
   let motivoFixed = 0;
   let motivoNotFound = 0;
   for (const email of ALREADY_CONVERTED_EMAILS) {
-    const existing = await notion.findLeadByEmail(email);
+    // Not findLeadByEmail — these are already Estado=Convertido, which
+    // that lookup deliberately excludes (it's built for open-lead dedup).
+    const existing = await notion.findLeadByEmailAny(email);
     if (!existing) {
       console.log(`[não encontrado — a saltar] ${email}`);
       motivoNotFound++;

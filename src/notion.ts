@@ -2062,6 +2062,27 @@ async function findLeadByEmail(email: string): Promise<{ id: string; estado: Lea
   };
 }
 
+// Same as findLeadByEmail but WITHOUT the open-only filter — for one-off
+// data repairs that need to reach a lead regardless of its current Estado
+// (e.g. fixing the Motivo text on a row already marked Convertido).
+async function findLeadByEmailAny(email: string): Promise<{ id: string; estado: LeadStatus } | null> {
+  if (!NOTION_LEADS_DB_ID) return null;
+  const res = await withRetry("findLeadByEmailAny", () =>
+    client.dataSources.query({
+      data_source_id: dsId(NOTION_LEADS_DB_ID!),
+      filter: { property: "Email", email: { equals: email } },
+      page_size: 1,
+    }),
+  );
+  const row = res.results[0];
+  if (!row || !("properties" in row)) return null;
+  const props = row.properties as Record<string, unknown>;
+  return {
+    id: row.id,
+    estado: (readSelectName(props["Estado"]) ?? "Novo") as LeadStatus,
+  };
+}
+
 // ----- Clientes em risco de churn -----
 
 // Returns an OPEN churn-risk row (Status not Resolvido/Arquivado) for this
@@ -2703,6 +2724,7 @@ export {
   updateLeadDetails,
   setLeadEstado,
   findLeadByEmail,
+  findLeadByEmailAny,
   // Clientes em risco de churn
   getChurnRowByEmail,
   createChurnFlag,
@@ -2770,6 +2792,7 @@ export const notion = {
   // Leads a contactar
   createLead,
   findLeadByEmail,
+  findLeadByEmailAny,
   updateLeadDetails,
   setLeadEstado,
   // Clientes em risco de churn
