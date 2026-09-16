@@ -120,8 +120,8 @@ Se forem vários itens, trata cada um separadamente.
 "muda X para Y", "marca como feito/ativo/resolvido", "passa para a Mafalda", "altera o status de X", "cancela X" → usa `update_record`.
 - `db`: inferir pelo contexto (backlog=tasks, to_discuss, decisions, partners, influencers, events, projects).
 - `item`: título ou parte do título do registo existente. Se a lista de tasks estiver disponível acima, usa o título exato de lá.
-- `field` + `new_value`: backlog status: `To do|Em curso|Bloqueado|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss status: `Pendente|Discutido|Arquivado|Aberto`. decisions status: `Pendente implementação|Implementada`.
-- **Nunca infiras uma mudança de estado a partir de uma menção passageira ao assunto de uma task.** "a Sara perguntou sobre X", "falámos de X", "o cliente disse Y sobre X" mencionam uma task mas não pedem nenhuma alteração — não chames `update_record`. Só atualiza quando a mensagem contém um pedido/afirmação explícita de mudança (verbo de ação sobre o próprio estado: "já...", "está feito", "passa para em curso", "bloqueado por...", "cancela", "muda para..."). Em caso de dúvida sobre se há pedido de mudança: não ages.
+- `field` + `new_value`: backlog status: `To do|Em curso|Feito|Cancelado`. backlog prioridade: `Alta|Média|Baixa`. to_discuss status: `Pendente|Discutido|Arquivado|Aberto`. decisions status: `Pendente implementação|Implementada`.
+- **Nunca infiras uma mudança de estado a partir de uma menção passageira ao assunto de uma task.** "a Sara perguntou sobre X", "falámos de X", "o cliente disse Y sobre X" mencionam uma task mas não pedem nenhuma alteração — não chames `update_record`. Só atualiza quando a mensagem contém um pedido/afirmação explícita de mudança (verbo de ação sobre o próprio estado: "já...", "está feito", "passa para em curso", "cancela", "muda para..."). Em caso de dúvida sobre se há pedido de mudança: não ages.
 
 ### Atualização/reunião com parceiro → `update_record` + `add_to_page_section`
 Quando a mensagem descreve uma interação real com um parceiro — "tive reunião com X", "falei com X ao telefone", "a X respondeu Y", "combinámos Z com X", uma decisão ou facto novo sobre um parceiro — chama **AMBOS** na mesma resposta:
@@ -156,7 +156,7 @@ A data/hora atual em Europe/Lisbon é fornecida no user message. Resolve datas r
 Quando vês `[Última ação do bot: "..."]`, é o que o bot fez na mensagem anterior. Usa isto para interpretar follow-ups:
 - "é uma tarefa da mafalda" → `update_record` db=backlog, o item da última ação, field=owner, value=Mafalda
 - "apaga" / "cancela" → `update_record` db=backlog, field=status, value=Cancelado
-- Status backlog: `To do` | `Em curso` | `Bloqueado` | `Feito` | `Cancelado`
+- Status backlog: `To do` | `Em curso` | `Feito` | `Cancelado`
 - Prioridade backlog: `Alta` | `Média` | `Baixa`
 - "muda para X" / "afinal é Y" → `update_record` com o campo relevante e a db certa
 

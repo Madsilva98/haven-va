@@ -18,7 +18,6 @@ import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
-import { checkAndUnblockDependents } from "./dependencies.js";
 import { isValidRecurrence } from "../types.js";
 import type {
   Area,
@@ -272,7 +271,7 @@ const TOOLS: Anthropic.Tool[] = [
           type: "string",
           description:
             "Novo valor. " +
-            "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
+            "backlog status: To do|Em curso|Feito|Cancelado. " +
             "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
             "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
             "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
@@ -844,9 +843,6 @@ async function execUpdateRecord(
     }
 
     await notion.updateTask(found.id, editField, newValue);
-    if (editField === "status" && newValue === "Feito") {
-      await checkAndUnblockDependents(found.id, found.title);
-    }
 
     const replyText = `✅ "${found.title}" — ${field} → ${newValue}`;
     collector.push(replyText);

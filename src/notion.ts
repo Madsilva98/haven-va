@@ -1792,51 +1792,6 @@ async function getRecentDecisions(n: number): Promise<DecisionRow[]> {
   return rows;
 }
 
-async function setTaskDependency(
-  blockedId: string,
-  prerequisiteId: string,
-): Promise<void> {
-  await withRetry("setTaskDependency", () =>
-    client.pages.update({
-      page_id: blockedId,
-      properties: {
-        "Depende de": { relation: [{ id: prerequisiteId }] },
-      } as Parameters<typeof client.pages.update>[0]["properties"],
-    }),
-  );
-  log.info("notion.dependency_set", { blockedId, prerequisiteId });
-}
-
-async function getDependentTasks(prerequisiteId: string): Promise<OpenTask[]> {
-  if (!NOTION_BACKLOG_DB_ID) return [];
-  const res = await withRetry("getDependentTasks", () =>
-    client.dataSources.query({
-      data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
-      filter: {
-        and: [
-          { property: "Depende de", relation: { contains: prerequisiteId } },
-          { property: "Status", select: { equals: "Bloqueado" } },
-        ],
-      },
-    }),
-  );
-  const tasks: OpenTask[] = [];
-  for (const row of res.results) {
-    if (!("properties" in row)) continue;
-    tasks.push(
-      rowToOpenTask({
-        id: row.id,
-        properties: row.properties as Record<string, unknown>,
-      }),
-    );
-  }
-  log.debug("notion.dependents_fetched", {
-    prerequisiteId,
-    count: tasks.length,
-  });
-  return tasks;
-}
-
 // silence unused-helper warning for readDateTime (kept for callers)
 void readDateTime;
 
@@ -2554,9 +2509,6 @@ export {
   setToDiscussResolved,
   createDecision,
   getRecentDecisions,
-  // Dependencies
-  setTaskDependency,
-  getDependentTasks,
   // Feature D — entities
   createProject,
   createEvent,
@@ -2617,9 +2569,6 @@ export const notion = {
   setToDiscussResolved,
   createDecision,
   getRecentDecisions,
-  // Dependencies
-  setTaskDependency,
-  getDependentTasks,
   // Feature D — entities
   createProject,
   createEvent,

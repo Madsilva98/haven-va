@@ -15,7 +15,6 @@ import { lisbonNaiveToUtcIso } from "../lib/tz.js";
 import * as calendar from "../lib/calendar.js";
 import * as notion from "../notion.js";
 import { taskUndoKeyboard } from "./keyboards.js";
-import { checkAndUnblockDependents } from "./dependencies.js";
 import { isValidRecurrence } from "../types.js";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 1500;
@@ -250,7 +249,7 @@ const TOOLS = [
                 new_value: {
                     type: "string",
                     description: "Novo valor. " +
-                        "backlog status: To do|Em curso|Bloqueado|Feito|Cancelado. " +
+                        "backlog status: To do|Em curso|Feito|Cancelado. " +
                         "backlog owner: Madalena|Mafalda|Beatriz|Unassigned. " +
                         "backlog prioridade: Alta|Média|Baixa. deadline: YYYY-MM-DD. " +
                         "to_discuss urgencia: Próxima reunião|Decisão offline|Urgente. " +
@@ -715,9 +714,6 @@ async function execUpdateRecord(input, ctx, collector) {
             return msg;
         }
         await notion.updateTask(found.id, editField, newValue);
-        if (editField === "status" && newValue === "Feito") {
-            await checkAndUnblockDependents(found.id, found.title);
-        }
         const replyText = `✅ "${found.title}" — ${field} → ${newValue}`;
         collector.push(replyText);
         await ctx.reply(replyText);

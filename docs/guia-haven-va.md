@@ -116,7 +116,7 @@ Bot de Telegram que liga diretamente ao Notion e ao Google Calendar. Fala com el
 
 | Campo | Valores possíveis |
 |---|---|
-| Status | To do · Em curso · Bloqueado · Feito · Cancelado |
+| Status | To do · Em curso · Feito · Cancelado |
 | Prioridade | 1. Alta · 2. Média · 3. Baixa |
 | Owner | Madalena · Mafalda · Beatriz · Unassigned |
 | Área | Marketing · Operações · Parcerias · Influencers · Tech · Cliente · Financeiro · Outro |

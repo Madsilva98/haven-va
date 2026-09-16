@@ -17,7 +17,7 @@ export type Area =
 
 export type Priority = "Alta" | "Média" | "Baixa";
 
-export type Status = "To do" | "Em curso" | "Bloqueado" | "Feito" | "Cancelado";
+export type Status = "To do" | "Em curso" | "Feito" | "Cancelado";
 
 export type EditableField = "status" | "owner" | "deadline" | "prioridade" | "area" | "title";
 
@@ -260,14 +260,6 @@ export interface EditPendingIntent {
   value: string | null;
 }
 
-export interface SetDependencyIntent {
-  type: "SET_DEPENDENCY";
-  blocked: string;
-  blockedOwner: OwnerValue;
-  prerequisite: string;
-  prerequisiteOwner: OwnerValue;
-}
-
 export interface ToDiscussIntent {
   type: "TO_DISCUSS";
   tema: string;
@@ -297,7 +289,6 @@ export type Intent =
   | DecisionIntent
   | LaunchIntentIntent
   | EditPendingIntent
-  | SetDependencyIntent
   | ToDiscussIntent
   | CreateEntityIntent;
 

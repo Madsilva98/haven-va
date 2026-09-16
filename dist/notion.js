@@ -1506,42 +1506,6 @@ async function getRecentDecisions(n) {
     log.debug("notion.recent_decisions_fetched", { count: rows.length });
     return rows;
 }
-async function setTaskDependency(blockedId, prerequisiteId) {
-    await withRetry("setTaskDependency", () => client.pages.update({
-        page_id: blockedId,
-        properties: {
-            "Depende de": { relation: [{ id: prerequisiteId }] },
-        },
-    }));
-    log.info("notion.dependency_set", { blockedId, prerequisiteId });
-}
-async function getDependentTasks(prerequisiteId) {
-    if (!NOTION_BACKLOG_DB_ID)
-        return [];
-    const res = await withRetry("getDependentTasks", () => client.dataSources.query({
-        data_source_id: dsId(NOTION_BACKLOG_DB_ID),
-        filter: {
-            and: [
-                { property: "Depende de", relation: { contains: prerequisiteId } },
-                { property: "Status", select: { equals: "Bloqueado" } },
-            ],
-        },
-    }));
-    const tasks = [];
-    for (const row of res.results) {
-        if (!("properties" in row))
-            continue;
-        tasks.push(rowToOpenTask({
-            id: row.id,
-            properties: row.properties,
-        }));
-    }
-    log.debug("notion.dependents_fetched", {
-        prerequisiteId,
-        count: tasks.length,
-    });
-    return tasks;
-}
 // silence unused-helper warning for readDateTime (kept for callers)
 void readDateTime;
 // ----- fuzzy / semantic search helpers -----
@@ -2129,8 +2093,6 @@ getOpenTasksFor, getWeeklyPriorities, setWeeklyPriority, getWeeklyCompletedSince
 getAllPartnerContacts, getContentCalendarNeedsScheduling, createReminder, getDueReminders, markReminderSent, cancelReminder, 
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
-// Dependencies
-setTaskDependency, getDependentTasks, 
 // Feature D — entities
 createProject, createEvent, createPartner, createInfluencer, 
 // Feature E — entity lookup
@@ -2177,9 +2139,6 @@ export const notion = {
     setToDiscussResolved,
     createDecision,
     getRecentDecisions,
-    // Dependencies
-    setTaskDependency,
-    getDependentTasks,
     // Feature D — entities
     createProject,
     createEvent,
