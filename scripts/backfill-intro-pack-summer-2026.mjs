@@ -48,7 +48,7 @@ async function main() {
 
   for (const c of candidates) {
     const expiresLabel = c.expiresAt.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
-    const line = `- ${c.name} <${c.email}> — ${c.packName}, terminou a ${expiresLabel} (${c.daysSinceExpiry} dias)`;
+    const line = `- ${c.name} <${c.email}> ${c.phone ?? "(sem telefone)"} — ${c.packName}, terminou a ${expiresLabel} (${c.daysSinceExpiry} dias), ${c.visitCount} visita(s)`;
 
     if (!apply) {
       console.log(`[dry-run] ${line}`);
@@ -62,9 +62,14 @@ async function main() {
       continue;
     }
 
-    const detalhe = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter (backfill verão 2026)`;
+    const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter (backfill verão 2026)`;
     const origem = `Intro pack "${c.packName}" terminado a ${expiresLabel} — backfill one-off, efeito verão`;
-    await notion.createLead(c.name, c.email, "Intro Pack", detalhe, "N/A", origem);
+    await notion.createLead(c.name, c.email, "Intro Pack", motivo, "N/A", origem, {
+      telefone: c.phone,
+      pack: c.packName,
+      ultimaVisita: c.lastVisit ? c.lastVisit.toISOString() : null,
+      nVisitas: c.visitCount,
+    });
     console.log(`[criado] ${line}`);
     created++;
   }

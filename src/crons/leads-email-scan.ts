@@ -20,7 +20,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { checkExistingCustomer, fetchAllCustomerNames, type CustomerNameRecord } from "../lib/leads.js";
+import {
+  checkExistingCustomer,
+  fetchAllCustomerNames,
+  findPhoneByEmail,
+  type CustomerNameRecord,
+} from "../lib/leads.js";
 import { isGenuineInformationRequest } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
@@ -149,9 +154,10 @@ export async function run(): Promise<void> {
           ? "Match incerto — rever manualmente"
           : "Sem correspondência";
         const origem = `${mailbox} · ${msg.from.name} <${msg.from.email}> · "${msg.subject}" · ${msg.receivedDateTime}`;
-        const mensagem = (msg.bodyPreview || msg.body).slice(0, 1000);
+        const motivo = `Pedido de informação por email — assunto: "${msg.subject}"`;
+        const telefone = findPhoneByEmail(email, customers);
 
-        await notion.createLead(name, email, "Email", mensagem, verificacao, origem);
+        await notion.createLead(name, email, "Email", motivo, verificacao, origem, { telefone });
         created.push({ nome: name, canal: "Email" });
       } catch (err) {
         log.error("leads_email_scan.write_failed", { email, message: errMsg(err) });

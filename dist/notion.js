@@ -1641,8 +1641,7 @@ async function createInfluencer(nome, owner, originalMsg) {
     log.info("notion.influencer_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-// ----- Leads a contactar -----
-async function createLead(nome, email, canal, mensagem, verificacao, origem) {
+async function createLead(nome, email, canal, motivo, verificacao, origem, opts = {}) {
     if (!NOTION_LEADS_DB_ID) {
         throw new Error("NOTION_LEADS_DB_ID not set");
     }
@@ -1651,8 +1650,12 @@ async function createLead(nome, email, canal, mensagem, verificacao, origem) {
         properties: {
             Nome: { title: [{ text: { content: nome } }] },
             ...(email ? { Email: { email } } : {}),
+            ...(opts.telefone ? { Telefone: { phone_number: opts.telefone } } : {}),
             Canal: { select: { name: canal } },
-            Mensagem: richText(mensagem),
+            Motivo: richText(motivo),
+            ...(opts.pack ? { Pack: richText(opts.pack) } : {}),
+            ...(opts.ultimaVisita ? { "Última visita": { date: { start: opts.ultimaVisita } } } : {}),
+            ...(opts.nVisitas != null ? { "Nº de visitas": { number: opts.nVisitas } } : {}),
             "Verificação": { select: { name: verificacao } },
             Estado: { select: { name: "Novo" } },
             Origem: richText(origem),
@@ -1713,7 +1716,7 @@ async function getChurnRowByEmail(email) {
         sinais: readMultiSelectNames(props["Sinais"]),
     };
 }
-async function createChurnFlag(nome, email, sinais, detalhes) {
+async function createChurnFlag(nome, email, sinais, detalhes, plano, telefone) {
     if (!NOTION_CHURN_RISK_DB_ID) {
         throw new Error("NOTION_CHURN_RISK_DB_ID not set");
     }
@@ -1722,6 +1725,8 @@ async function createChurnFlag(nome, email, sinais, detalhes) {
         properties: {
             Nome: { title: [{ text: { content: nome } }] },
             Email: { email },
+            ...(telefone ? { Telefone: { phone_number: telefone } } : {}),
+            Plano: richText(plano),
             Sinais: { multi_select: sinais.map((s) => ({ name: s })) },
             Detalhes: richText(detalhes),
             Status: { select: { name: "Aberto" } },

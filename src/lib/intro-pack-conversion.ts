@@ -14,6 +14,7 @@
  */
 
 import { isExcludedEmail } from "./churn-signals.js";
+import { fetchAllCustomerNames, findPhoneByEmail, type CustomerNameRecord } from "./leads.js";
 import { log } from "./log.js";
 import { studioSupabase } from "./studio-supabase.js";
 
@@ -31,9 +32,12 @@ export const DEFAULT_CUTOFF_DAYS = 21;
 export interface UnconvertedIntroPack {
   email: string;
   name: string;
+  phone: string | null;
   packName: string;
   expiresAt: Date;
   daysSinceExpiry: number;
+  lastVisit: Date | null; // last attended booking (checkin_status = "Yes"), any time
+  visitCount: number; // count of attended bookings, any time
 }
 
 interface IntroPackRow {
@@ -104,6 +108,38 @@ async function fetchAllNonIntroMembershipStarts(): Promise<Map<string, Date[]>> 
   return map;
 }
 
+interface VisitStats {
+  lastVisit: Date | null;
+  count: number;
+}
+
+/**
+ * email (lowercased) -> attendance stats, counting only checkin_status =
+ * "Yes" (an actual attended class, not just a reservation made).
+ */
+async function fetchVisitHistory(): Promise<Map<string, VisitStats>> {
+  if (!studioSupabase) return new Map();
+  const { data, error } = await studioSupabase
+    .from("kenko_bookings")
+    .select("contact_email, event_date, checkin_status")
+    .eq("checkin_status", "Yes");
+  if (error) throw new Error(`intro_pack_conversion: kenko_bookings query failed: ${error.message}`);
+  const map = new Map<string, VisitStats>();
+  for (const r of data ?? []) {
+    if (!r.contact_email || !r.event_date) continue;
+    const email = (r.contact_email as string).toLowerCase().trim();
+    const eventDate = new Date(r.event_date as string);
+    const existing = map.get(email);
+    if (!existing) {
+      map.set(email, { lastVisit: eventDate, count: 1 });
+    } else {
+      existing.count += 1;
+      if (eventDate > existing.lastVisit!) existing.lastVisit = eventDate;
+    }
+  }
+  return map;
+}
+
 // Exported for unit testing without a Supabase call.
 export function hasConvertedAfter(
   email: string,
@@ -120,13 +156,17 @@ interface ConversionCheckData {
   firstPackByEmail: Map<string, IntroPackRow>;
   subsByEmail: Map<string, Date[]>;
   membershipsByEmail: Map<string, Date[]>;
+  visitsByEmail: Map<string, VisitStats>;
+  customers: CustomerNameRecord[];
 }
 
 async function loadConversionCheckData(): Promise<ConversionCheckData> {
-  const [introRows, subsByEmail, membershipsByEmail] = await Promise.all([
+  const [introRows, subsByEmail, membershipsByEmail, visitsByEmail, customers] = await Promise.all([
     fetchIntroPackFinishers(),
     fetchAllSubscriptionStarts(),
     fetchAllNonIntroMembershipStarts(),
+    fetchVisitHistory(),
+    fetchAllCustomerNames(),
   ]);
 
   // First intro pack per person — a second/later intro pack purchase would
@@ -140,17 +180,26 @@ async function loadConversionCheckData(): Promise<ConversionCheckData> {
     }
   }
 
-  return { firstPackByEmail, subsByEmail, membershipsByEmail };
+  return { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers };
 }
 
-function toUnconverted(row: IntroPackRow, now: Date): UnconvertedIntroPack {
+function toUnconverted(
+  row: IntroPackRow,
+  now: Date,
+  visitsByEmail: Map<string, VisitStats>,
+  customers: CustomerNameRecord[],
+): UnconvertedIntroPack {
   const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
+  const visits = visitsByEmail.get(row.email);
   return {
     email: row.email,
     name: row.name,
+    phone: findPhoneByEmail(row.email, customers),
     packName: row.packName,
     expiresAt: row.expiresAt,
     daysSinceExpiry: Math.round(daysSinceExpiry),
+    lastVisit: visits?.lastVisit ?? null,
+    visitCount: visits?.count ?? 0,
   };
 }
 
@@ -167,13 +216,14 @@ export async function findUnconvertedIntroPacks(
     log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_supabase_not_configured" });
     return [];
   }
-  const { firstPackByEmail, subsByEmail, membershipsByEmail } = await loadConversionCheckData();
+  const { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers } =
+    await loadConversionCheckData();
   const out: UnconvertedIntroPack[] = [];
   for (const row of firstPackByEmail.values()) {
     if (hasConvertedAfter(row.email, row.expiresAt, subsByEmail, membershipsByEmail)) continue;
     const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
     if (daysSinceExpiry >= cutoffDays) {
-      out.push(toUnconverted(row, now));
+      out.push(toUnconverted(row, now, visitsByEmail, customers));
     }
   }
   return out;
@@ -197,12 +247,13 @@ export async function findUnconvertedIntroPacksInRange(
   }
   const from = new Date(fromISO);
   const to = new Date(toISO);
-  const { firstPackByEmail, subsByEmail, membershipsByEmail } = await loadConversionCheckData();
+  const { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers } =
+    await loadConversionCheckData();
   const out: UnconvertedIntroPack[] = [];
   for (const row of firstPackByEmail.values()) {
     if (row.expiresAt < from || row.expiresAt >= to) continue;
     if (hasConvertedAfter(row.email, row.expiresAt, subsByEmail, membershipsByEmail)) continue;
-    out.push(toUnconverted(row, now));
+    out.push(toUnconverted(row, now, visitsByEmail, customers));
   }
   return out;
 }

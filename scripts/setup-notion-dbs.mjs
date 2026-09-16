@@ -228,10 +228,14 @@ const listasProperties = {
 // values are reserved for the still-blocked Meta webhook path.
 const leadsProperties = {
   Email: { email: {} },
+  Telefone: { phone_number: {} },
   Canal: { select: { options: [
     { name: "Email" }, { name: "WhatsApp" }, { name: "Instagram" }, { name: "Intro Pack" },
   ] } },
-  Mensagem: { rich_text: {} },
+  Motivo: { rich_text: {} },
+  Pack: { rich_text: {} },
+  "Última visita": { date: {} },
+  "Nº de visitas": { number: {} },
   "Verificação": { select: { options: [
     { name: "Sem correspondência" }, { name: "Match incerto — rever manualmente" }, { name: "N/A" },
   ] } },
@@ -241,12 +245,19 @@ const leadsProperties = {
   Notas: { rich_text: {} },
   Origem: { rich_text: {} },
   "Criado em": { created_time: {} },
+  // "Mensagem" (the raw email excerpt) was removed 2026-09-16 — "Motivo" +
+  // "Origem" carry enough context, founder didn't need it. Deleted via a
+  // one-off `Mensagem: null` push; NOT left in permanently — the Notion API
+  // 404s (doesn't silently no-op) if you try to null a property that's
+  // already gone, which would break every future run of this script.
 };
 
 // ── Clientes em risco de churn ──────────────────────────────────────────────
 // Title property is "Nome". Fed by src/crons/churn-risk.ts.
 const churnRiskProperties = {
   Email: { email: {} },
+  Telefone: { phone_number: {} },
+  Plano: { rich_text: {} },
   Sinais: { multi_select: { options: [
     { name: "Sem reservas 21+ dias" }, { name: "Pagamento falhado" }, { name: "Baixa utilização" },
   ] } },

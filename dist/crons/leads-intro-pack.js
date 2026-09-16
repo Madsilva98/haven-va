@@ -38,9 +38,14 @@ export async function run() {
             const existing = await notion.findLeadByEmail(c.email);
             if (existing)
                 continue; // already an open lead for this person
-            const detalhe = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade`;
+            const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade`;
             const origem = `Intro pack "${c.packName}" terminado a ${c.expiresAt.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" })}`;
-            await notion.createLead(c.name, c.email, "Intro Pack", detalhe, "N/A", origem);
+            await notion.createLead(c.name, c.email, "Intro Pack", motivo, "N/A", origem, {
+                telefone: c.phone,
+                pack: c.packName,
+                ultimaVisita: c.lastVisit ? c.lastVisit.toISOString() : null,
+                nVisitas: c.visitCount,
+            });
             created.push({ nome: c.name, canal: "Intro Pack" });
         }
         catch (err) {

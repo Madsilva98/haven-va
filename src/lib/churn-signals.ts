@@ -22,6 +22,7 @@
  */
 
 import type { ChurnSignalType } from "../types.js";
+import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
 import { studioSupabase } from "./studio-supabase.js";
 
@@ -72,6 +73,8 @@ export interface FailedPaymentRecord {
 export interface ChurnFlag {
   email: string;
   name: string;
+  plano: string;
+  telefone: string | null; // filled in by fetchChurnFlags (I/O); null from computeChurnFlags alone
   signals: { type: ChurnSignalType; detail: string }[];
 }
 
@@ -207,7 +210,7 @@ export function computeChurnFlags(
     }
 
     if (signals.length > 0) {
-      flags.push({ email, name: sub.name, signals });
+      flags.push({ email, name: sub.name, plano: sub.membershipName, telefone: null, signals });
     }
   }
 
@@ -274,6 +277,15 @@ export async function fetchChurnFlags(now: Date = new Date()): Promise<ChurnFlag
     }));
 
   const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);
+
+  // Phone isn't in kenko_subscriptions — look it up from kenko_customers
+  // (which includes Leads alongside real customers, so this can hit even
+  // for edge cases where a phone was entered without a formal purchase).
+  const customers = await fetchAllCustomerNames();
+  for (const flag of flags) {
+    flag.telefone = findPhoneByEmail(flag.email, customers);
+  }
+
   log.debug("churn_signals.computed", {
     subscribers: subscribers.length,
     flagged: flags.length,

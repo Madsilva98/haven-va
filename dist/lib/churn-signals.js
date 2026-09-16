@@ -20,6 +20,7 @@
  * raw unused-credits snapshot, no-show rate, "never booked at all" — none
  * discriminated churned vs. active members once the above noise was removed.
  */
+import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
 import { studioSupabase } from "./studio-supabase.js";
 // Staff/test accounts — not secrets, rarely change, kept here (not .env)
@@ -156,7 +157,7 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
             }
         }
         if (signals.length > 0) {
-            flags.push({ email, name: sub.name, signals });
+            flags.push({ email, name: sub.name, plano: sub.membershipName, telefone: null, signals });
         }
     }
     return flags;
@@ -217,6 +218,13 @@ export async function fetchChurnFlags(now = new Date()) {
         paymentDate: new Date(r.payment_date),
     }));
     const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);
+    // Phone isn't in kenko_subscriptions — look it up from kenko_customers
+    // (which includes Leads alongside real customers, so this can hit even
+    // for edge cases where a phone was entered without a formal purchase).
+    const customers = await fetchAllCustomerNames();
+    for (const flag of flags) {
+        flag.telefone = findPhoneByEmail(flag.email, customers);
+    }
     log.debug("churn_signals.computed", {
         subscribers: subscribers.length,
         flagged: flags.length,

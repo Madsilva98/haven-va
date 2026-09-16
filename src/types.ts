@@ -317,8 +317,12 @@ export interface LeadRow {
   id: string;
   nome: string;
   email: string | null;
+  telefone: string | null;
   canal: LeadChannel;
-  mensagem: string;
+  motivo: string;
+  pack: string | null; // which intro pack, when canal = "Intro Pack"
+  ultimaVisita: string | null; // ISO date of last attended booking, if any
+  nVisitas: number | null; // count of attended bookings, if known
   verificacao: LeadVerification;
   estado: LeadStatus;
   origem: string;
@@ -337,6 +341,8 @@ export interface ChurnRiskRow {
   id: string;
   nome: string;
   email: string;
+  telefone: string | null;
+  plano: string;
   sinais: ChurnSignalType[];
   detalhes: string;
   status: ChurnStatus;

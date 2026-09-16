@@ -15,6 +15,7 @@ import { studioSupabase } from "./studio-supabase.js";
 export interface CustomerNameRecord {
   name: string;
   email: string | null;
+  phone: string | null;
 }
 
 export interface FuzzyMatch {
@@ -47,7 +48,7 @@ export async function fetchAllCustomerNames(): Promise<CustomerNameRecord[]> {
   }
   const { data, error } = await studioSupabase
     .from("kenko_customers")
-    .select("contact_name, contact_email");
+    .select("contact_name, contact_email, contact_phone");
   if (error) {
     throw new Error(`leads: kenko_customers query failed: ${error.message}`);
   }
@@ -56,7 +57,22 @@ export async function fetchAllCustomerNames(): Promise<CustomerNameRecord[]> {
     .map((r) => ({
       name: r.contact_name as string,
       email: (r.contact_email as string | null) ?? null,
+      phone: (r.contact_phone as string | null) ?? null,
     }));
+}
+
+/**
+ * Pure — no I/O. Exact (case-insensitive) email match against `customers`
+ * for a phone number, if `kenko_customers` has one on file. Independent of
+ * the purchase check — `kenko_customers` includes Leads alongside real
+ * customers (see src/lib/studio-supabase.ts), so a phone can be on file
+ * even for someone who never bought anything.
+ */
+export function findPhoneByEmail(email: string | null, customers: CustomerNameRecord[]): string | null {
+  if (!email) return null;
+  const normalized = email.trim().toLowerCase();
+  const match = customers.find((c) => c.email && c.email.trim().toLowerCase() === normalized);
+  return match?.phone ?? null;
 }
 
 async function hasRealPurchase(email: string): Promise<boolean> {

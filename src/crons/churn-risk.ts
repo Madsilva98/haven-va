@@ -47,7 +47,7 @@ export async function run(): Promise<void> {
     try {
       const existing = await notion.getChurnRowByEmail(flag.email);
       if (!existing) {
-        await notion.createChurnFlag(flag.name, flag.email, signalTypes, detalhes);
+        await notion.createChurnFlag(flag.name, flag.email, signalTypes, detalhes, flag.plano, flag.telefone);
         changed.push({ nome: flag.name, sinais: signalTypes });
         continue;
       }
