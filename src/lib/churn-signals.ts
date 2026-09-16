@@ -24,7 +24,7 @@
 import type { ChurnSignalType } from "../types.js";
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 
 // Staff/test accounts — not secrets, rarely change, kept here (not .env)
 // so they're easy to find and extend.
@@ -231,49 +231,64 @@ export async function fetchChurnFlags(now: Date = new Date()): Promise<ChurnFlag
   const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
   const fortyFiveDaysAgoIso = new Date(now.getTime() - FAILED_PAYMENT_WINDOW_DAYS * 86_400_000).toISOString();
 
-  const [subsRes, bookingsRes, failedRes] = await Promise.all([
-    studioSupabase
-      .from("kenko_subscriptions")
-      .select("contact_email, contact_name, membership_name, subscription_starts_at")
-      .eq("subscription_status", "Active"),
-    studioSupabase
-      .from("kenko_bookings")
-      .select("contact_email, booking_date, event_date, booking_status")
-      .gte("booking_date", fourMonthsAgoIso),
-    studioSupabase
-      .from("kenko_payments")
-      .select("contact_email, payment_date")
-      .eq("payment_status", "Failed")
-      .gte("payment_date", fortyFiveDaysAgoIso),
+  const [subsRows, bookingRows, failedRows] = await Promise.all([
+    fetchAllPages<{
+      contact_email: string | null;
+      contact_name: string | null;
+      membership_name: string | null;
+      subscription_starts_at: string | null;
+    }>((from, to) =>
+      studioSupabase!
+        .from("kenko_subscriptions")
+        .select("contact_email, contact_name, membership_name, subscription_starts_at")
+        .eq("subscription_status", "Active")
+        .range(from, to),
+    ),
+    fetchAllPages<{
+      contact_email: string | null;
+      booking_date: string | null;
+      event_date: string | null;
+      booking_status: string | null;
+    }>((from, to) =>
+      studioSupabase!
+        .from("kenko_bookings")
+        .select("contact_email, booking_date, event_date, booking_status")
+        .gte("booking_date", fourMonthsAgoIso)
+        .range(from, to),
+    ),
+    fetchAllPages<{ contact_email: string | null; payment_date: string | null }>((from, to) =>
+      studioSupabase!
+        .from("kenko_payments")
+        .select("contact_email, payment_date")
+        .eq("payment_status", "Failed")
+        .gte("payment_date", fortyFiveDaysAgoIso)
+        .range(from, to),
+    ),
   ]);
 
-  if (subsRes.error) throw new Error(`churn_signals: kenko_subscriptions query failed: ${subsRes.error.message}`);
-  if (bookingsRes.error) throw new Error(`churn_signals: kenko_bookings query failed: ${bookingsRes.error.message}`);
-  if (failedRes.error) throw new Error(`churn_signals: kenko_payments query failed: ${failedRes.error.message}`);
-
-  const subscribers: ActiveSubscriber[] = (subsRes.data ?? [])
+  const subscribers: ActiveSubscriber[] = subsRows
     .filter((r) => r.contact_email && r.membership_name && r.subscription_starts_at)
     .map((r) => ({
-      email: r.contact_email as string,
-      name: (r.contact_name as string | null) || (r.contact_email as string),
-      membershipName: r.membership_name as string,
-      subscriptionStartsAt: new Date(r.subscription_starts_at as string),
+      email: r.contact_email!,
+      name: r.contact_name || r.contact_email!,
+      membershipName: r.membership_name!,
+      subscriptionStartsAt: new Date(r.subscription_starts_at!),
     }));
 
-  const bookings: BookingRecord[] = (bookingsRes.data ?? [])
+  const bookings: BookingRecord[] = bookingRows
     .filter((r) => r.contact_email && r.booking_date && r.event_date)
     .map((r) => ({
-      email: r.contact_email as string,
-      bookingDate: new Date(r.booking_date as string),
-      eventDate: new Date(r.event_date as string),
-      status: (r.booking_status as string | null) ?? "",
+      email: r.contact_email!,
+      bookingDate: new Date(r.booking_date!),
+      eventDate: new Date(r.event_date!),
+      status: r.booking_status ?? "",
     }));
 
-  const failedPayments: FailedPaymentRecord[] = (failedRes.data ?? [])
+  const failedPayments: FailedPaymentRecord[] = failedRows
     .filter((r) => r.contact_email && r.payment_date)
     .map((r) => ({
-      email: r.contact_email as string,
-      paymentDate: new Date(r.payment_date as string),
+      email: r.contact_email!,
+      paymentDate: new Date(r.payment_date!),
     }));
 
   const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);

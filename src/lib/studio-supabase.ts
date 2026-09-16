@@ -50,3 +50,41 @@ export const studioSupabase = client;
 export function isStudioSupabaseAvailable(): boolean {
   return client !== null;
 }
+
+// PostgREST (and by extension supabase-js) caps a single select at 1000
+// rows by default — a query with no .range() silently returns only the
+// first page, no error, no warning. Found the hard way 2026-09-16:
+// kenko_bookings has 3425+ checkin_status='Yes' rows, and every call site
+// that fetched it whole (visit history, churn signals' booking window)
+// was quietly missing most of them. Any query that scans a table which
+// could plausibly exceed 1000 rows — now or as the studio grows — must
+// go through this, not a bare .select().
+const SUPABASE_PAGE_SIZE = 1000;
+
+export interface SupabasePage<T> {
+  data: T[] | null;
+  error: { message: string } | null;
+}
+
+/**
+ * `queryFactory(from, to)` must build a FRESH query each call and apply
+ * `.range(from, to)` to it itself, e.g.:
+ *   fetchAllPages((from, to) =>
+ *     studioSupabase.from("t").select("c").eq("x", 1).range(from, to))
+ * Stops (and returns what it has) on the first page shorter than
+ * SUPABASE_PAGE_SIZE; throws on the first page-fetch error.
+ */
+export async function fetchAllPages<T>(
+  queryFactory: (from: number, to: number) => PromiseLike<SupabasePage<T>>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await queryFactory(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if (!data || data.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+  return rows;
+}

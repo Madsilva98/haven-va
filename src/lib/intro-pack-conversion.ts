@@ -16,7 +16,7 @@
 import { isExcludedEmail } from "./churn-signals.js";
 import { fetchAllCustomerNames, findPhoneByEmail, type CustomerNameRecord } from "./leads.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 
 // The only 3 intro-pack products with real volume (see kenko_product_catalogue
 // revenue_bucket='intro_packs' — the rest, "Open Day" one-off events etc.,
@@ -50,38 +50,49 @@ interface IntroPackRow {
 
 async function fetchIntroPackFinishers(): Promise<IntroPackRow[]> {
   if (!studioSupabase) return [];
-  const { data, error } = await studioSupabase
-    .from("kenko_memberships")
-    .select("contact_email, contact_name, membership_name, membership_starts_at, membership_expires_at")
-    .in("membership_name", [...INTRO_PACK_NAMES])
-    .eq("membership_status", "Expired")
-    .not("membership_expires_at", "is", null);
-  if (error) throw new Error(`intro_pack_conversion: kenko_memberships query failed: ${error.message}`);
-  return (data ?? [])
+  const rows = await fetchAllPages<{
+    contact_email: string | null;
+    contact_name: string | null;
+    membership_name: string | null;
+    membership_starts_at: string | null;
+    membership_expires_at: string | null;
+  }>((from, to) =>
+    studioSupabase!
+      .from("kenko_memberships")
+      .select("contact_email, contact_name, membership_name, membership_starts_at, membership_expires_at")
+      .in("membership_name", [...INTRO_PACK_NAMES])
+      .eq("membership_status", "Expired")
+      .not("membership_expires_at", "is", null)
+      .range(from, to),
+  );
+  return rows
     .filter((r) => r.contact_email && r.membership_starts_at && r.membership_expires_at)
     .map((r) => ({
-      email: (r.contact_email as string).toLowerCase().trim(),
-      name: (r.contact_name as string | null) || (r.contact_email as string),
-      packName: r.membership_name as string,
-      startsAt: new Date(r.membership_starts_at as string),
-      expiresAt: new Date(r.membership_expires_at as string),
+      email: r.contact_email!.toLowerCase().trim(),
+      name: r.contact_name || r.contact_email!,
+      packName: r.membership_name!,
+      startsAt: new Date(r.membership_starts_at!),
+      expiresAt: new Date(r.membership_expires_at!),
     }));
 }
 
 /** email (lowercased) -> every subscription_starts_at ever seen for them. */
 async function fetchAllSubscriptionStarts(): Promise<Map<string, Date[]>> {
   if (!studioSupabase) return new Map();
-  const { data, error } = await studioSupabase
-    .from("kenko_subscriptions")
-    .select("contact_email, subscription_starts_at")
-    .not("subscription_starts_at", "is", null);
-  if (error) throw new Error(`intro_pack_conversion: kenko_subscriptions query failed: ${error.message}`);
+  const rows = await fetchAllPages<{ contact_email: string | null; subscription_starts_at: string | null }>(
+    (from, to) =>
+      studioSupabase!
+        .from("kenko_subscriptions")
+        .select("contact_email, subscription_starts_at")
+        .not("subscription_starts_at", "is", null)
+        .range(from, to),
+  );
   const map = new Map<string, Date[]>();
-  for (const r of data ?? []) {
+  for (const r of rows) {
     if (!r.contact_email) continue;
-    const email = (r.contact_email as string).toLowerCase().trim();
+    const email = r.contact_email.toLowerCase().trim();
     const list = map.get(email) ?? [];
-    list.push(new Date(r.subscription_starts_at as string));
+    list.push(new Date(r.subscription_starts_at!));
     map.set(email, list);
   }
   return map;
@@ -90,19 +101,25 @@ async function fetchAllSubscriptionStarts(): Promise<Map<string, Date[]>> {
 /** email (lowercased) -> every non-intro-pack membership_starts_at ever seen. */
 async function fetchAllNonIntroMembershipStarts(): Promise<Map<string, Date[]>> {
   if (!studioSupabase) return new Map();
-  const { data, error } = await studioSupabase
-    .from("kenko_memberships")
-    .select("contact_email, membership_name, membership_starts_at")
-    .not("membership_starts_at", "is", null);
-  if (error) throw new Error(`intro_pack_conversion: kenko_memberships (non-intro) query failed: ${error.message}`);
+  const rows = await fetchAllPages<{
+    contact_email: string | null;
+    membership_name: string | null;
+    membership_starts_at: string | null;
+  }>((from, to) =>
+    studioSupabase!
+      .from("kenko_memberships")
+      .select("contact_email, membership_name, membership_starts_at")
+      .not("membership_starts_at", "is", null)
+      .range(from, to),
+  );
   const introNames = new Set<string>(INTRO_PACK_NAMES);
   const map = new Map<string, Date[]>();
-  for (const r of data ?? []) {
+  for (const r of rows) {
     if (!r.contact_email || !r.membership_name) continue;
-    if (introNames.has(r.membership_name as string)) continue;
-    const email = (r.contact_email as string).toLowerCase().trim();
+    if (introNames.has(r.membership_name)) continue;
+    const email = r.contact_email.toLowerCase().trim();
     const list = map.get(email) ?? [];
-    list.push(new Date(r.membership_starts_at as string));
+    list.push(new Date(r.membership_starts_at!));
     map.set(email, list);
   }
   return map;
@@ -119,16 +136,18 @@ interface VisitStats {
  */
 async function fetchVisitHistory(): Promise<Map<string, VisitStats>> {
   if (!studioSupabase) return new Map();
-  const { data, error } = await studioSupabase
-    .from("kenko_bookings")
-    .select("contact_email, event_date, checkin_status")
-    .eq("checkin_status", "Yes");
-  if (error) throw new Error(`intro_pack_conversion: kenko_bookings query failed: ${error.message}`);
+  const rows = await fetchAllPages<{ contact_email: string | null; event_date: string | null }>((from, to) =>
+    studioSupabase!
+      .from("kenko_bookings")
+      .select("contact_email, event_date, checkin_status")
+      .eq("checkin_status", "Yes")
+      .range(from, to),
+  );
   const map = new Map<string, VisitStats>();
-  for (const r of data ?? []) {
+  for (const r of rows) {
     if (!r.contact_email || !r.event_date) continue;
-    const email = (r.contact_email as string).toLowerCase().trim();
-    const eventDate = new Date(r.event_date as string);
+    const email = r.contact_email.toLowerCase().trim();
+    const eventDate = new Date(r.event_date);
     const existing = map.get(email);
     if (!existing) {
       map.set(email, { lastVisit: eventDate, count: 1 });

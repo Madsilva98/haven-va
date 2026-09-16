@@ -9,7 +9,7 @@
  */
 import { scoreMatch } from "./fuzzy-match.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 const FUZZY_MATCH_THRESHOLD = 0.5;
 /**
  * Every kenko_customers name/email, fetched once per caller (e.g. once per
@@ -21,13 +21,11 @@ export async function fetchAllCustomerNames() {
         log.warn("leads.fetch_customers_skipped", { reason: "studio_supabase_not_configured" });
         return [];
     }
-    const { data, error } = await studioSupabase
+    const rows = await fetchAllPages((from, to) => studioSupabase
         .from("kenko_customers")
-        .select("contact_name, contact_email, contact_phone");
-    if (error) {
-        throw new Error(`leads: kenko_customers query failed: ${error.message}`);
-    }
-    return (data ?? [])
+        .select("contact_name, contact_email, contact_phone")
+        .range(from, to));
+    return rows
         .filter((r) => r.contact_name)
         .map((r) => ({
         name: r.contact_name,

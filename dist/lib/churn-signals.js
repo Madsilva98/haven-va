@@ -22,7 +22,7 @@
  */
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 // Staff/test accounts — not secrets, rarely change, kept here (not .env)
 // so they're easy to find and extend.
 const STAFF_TEST_EXACT_EMAILS = new Set([
@@ -174,28 +174,25 @@ export async function fetchChurnFlags(now = new Date()) {
     }
     const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
     const fortyFiveDaysAgoIso = new Date(now.getTime() - FAILED_PAYMENT_WINDOW_DAYS * 86_400_000).toISOString();
-    const [subsRes, bookingsRes, failedRes] = await Promise.all([
-        studioSupabase
+    const [subsRows, bookingRows, failedRows] = await Promise.all([
+        fetchAllPages((from, to) => studioSupabase
             .from("kenko_subscriptions")
             .select("contact_email, contact_name, membership_name, subscription_starts_at")
-            .eq("subscription_status", "Active"),
-        studioSupabase
+            .eq("subscription_status", "Active")
+            .range(from, to)),
+        fetchAllPages((from, to) => studioSupabase
             .from("kenko_bookings")
             .select("contact_email, booking_date, event_date, booking_status")
-            .gte("booking_date", fourMonthsAgoIso),
-        studioSupabase
+            .gte("booking_date", fourMonthsAgoIso)
+            .range(from, to)),
+        fetchAllPages((from, to) => studioSupabase
             .from("kenko_payments")
             .select("contact_email, payment_date")
             .eq("payment_status", "Failed")
-            .gte("payment_date", fortyFiveDaysAgoIso),
+            .gte("payment_date", fortyFiveDaysAgoIso)
+            .range(from, to)),
     ]);
-    if (subsRes.error)
-        throw new Error(`churn_signals: kenko_subscriptions query failed: ${subsRes.error.message}`);
-    if (bookingsRes.error)
-        throw new Error(`churn_signals: kenko_bookings query failed: ${bookingsRes.error.message}`);
-    if (failedRes.error)
-        throw new Error(`churn_signals: kenko_payments query failed: ${failedRes.error.message}`);
-    const subscribers = (subsRes.data ?? [])
+    const subscribers = subsRows
         .filter((r) => r.contact_email && r.membership_name && r.subscription_starts_at)
         .map((r) => ({
         email: r.contact_email,
@@ -203,7 +200,7 @@ export async function fetchChurnFlags(now = new Date()) {
         membershipName: r.membership_name,
         subscriptionStartsAt: new Date(r.subscription_starts_at),
     }));
-    const bookings = (bookingsRes.data ?? [])
+    const bookings = bookingRows
         .filter((r) => r.contact_email && r.booking_date && r.event_date)
         .map((r) => ({
         email: r.contact_email,
@@ -211,7 +208,7 @@ export async function fetchChurnFlags(now = new Date()) {
         eventDate: new Date(r.event_date),
         status: r.booking_status ?? "",
     }));
-    const failedPayments = (failedRes.data ?? [])
+    const failedPayments = failedRows
         .filter((r) => r.contact_email && r.payment_date)
         .map((r) => ({
         email: r.contact_email,

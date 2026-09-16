@@ -15,7 +15,7 @@
 import { isExcludedEmail } from "./churn-signals.js";
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 // The only 3 intro-pack products with real volume (see kenko_product_catalogue
 // revenue_bucket='intro_packs' — the rest, "Open Day" one-off events etc.,
 // are too low-volume to matter here).
@@ -28,15 +28,14 @@ export const DEFAULT_CUTOFF_DAYS = 21;
 async function fetchIntroPackFinishers() {
     if (!studioSupabase)
         return [];
-    const { data, error } = await studioSupabase
+    const rows = await fetchAllPages((from, to) => studioSupabase
         .from("kenko_memberships")
         .select("contact_email, contact_name, membership_name, membership_starts_at, membership_expires_at")
         .in("membership_name", [...INTRO_PACK_NAMES])
         .eq("membership_status", "Expired")
-        .not("membership_expires_at", "is", null);
-    if (error)
-        throw new Error(`intro_pack_conversion: kenko_memberships query failed: ${error.message}`);
-    return (data ?? [])
+        .not("membership_expires_at", "is", null)
+        .range(from, to));
+    return rows
         .filter((r) => r.contact_email && r.membership_starts_at && r.membership_expires_at)
         .map((r) => ({
         email: r.contact_email.toLowerCase().trim(),
@@ -50,14 +49,13 @@ async function fetchIntroPackFinishers() {
 async function fetchAllSubscriptionStarts() {
     if (!studioSupabase)
         return new Map();
-    const { data, error } = await studioSupabase
+    const rows = await fetchAllPages((from, to) => studioSupabase
         .from("kenko_subscriptions")
         .select("contact_email, subscription_starts_at")
-        .not("subscription_starts_at", "is", null);
-    if (error)
-        throw new Error(`intro_pack_conversion: kenko_subscriptions query failed: ${error.message}`);
+        .not("subscription_starts_at", "is", null)
+        .range(from, to));
     const map = new Map();
-    for (const r of data ?? []) {
+    for (const r of rows) {
         if (!r.contact_email)
             continue;
         const email = r.contact_email.toLowerCase().trim();
@@ -71,15 +69,14 @@ async function fetchAllSubscriptionStarts() {
 async function fetchAllNonIntroMembershipStarts() {
     if (!studioSupabase)
         return new Map();
-    const { data, error } = await studioSupabase
+    const rows = await fetchAllPages((from, to) => studioSupabase
         .from("kenko_memberships")
         .select("contact_email, membership_name, membership_starts_at")
-        .not("membership_starts_at", "is", null);
-    if (error)
-        throw new Error(`intro_pack_conversion: kenko_memberships (non-intro) query failed: ${error.message}`);
+        .not("membership_starts_at", "is", null)
+        .range(from, to));
     const introNames = new Set(INTRO_PACK_NAMES);
     const map = new Map();
-    for (const r of data ?? []) {
+    for (const r of rows) {
         if (!r.contact_email || !r.membership_name)
             continue;
         if (introNames.has(r.membership_name))
@@ -98,14 +95,13 @@ async function fetchAllNonIntroMembershipStarts() {
 async function fetchVisitHistory() {
     if (!studioSupabase)
         return new Map();
-    const { data, error } = await studioSupabase
+    const rows = await fetchAllPages((from, to) => studioSupabase
         .from("kenko_bookings")
         .select("contact_email, event_date, checkin_status")
-        .eq("checkin_status", "Yes");
-    if (error)
-        throw new Error(`intro_pack_conversion: kenko_bookings query failed: ${error.message}`);
+        .eq("checkin_status", "Yes")
+        .range(from, to));
     const map = new Map();
-    for (const r of data ?? []) {
+    for (const r of rows) {
         if (!r.contact_email || !r.event_date)
             continue;
         const email = r.contact_email.toLowerCase().trim();

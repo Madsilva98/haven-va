@@ -10,7 +10,7 @@
 
 import { scoreMatch } from "./fuzzy-match.js";
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
+import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
 
 export interface CustomerNameRecord {
   name: string;
@@ -46,18 +46,22 @@ export async function fetchAllCustomerNames(): Promise<CustomerNameRecord[]> {
     log.warn("leads.fetch_customers_skipped", { reason: "studio_supabase_not_configured" });
     return [];
   }
-  const { data, error } = await studioSupabase
-    .from("kenko_customers")
-    .select("contact_name, contact_email, contact_phone");
-  if (error) {
-    throw new Error(`leads: kenko_customers query failed: ${error.message}`);
-  }
-  return (data ?? [])
+  const rows = await fetchAllPages<{
+    contact_name: string | null;
+    contact_email: string | null;
+    contact_phone: string | null;
+  }>((from, to) =>
+    studioSupabase!
+      .from("kenko_customers")
+      .select("contact_name, contact_email, contact_phone")
+      .range(from, to),
+  );
+  return rows
     .filter((r) => r.contact_name)
     .map((r) => ({
-      name: r.contact_name as string,
-      email: (r.contact_email as string | null) ?? null,
-      phone: (r.contact_phone as string | null) ?? null,
+      name: r.contact_name!,
+      email: r.contact_email ?? null,
+      phone: r.contact_phone ?? null,
     }));
 }
 
