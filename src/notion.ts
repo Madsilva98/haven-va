@@ -2062,6 +2062,38 @@ async function findLeadByEmail(email: string): Promise<{ id: string; estado: Lea
   };
 }
 
+// Every lead currently in one of `estados` — full cursor loop, not the
+// SMALL_DBS shortcut (Leads a contactar can grow past 100 rows). Used by
+// leads-reconcile.ts: archive Perdido rows, and check Novo/Contactado
+// rows for a purchase that's since come in.
+async function getLeadsByEstado(
+  estados: LeadStatus[],
+): Promise<{ id: string; email: string | null; estado: LeadStatus }[]> {
+  if (!NOTION_LEADS_DB_ID) return [];
+  const rows: { id: string; email: string | null; estado: LeadStatus }[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getLeadsByEstado", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_LEADS_DB_ID!),
+        start_cursor: cursor,
+        filter: { or: estados.map((estado) => ({ property: "Estado", select: { equals: estado } })) },
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
+        estado: (readSelectName(props["Estado"]) ?? "Novo") as LeadStatus,
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return rows;
+}
+
 // Same as findLeadByEmail but WITHOUT the open-only filter — for one-off
 // data repairs that need to reach a lead regardless of its current Estado
 // (e.g. fixing the Motivo text on a row already marked Convertido).
@@ -2725,6 +2757,7 @@ export {
   setLeadEstado,
   findLeadByEmail,
   findLeadByEmailAny,
+  getLeadsByEstado,
   // Clientes em risco de churn
   getChurnRowByEmail,
   createChurnFlag,
@@ -2793,6 +2826,7 @@ export const notion = {
   createLead,
   findLeadByEmail,
   findLeadByEmailAny,
+  getLeadsByEstado,
   updateLeadDetails,
   setLeadEstado,
   // Clientes em risco de churn

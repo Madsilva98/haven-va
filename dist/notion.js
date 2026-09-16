@@ -1724,6 +1724,35 @@ async function findLeadByEmail(email) {
         estado: (readSelectName(props["Estado"]) ?? "Novo"),
     };
 }
+// Every lead currently in one of `estados` — full cursor loop, not the
+// SMALL_DBS shortcut (Leads a contactar can grow past 100 rows). Used by
+// leads-reconcile.ts: archive Perdido rows, and check Novo/Contactado
+// rows for a purchase that's since come in.
+async function getLeadsByEstado(estados) {
+    if (!NOTION_LEADS_DB_ID)
+        return [];
+    const rows = [];
+    let cursor;
+    do {
+        const res = await withRetry("getLeadsByEstado", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_LEADS_DB_ID),
+            start_cursor: cursor,
+            filter: { or: estados.map((estado) => ({ property: "Estado", select: { equals: estado } })) },
+        }));
+        for (const row of res.results) {
+            if (!("properties" in row))
+                continue;
+            const props = row.properties;
+            rows.push({
+                id: row.id,
+                email: props["Email"]?.email ?? null,
+                estado: (readSelectName(props["Estado"]) ?? "Novo"),
+            });
+        }
+        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+    } while (cursor);
+    return rows;
+}
 // Same as findLeadByEmail but WITHOUT the open-only filter — for one-off
 // data repairs that need to reach a lead regardless of its current Estado
 // (e.g. fixing the Motivo text on a row already marked Convertido).
@@ -2246,7 +2275,7 @@ findPageInDb, appendToPageSection, uploadAndAttachFile,
 // Entity dashboards
 getEntitiesForOwner, getTasksForEntity, 
 // Leads a contactar
-createLead, updateLeadDetails, setLeadEstado, findLeadByEmail, findLeadByEmailAny, 
+createLead, updateLeadDetails, setLeadEstado, findLeadByEmail, findLeadByEmailAny, getLeadsByEstado, 
 // Clientes em risco de churn
 getChurnRowByEmail, createChurnFlag, updateChurnFlag, };
 export const notion = {
@@ -2311,6 +2340,7 @@ export const notion = {
     createLead,
     findLeadByEmail,
     findLeadByEmailAny,
+    getLeadsByEstado,
     updateLeadDetails,
     setLeadEstado,
     // Clientes em risco de churn

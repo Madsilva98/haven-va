@@ -6,6 +6,7 @@ import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-ba
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runLeadsEmailScan } from "./crons/leads-email-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
+import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
@@ -72,6 +73,14 @@ const tasks = [
     () =>
       runTidyMailboxesFeedbackReminder().catch((e) =>
         log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "10 8 * * 1",
+    () =>
+      runLeadsReconcile().catch((e) =>
+        log.error("cron.leads_reconcile", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

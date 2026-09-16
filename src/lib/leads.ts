@@ -79,7 +79,13 @@ export function findPhoneByEmail(email: string | null, customers: CustomerNameRe
   return match?.phone ?? null;
 }
 
-async function hasRealPurchase(email: string): Promise<boolean> {
+/**
+ * True if `email` has a real, paid purchase on file (kenko_payments OR
+ * kenko_sale_items) — the same check used before writing a new lead,
+ * also reused by src/crons/leads-reconcile.ts to auto-archive an
+ * already-open lead the moment they convert.
+ */
+export async function hasRealPurchase(email: string): Promise<boolean> {
   if (!studioSupabase) return false;
   const normalized = email.trim().toLowerCase();
 

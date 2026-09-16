@@ -47,7 +47,13 @@ export function findPhoneByEmail(email, customers) {
     const match = customers.find((c) => c.email && c.email.trim().toLowerCase() === normalized);
     return match?.phone ?? null;
 }
-async function hasRealPurchase(email) {
+/**
+ * True if `email` has a real, paid purchase on file (kenko_payments OR
+ * kenko_sale_items) — the same check used before writing a new lead,
+ * also reused by src/crons/leads-reconcile.ts to auto-archive an
+ * already-open lead the moment they convert.
+ */
+export async function hasRealPurchase(email) {
     if (!studioSupabase)
         return false;
     const normalized = email.trim().toLowerCase();
