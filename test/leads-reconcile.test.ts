@@ -44,9 +44,16 @@ describe("leads-reconcile", () => {
     loadConversionCheckData.mockReset();
   });
 
-  it("archives Perdido rows unconditionally", async () => {
+  it("archives Perdido and Convertido rows unconditionally — the list must stay 'viva'", async () => {
     getLeadsByEstado.mockImplementation(async (estados: string[]) =>
-      estados[0] === "Perdido" ? [{ id: "p1", email: "a@x.com", estado: "Perdido", canal: "Email" }] : [],
+      estados.includes("Perdido")
+        ? [
+            { id: "p1", email: "a@x.com", estado: "Perdido", canal: "Email" },
+            // Manually marked Convertido by the founder in Notion — must be
+            // archived outright, not left visible in the list.
+            { id: "c1", email: "b@x.com", estado: "Convertido", canal: "Intro Pack" },
+          ]
+        : [],
     );
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map(),
@@ -56,7 +63,9 @@ describe("leads-reconcile", () => {
 
     await run();
 
+    expect(getLeadsByEstado).toHaveBeenCalledWith(["Perdido", "Convertido"]);
     expect(archivePage).toHaveBeenCalledWith("p1");
+    expect(archivePage).toHaveBeenCalledWith("c1");
   });
 
   it("archives an Email-channel lead that now has a real purchase on file", async () => {

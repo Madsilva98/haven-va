@@ -1,14 +1,20 @@
 /**
  * Weekly cleanup of "Leads a contactar" — the founder's call: this DB
- * should only ever show people who genuinely still need a follow-up.
+ * should only ever show people who genuinely still need a follow-up. She
+ * wants the list "viva" (alive) — whatever she sets Estado to by hand,
+ * the next cron pass tidies away.
  *
- * 1. Any row marked Estado="Perdido" (the founder gave up on it) gets
- *    archived — she flips the status by hand in Notion, this is just the
- *    "next time the cron runs, tidy it away" half of that workflow.
+ * 1. Any row marked Estado="Perdido" OR Estado="Convertido" gets archived
+ *    unconditionally — those are both closed states the founder sets by
+ *    hand in Notion, this is just the "next time the cron runs, tidy it
+ *    away" half of that workflow. (Convertido is never the bot's own
+ *    write — see point 2 — only ever a manual override, but once it's set
+ *    the row shouldn't stick around either.)
  * 2. Any still-open row (Novo/Contactado) that has genuinely converted
- *    gets archived too: marking them "Convertido" instead of archiving
- *    was tried and explicitly rejected by the founder — this DB is a
- *    to-do list, not a log.
+ *    gets archived too — automatically, without the founder having to
+ *    notice and flip the status herself. The bot marking it "Convertido"
+ *    instead of archiving directly was tried and explicitly rejected by
+ *    the founder — this DB is a to-do list, not a log.
  *
  * "Converted" is channel-dependent, which is why this can't just be one
  * hasRealPurchase(email) check for every open row:
@@ -38,21 +44,21 @@ export async function run() {
         log.debug("leads_reconcile.skipped", { reason: "NOTION_LEADS_DB_ID not set" });
         return;
     }
-    let archivedLost = 0;
+    let archivedClosed = 0;
     try {
-        const lost = await notion.getLeadsByEstado(["Perdido"]);
-        for (const row of lost) {
+        const closed = await notion.getLeadsByEstado(["Perdido", "Convertido"]);
+        for (const row of closed) {
             try {
                 await notion.archivePage(row.id);
-                archivedLost++;
+                archivedClosed++;
             }
             catch (err) {
-                log.error("leads_reconcile.archive_lost_failed", { pageId: row.id, message: errMsg(err) });
+                log.error("leads_reconcile.archive_closed_failed", { pageId: row.id, message: errMsg(err) });
             }
         }
     }
     catch (err) {
-        log.error("leads_reconcile.fetch_lost_failed", { message: errMsg(err) });
+        log.error("leads_reconcile.fetch_closed_failed", { message: errMsg(err) });
     }
     let archivedConverted = 0;
     if (isStudioSupabaseAvailable()) {
@@ -101,5 +107,5 @@ export async function run() {
             log.error("leads_reconcile.fetch_open_failed", { message: errMsg(err) });
         }
     }
-    log.info("leads_reconcile.done", { archivedLost, archivedConverted });
+    log.info("leads_reconcile.done", { archivedClosed, archivedConverted });
 }
