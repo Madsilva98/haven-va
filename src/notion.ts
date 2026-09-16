@@ -2000,6 +2000,25 @@ async function createLead(
   return page.id;
 }
 
+// Corrects the structured fields on an existing lead row without touching
+// Estado/Notas/Origem — used for one-off data repairs (e.g. the 2026-09-16
+// Supabase pagination bug that under-counted visits for the summer backfill).
+async function updateLeadDetails(pageId: string, opts: CreateLeadOptions): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (opts.telefone) properties["Telefone"] = { phone_number: opts.telefone };
+  if (opts.pack) properties["Pack"] = richText(opts.pack);
+  if (opts.ultimaVisita) properties["Última visita"] = { date: { start: opts.ultimaVisita } };
+  if (opts.nVisitas != null) properties["Nº de visitas"] = { number: opts.nVisitas };
+  if (Object.keys(properties).length === 0) return;
+  await withRetry("updateLeadDetails", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.lead_details_updated", { pageId });
+}
+
 // Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
 // any — used to avoid creating a duplicate row for the same person across
 // runs. A closed lead (already converted/lost) does not block a new one.
@@ -2665,6 +2684,7 @@ export {
   getTasksForEntity,
   // Leads a contactar
   createLead,
+  updateLeadDetails,
   findLeadByEmail,
   // Clientes em risco de churn
   getChurnRowByEmail,
@@ -2733,6 +2753,7 @@ export const notion = {
   // Leads a contactar
   createLead,
   findLeadByEmail,
+  updateLeadDetails,
   // Clientes em risco de churn
   getChurnRowByEmail,
   createChurnFlag,
