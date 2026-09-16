@@ -1747,6 +1747,7 @@ async function getLeadsByEstado(estados) {
                 id: row.id,
                 email: props["Email"]?.email ?? null,
                 estado: (readSelectName(props["Estado"]) ?? "Novo"),
+                canal: readSelectName(props["Canal"]),
             });
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;

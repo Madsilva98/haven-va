@@ -5,17 +5,27 @@
  * 1. Any row marked Estado="Perdido" (the founder gave up on it) gets
  *    archived — she flips the status by hand in Notion, this is just the
  *    "next time the cron runs, tidy it away" half of that workflow.
- * 2. Any still-open row (Novo/Contactado) whose email now has a real
- *    purchase on file (src/lib/leads.ts hasRealPurchase — same check used
- *    before ever writing a lead) gets archived too: they converted, no
- *    follow-up needed, and marking them "Convertido" instead of archiving
- *    was tried and explicitly rejected by the founder — this DB is a to-do
- *    list, not a log.
+ * 2. Any still-open row (Novo/Contactado) that has genuinely converted
+ *    gets archived too: marking them "Convertido" instead of archiving
+ *    was tried and explicitly rejected by the founder — this DB is a
+ *    to-do list, not a log.
  *
- * Channel-agnostic on purpose — works the same for Email, Intro Pack, and
- * (once unblocked) WhatsApp/Instagram leads, since "did they ever pay us"
- * doesn't depend on which channel originally surfaced them.
+ * "Converted" is channel-dependent, which is why this can't just be one
+ * hasRealPurchase(email) check for every open row:
+ *   - Email/WhatsApp/Instagram leads never purchased anything before being
+ *     written here, so ANY real purchase on file (src/lib/leads.ts
+ *     hasRealPurchase) means they converted.
+ *   - Intro Pack leads are people who ALREADY paid for their intro pack —
+ *     that's how they ended up in this DB in the first place. Running
+ *     hasRealPurchase on them is always true and would archive every one
+ *     of them regardless of whether they ever came back (this happened in
+ *     production on 2026-09-16 and had to be manually reverted). What
+ *     "converted" means for them is the same question
+ *     src/lib/intro-pack-conversion.ts asks when first writing the lead:
+ *     did they start a subscription/non-intro membership AFTER their own
+ *     pack's expiry date (src/lib/intro-pack-conversion.ts hasConvertedAfter).
  */
+import { hasConvertedAfter, loadConversionCheckData } from "../lib/intro-pack-conversion.js";
 import { hasRealPurchase } from "../lib/leads.js";
 import { log } from "../lib/log.js";
 import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
@@ -48,7 +58,9 @@ export async function run() {
     if (isStudioSupabaseAvailable()) {
         try {
             const open = await notion.getLeadsByEstado(["Novo", "Contactado"]);
-            for (const row of open) {
+            const introPackRows = open.filter((r) => r.canal === "Intro Pack");
+            const otherRows = open.filter((r) => r.canal !== "Intro Pack");
+            for (const row of otherRows) {
                 if (!row.email)
                     continue;
                 try {
@@ -59,6 +71,29 @@ export async function run() {
                 }
                 catch (err) {
                     log.error("leads_reconcile.check_converted_failed", { pageId: row.id, message: errMsg(err) });
+                }
+            }
+            if (introPackRows.length > 0) {
+                try {
+                    const { firstPackByEmail, subsByEmail, membershipsByEmail } = await loadConversionCheckData();
+                    for (const row of introPackRows) {
+                        if (!row.email)
+                            continue;
+                        const email = row.email.toLowerCase().trim();
+                        const pack = firstPackByEmail.get(email);
+                        // No matching intro-pack record found (e.g. excluded/staff
+                        // email, or data since changed) — leave it alone rather than
+                        // guess.
+                        if (!pack)
+                            continue;
+                        if (hasConvertedAfter(email, pack.expiresAt, subsByEmail, membershipsByEmail)) {
+                            await notion.archivePage(row.id);
+                            archivedConverted++;
+                        }
+                    }
+                }
+                catch (err) {
+                    log.error("leads_reconcile.check_intro_pack_converted_failed", { message: errMsg(err) });
                 }
             }
         }

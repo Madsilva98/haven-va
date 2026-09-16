@@ -124,7 +124,12 @@ export function hasConvertedAfter(email, after, subsByEmail, membershipsByEmail)
     const mems = membershipsByEmail.get(email) ?? [];
     return subs.some((d) => d > after) || mems.some((d) => d > after);
 }
-async function loadConversionCheckData() {
+// Exported for src/crons/leads-reconcile.ts, which needs the same
+// subs/memberships lookup to check "did this specific Intro Pack lead
+// convert after THEIR pack's expiry" — a per-email question hasRealPurchase
+// can't answer, since it treats the intro-pack purchase itself as a
+// conversion.
+export async function loadConversionCheckData() {
     const [introRows, subsByEmail, membershipsByEmail, visitsByEmail, customers] = await Promise.all([
         fetchIntroPackFinishers(),
         fetchAllSubscriptionStarts(),

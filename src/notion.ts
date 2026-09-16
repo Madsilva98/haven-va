@@ -2068,9 +2068,9 @@ async function findLeadByEmail(email: string): Promise<{ id: string; estado: Lea
 // rows for a purchase that's since come in.
 async function getLeadsByEstado(
   estados: LeadStatus[],
-): Promise<{ id: string; email: string | null; estado: LeadStatus }[]> {
+): Promise<{ id: string; email: string | null; estado: LeadStatus; canal: LeadChannel | null }[]> {
   if (!NOTION_LEADS_DB_ID) return [];
-  const rows: { id: string; email: string | null; estado: LeadStatus }[] = [];
+  const rows: { id: string; email: string | null; estado: LeadStatus; canal: LeadChannel | null }[] = [];
   let cursor: string | undefined;
   do {
     const res = await withRetry("getLeadsByEstado", () =>
@@ -2087,6 +2087,7 @@ async function getLeadsByEstado(
         id: row.id,
         email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
         estado: (readSelectName(props["Estado"]) ?? "Novo") as LeadStatus,
+        canal: readSelectName(props["Canal"]) as LeadChannel | null,
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
