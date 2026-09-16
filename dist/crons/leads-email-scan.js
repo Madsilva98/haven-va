@@ -1,4 +1,17 @@
 /**
+ * DISABLED (2026-09-16) — not registered in src/server.ts. Founder's
+ * call: `tidy-mailboxes.ts` runs daily and auto-archives any thread its
+ * classifier judges "resolved / not needing a reply", no human review.
+ * This scan excludes the Archive folder (see src/lib/outlook.ts), so a
+ * genuine unanswered inquiry that tidy-mailboxes misjudged as resolved
+ * would be archived and silently invisible to this scan by the time it
+ * runs the following Monday — with no way to tell that happened. Combined
+ * with email being a low-volume channel next to Instagram/WhatsApp/phone
+ * for this business, not worth the risk. Left in place (not deleted) in
+ * case the founder wants it back — e.g. if tidy-mailboxes' archiving
+ * criteria changes, or a dedicated non-Archive-excluding mailbox is set
+ * up for it later. Re-enable by re-registering it in src/server.ts.
+ *
  * Weekly scan of configured Outlook mailboxes (OUTLOOK_MAILBOXES, same
  * config as the partnerships sync) for genuine information-request emails
  * that never got followed up. A single unattended cron, deliberately not

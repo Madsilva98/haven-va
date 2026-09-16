@@ -4,7 +4,6 @@ import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
-import { run as runLeadsEmailScan } from "./crons/leads-email-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
@@ -81,14 +80,6 @@ const tasks = [
     () =>
       runLeadsReconcile().catch((e) =>
         log.error("cron.leads_reconcile", { e: String(e) }),
-      ),
-    { timezone: TZ },
-  ),
-  cron.schedule(
-    "15 8 * * 1",
-    () =>
-      runLeadsEmailScan().catch((e) =>
-        log.error("cron.leads_email_scan", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
