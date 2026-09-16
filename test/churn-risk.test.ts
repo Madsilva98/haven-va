@@ -68,7 +68,7 @@ describe("churn-risk", () => {
         name: "New Risk",
         plano: "4x Monthly",
         telefone: null,
-        signals: [{ type: "Sem reservas 21+ dias", detail: "25 dias sem reservar" }],
+        signals: [{ type: "Sem reservas 14+ dias", detail: "25 dias sem reservar" }],
       },
     ]);
 
@@ -77,7 +77,7 @@ describe("churn-risk", () => {
     expect(createChurnFlag).toHaveBeenCalledWith(
       "New Risk",
       "new@x.com",
-      ["Sem reservas 21+ dias"],
+      ["Sem reservas 14+ dias"],
       "25 dias sem reservar",
       "4x Monthly",
       null,

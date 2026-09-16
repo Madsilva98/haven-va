@@ -6,9 +6,20 @@
  * under another subscription/pack excluded first — see docs/knowledge-base
  * for the session that derived these):
  *
- * 1. No booking in >21 days on a subscription that's still Active (only
- *    once the subscription itself is >=21 days old, so brand-new signups
- *    aren't flagged before they've had a first class).
+ * 1. No booking in >14 days on a subscription that's still Active (only
+ *    once the subscription itself is >=14 days old, so brand-new signups
+ *    aren't flagged before they've had a first class). Originally set to
+ *    21 days (39.6% of real cancellations vs. 7.0% of active members had
+ *    that gap); re-derived 2026-09-16 at the founder's request ("21 dias
+ *    é já muito, quase um mês sem aproveitar") by testing a range of
+ *    thresholds against the same churned-vs-active comparison — 14 days
+ *    gave the best separation of any candidate tested (54.2% of
+ *    cancellations vs. 20.0% of active members, a wider gap than 21 days'
+ *    40.4% vs 10.0%), not just a shorter one. Trade-off: roughly 1 in 5
+ *    currently-active members will show this gap at some point (vs. 1 in
+ *    10 at 21 days) — more coverage, more noise. See
+ *    docs/knowledge-base for the full table across 7/10/14/17/21/24/28/30
+ *    days if this ever needs re-deriving again.
  * 2. A failed payment in the last 45 days on a still-Active subscription.
  * 3. Utilization under 50% of the plan's monthly credit allowance in EACH
  *    of the last 3 full calendar months — a month only counts if the
@@ -41,7 +52,7 @@ export function parseMonthlyAllowance(membershipName) {
     const m = membershipName.match(/^(\d+)x/i);
     return m ? Number(m[1]) : null;
 }
-const NO_BOOKING_GAP_DAYS = 21;
+const NO_BOOKING_GAP_DAYS = 14;
 const FAILED_PAYMENT_WINDOW_DAYS = 45;
 const UNDERUSE_RATIO = 0.5;
 const UNDERUSE_MONTHS = 3;
@@ -120,7 +131,7 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
                 const detail = lastBooking
                     ? `${Math.round(gapDays)} dias sem reservar (última reserva: ${formatDatePt(lastBooking)})`
                     : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
-                signals.push({ type: "Sem reservas 21+ dias", detail });
+                signals.push({ type: "Sem reservas 14+ dias", detail });
             }
         }
         // Signal 2 — failed payment in the last 45 days.

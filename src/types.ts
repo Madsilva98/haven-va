@@ -331,7 +331,7 @@ export interface LeadRow {
 // ----- Clientes em risco de churn -----
 
 export type ChurnSignalType =
-  | "Sem reservas 21+ dias"
+  | "Sem reservas 14+ dias"
   | "Pagamento falhado"
   | "Baixa utilização";
 

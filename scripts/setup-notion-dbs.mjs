@@ -259,7 +259,7 @@ const churnRiskProperties = {
   Telefone: { phone_number: {} },
   Plano: { rich_text: {} },
   Sinais: { multi_select: { options: [
-    { name: "Sem reservas 21+ dias" }, { name: "Pagamento falhado" }, { name: "Baixa utilização" },
+    { name: "Sem reservas 14+ dias" }, { name: "Pagamento falhado" }, { name: "Baixa utilização" },
   ] } },
   Detalhes: { rich_text: {} },
   Status: { select: { options: [

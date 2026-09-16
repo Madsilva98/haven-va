@@ -47,17 +47,17 @@ describe("computeChurnFlags", () => {
     return { email, name: email, membershipName, subscriptionStartsAt: new Date(startsAt) };
   }
 
-  it("flags no booking in >21 days for a long-tenured subscriber", () => {
+  it("flags no booking in >14 days for a long-tenured subscriber", () => {
     const subs = [subscriber("a@x.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
     const bookings: BookingRecord[] = [
       { email: "a@x.com", bookingDate: new Date("2026-07-01T00:00:00Z"), eventDate: new Date("2026-07-01T00:00:00Z"), status: "Booked" },
     ];
     const flags = computeChurnFlags(subs, bookings, [], NOW);
     expect(flags).toHaveLength(1);
-    expect(flags[0]!.signals.map((s) => s.type)).toContain("Sem reservas 21+ dias");
+    expect(flags[0]!.signals.map((s) => s.type)).toContain("Sem reservas 14+ dias");
   });
 
-  it("does not flag a brand-new subscriber (tenure < 21 days) with no booking yet", () => {
+  it("does not flag a brand-new subscriber (tenure < 14 days) with no booking yet", () => {
     const subs = [subscriber("new@x.com", "4x Monthly | Premium", "2026-09-10T00:00:00Z")];
     const flags = computeChurnFlags(subs, [], [], NOW);
     expect(flags).toHaveLength(0);
