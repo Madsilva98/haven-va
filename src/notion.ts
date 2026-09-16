@@ -1964,6 +1964,7 @@ interface CreateLeadOptions {
   pack?: string | null;
   ultimaVisita?: string | null; // ISO date
   nVisitas?: number | null;
+  motivo?: string; // only honored by updateLeadDetails, not createLead (which takes motivo as a required positional arg)
 }
 
 async function createLead(
@@ -2009,6 +2010,7 @@ async function updateLeadDetails(pageId: string, opts: CreateLeadOptions): Promi
   if (opts.pack) properties["Pack"] = richText(opts.pack);
   if (opts.ultimaVisita) properties["Última visita"] = { date: { start: opts.ultimaVisita } };
   if (opts.nVisitas != null) properties["Nº de visitas"] = { number: opts.nVisitas };
+  if (opts.motivo) properties["Motivo"] = richText(opts.motivo);
   if (Object.keys(properties).length === 0) return;
   await withRetry("updateLeadDetails", () =>
     client.pages.update({

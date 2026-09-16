@@ -1677,6 +1677,8 @@ async function updateLeadDetails(pageId, opts) {
         properties["Última visita"] = { date: { start: opts.ultimaVisita } };
     if (opts.nVisitas != null)
         properties["Nº de visitas"] = { number: opts.nVisitas };
+    if (opts.motivo)
+        properties["Motivo"] = richText(opts.motivo);
     if (Object.keys(properties).length === 0)
         return;
     await withRetry("updateLeadDetails", () => client.pages.update({
