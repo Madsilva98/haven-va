@@ -6,7 +6,28 @@ import { formatReminderMessage } from "../messages/pipeline.js";
 import * as notion from "../notion.js";
 import type { FounderName } from "../types.js";
 
+// Guards against two ticks of this every-5-minutes cron overlapping: if a
+// run is ever slow enough (Notion latency, a big backlog of due reminders)
+// to still be mid-loop when the next tick fires, without this a reminder
+// could be fetched by both ticks before either marks it sent, and go out
+// twice. Single Node process, so a module-level flag is enough — no need
+// for a Notion-side or distributed lock.
+let running = false;
+
 export async function run(): Promise<void> {
+  if (running) {
+    log.warn("reminders.overlap_skipped");
+    return;
+  }
+  running = true;
+  try {
+    await runOnce();
+  } finally {
+    running = false;
+  }
+}
+
+async function runOnce(): Promise<void> {
   let due: Awaited<ReturnType<typeof notion.getDueReminders>> = [];
   try {
     due = await notion.getDueReminders();
