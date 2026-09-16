@@ -2146,6 +2146,40 @@ async function getChurnRowByEmail(
   };
 }
 
+// Every churn-risk row currently in one of `statuses` — full cursor loop,
+// not the SMALL_DBS shortcut (this can grow past 100 rows). Used by
+// churn-risk.ts to sweep away Resolvido/Arquivado rows on every run, the
+// same "stay alive" behaviour as leads-reconcile.ts for Leads a contactar
+// — the founder manages Status by hand in Notion, this just tidies away
+// whatever she's closed out.
+async function getChurnRowsByStatus(
+  statuses: ChurnStatus[],
+): Promise<{ id: string; email: string | null; status: ChurnStatus }[]> {
+  if (!NOTION_CHURN_RISK_DB_ID) return [];
+  const rows: { id: string; email: string | null; status: ChurnStatus }[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getChurnRowsByStatus", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_CHURN_RISK_DB_ID!),
+        start_cursor: cursor,
+        filter: { or: statuses.map((status) => ({ property: "Status", select: { equals: status } })) },
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
+        status: (readSelectName(props["Status"]) ?? "Aberto") as ChurnStatus,
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return rows;
+}
+
 async function createChurnFlag(
   nome: string,
   email: string,
@@ -2763,6 +2797,7 @@ export {
   getChurnRowByEmail,
   createChurnFlag,
   updateChurnFlag,
+  getChurnRowsByStatus,
 };
 
 export const notion = {
@@ -2834,4 +2869,5 @@ export const notion = {
   getChurnRowByEmail,
   createChurnFlag,
   updateChurnFlag,
+  getChurnRowsByStatus,
 };

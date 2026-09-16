@@ -1,10 +1,16 @@
 /**
- * Weekly churn-risk scan — computes the 3 validated signals
- * (src/lib/churn-signals.ts) against Studio Supabase, writes/updates
- * "Clientes em risco" in Notion, and posts one digest to the Telegram
- * group listing only who's newly flagged or gained a new signal this
- * week. Rows already open from a prior week are the founder's manual
- * follow-up, not re-nagged here — closing/resolving is always manual.
+ * Weekly churn-risk scan. Two parts:
+ *
+ * 1. Sweeps away any row the founder has closed out (Status="Resolvido"
+ *    or "Arquivado") — she sets that by hand in Notion, this is the "next
+ *    time the cron runs, tidy it away" half of that workflow. Same "stay
+ *    alive" behaviour the founder asked for on Leads a contactar
+ *    (src/crons/leads-reconcile.ts).
+ * 2. Computes the 3 validated signals (src/lib/churn-signals.ts) against
+ *    Studio Supabase, writes/updates "Clientes em risco" in Notion, and
+ *    posts one digest to the Telegram group listing only who's newly
+ *    flagged or gained a new signal this week. Rows already open from a
+ *    prior week are the founder's manual follow-up, not re-nagged here.
  *
  * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
  * the birthday cron.
@@ -26,6 +32,22 @@ export async function run() {
     if (!isStudioSupabaseAvailable()) {
         log.debug("churn_risk.skipped", { reason: "studio_supabase_not_configured" });
         return;
+    }
+    let archivedClosed = 0;
+    try {
+        const closed = await notion.getChurnRowsByStatus(["Resolvido", "Arquivado"]);
+        for (const row of closed) {
+            try {
+                await notion.archivePage(row.id);
+                archivedClosed++;
+            }
+            catch (err) {
+                log.error("churn_risk.archive_closed_failed", { pageId: row.id, message: errMsg(err) });
+            }
+        }
+    }
+    catch (err) {
+        log.error("churn_risk.fetch_closed_failed", { message: errMsg(err) });
     }
     let flags;
     try {
@@ -59,12 +81,12 @@ export async function run() {
     }
     const message = formatChurnDigest(changed);
     if (!message) {
-        log.info("churn_risk.no_changes", { totalFlagged: flags.length });
+        log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed });
         return;
     }
     try {
         const messageId = await sendGroupMessage(message);
-        log.info("churn_risk.posted", { messageId, count: changed.length });
+        log.info("churn_risk.posted", { messageId, count: changed.length, archivedClosed });
     }
     catch (err) {
         log.error("churn_risk.send_failed", { message: errMsg(err) });

@@ -1800,6 +1800,37 @@ async function getChurnRowByEmail(email) {
         sinais: readMultiSelectNames(props["Sinais"]),
     };
 }
+// Every churn-risk row currently in one of `statuses` — full cursor loop,
+// not the SMALL_DBS shortcut (this can grow past 100 rows). Used by
+// churn-risk.ts to sweep away Resolvido/Arquivado rows on every run, the
+// same "stay alive" behaviour as leads-reconcile.ts for Leads a contactar
+// — the founder manages Status by hand in Notion, this just tidies away
+// whatever she's closed out.
+async function getChurnRowsByStatus(statuses) {
+    if (!NOTION_CHURN_RISK_DB_ID)
+        return [];
+    const rows = [];
+    let cursor;
+    do {
+        const res = await withRetry("getChurnRowsByStatus", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_CHURN_RISK_DB_ID),
+            start_cursor: cursor,
+            filter: { or: statuses.map((status) => ({ property: "Status", select: { equals: status } })) },
+        }));
+        for (const row of res.results) {
+            if (!("properties" in row))
+                continue;
+            const props = row.properties;
+            rows.push({
+                id: row.id,
+                email: props["Email"]?.email ?? null,
+                status: (readSelectName(props["Status"]) ?? "Aberto"),
+            });
+        }
+        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+    } while (cursor);
+    return rows;
+}
 async function createChurnFlag(nome, email, sinais, detalhes, plano, telefone) {
     if (!NOTION_CHURN_RISK_DB_ID) {
         throw new Error("NOTION_CHURN_RISK_DB_ID not set");
@@ -2278,7 +2309,7 @@ getEntitiesForOwner, getTasksForEntity,
 // Leads a contactar
 createLead, updateLeadDetails, setLeadEstado, findLeadByEmail, findLeadByEmailAny, getLeadsByEstado, 
 // Clientes em risco de churn
-getChurnRowByEmail, createChurnFlag, updateChurnFlag, };
+getChurnRowByEmail, createChurnFlag, updateChurnFlag, getChurnRowsByStatus, };
 export const notion = {
     createTask,
     updateTask,
@@ -2348,4 +2379,5 @@ export const notion = {
     getChurnRowByEmail,
     createChurnFlag,
     updateChurnFlag,
+    getChurnRowsByStatus,
 };
