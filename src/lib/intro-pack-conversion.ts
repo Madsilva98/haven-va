@@ -273,6 +273,84 @@ export async function findUnconvertedIntroPacks(
   return out;
 }
 
+const TWO_CLASSES_NAMES = new Set<string>(["2 Classes + Free Socks | Premium", "2 Classes | Premium"]);
+const TEN_DAY_NAME = "10-Day Unlimited Pass";
+
+export interface ExpiringIntroPackToWatch {
+  email: string;
+  name: string;
+  phone: string | null;
+  packName: string;
+  expiresAt: Date;
+  visitCount: number;
+}
+
+/**
+ * Still-active intro packs expiring within `daysAhead` days (default 3),
+ * filtered to the two usage patterns worth a proactive nudge before the
+ * pack lapses — founder's spec, 2026-09-20, not empirically derived like
+ * DEFAULT_CUTOFF_DAYS above:
+ * - 2 Classes: exactly 1 of the 2 classes attended so far (one class
+ *   would otherwise go unused).
+ * - 10-Day Unlimited: more than 5 classes attended already (clearly
+ *   engaged, a good conversion candidate before the pack ends).
+ * Used by src/crons/intro-pack-expiring.ts.
+ */
+export async function findExpiringIntroPacksToWatch(
+  daysAhead = 3,
+  now: Date = new Date(),
+): Promise<ExpiringIntroPackToWatch[]> {
+  if (!studioSupabase) {
+    log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_supabase_not_configured" });
+    return [];
+  }
+
+  const to = new Date(now.getTime() + daysAhead * 86_400_000);
+  const rows = await fetchAllPages<{
+    contact_email: string | null;
+    contact_name: string | null;
+    membership_name: string | null;
+    membership_expires_at: string | null;
+  }>((from, rangeTo) =>
+    studioSupabase!
+      .from("kenko_memberships")
+      .select("contact_email, contact_name, membership_name, membership_expires_at")
+      .in("membership_name", [...INTRO_PACK_NAMES])
+      .eq("membership_status", "Active")
+      .gte("membership_expires_at", now.toISOString())
+      .lte("membership_expires_at", to.toISOString())
+      .range(from, rangeTo),
+  );
+
+  const [visitsByEmail, customers] = await Promise.all([fetchVisitHistory(), fetchAllCustomerNames()]);
+
+  const out: ExpiringIntroPackToWatch[] = [];
+  for (const r of rows) {
+    if (!r.contact_email || !r.membership_name || !r.membership_expires_at) continue;
+    const email = r.contact_email.toLowerCase().trim();
+    if (isExcludedEmail(email)) continue;
+
+    const visitCount = visitsByEmail.get(email)?.count ?? 0;
+    const isTwoClasses = TWO_CLASSES_NAMES.has(r.membership_name);
+    const isTenDay = r.membership_name === TEN_DAY_NAME;
+    if (isTwoClasses && visitCount !== 1) continue;
+    if (isTenDay && visitCount <= 5) continue;
+    if (!isTwoClasses && !isTenDay) continue;
+
+    out.push({
+      email,
+      name: r.contact_name?.trim() || email,
+      phone: findPhoneByEmail(email, customers),
+      packName: r.membership_name,
+      expiresAt: new Date(r.membership_expires_at),
+      visitCount,
+    });
+  }
+
+  out.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
+  return out;
+}
+
 /**
  * One-off backfill helper (scripts/backfill-intro-pack-summer-2026.mjs):
  * everyone whose intro pack expired within [fromISO, toISO) and never
