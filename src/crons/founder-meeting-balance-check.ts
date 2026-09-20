@@ -10,11 +10,13 @@
  * which fires the *morning after* that same meeting). Rule, in order:
  *
  * 1. If that meeting is scheduled for TODAY, send the balance now.
- * 2. Otherwise, if today is Sunday and no such meeting was scheduled at
- *    any point this week, send it now as a fallback so the week never
- *    goes without a balance. (This pairs naturally with
- *    founder-meeting-check.ts's own Monday fallback the next morning —
- *    Sunday recap, Monday reset.)
+ * 2. Otherwise, if today is Monday and no such meeting was scheduled at
+ *    any point during the week that just ended, send the balance now as
+ *    a fallback — recapping THAT concluded week (not the new one that
+ *    started this morning) — so a week never goes without a balance.
+ *    Changed from a Sunday fallback to Monday 2026-09-20, founder's
+ *    call, so every message tied to the Founders Meeting shares one
+ *    fallback day with founder-meeting-check.ts.
  * 3. Otherwise, do nothing today.
  *
  * Whenever week-balance actually sends (either branch above), the
@@ -52,8 +54,9 @@ async function meetingScheduledToday(now: Date): Promise<boolean> {
   return events.some((e) => matchesFounderMeeting(e.title));
 }
 
-async function meetingScheduledThisWeek(now: Date): Promise<boolean> {
-  const events = await listEventsInRange(mondayOf(now), sundayOf(now));
+/** Was the meeting scheduled anywhere in the Mon–Sun week containing `reference`. */
+async function meetingScheduledInWeekOf(reference: Date): Promise<boolean> {
+  const events = await listEventsInRange(mondayOf(reference), sundayOf(reference));
   return events.some((e) => matchesFounderMeeting(e.title));
 }
 
@@ -69,19 +72,25 @@ export async function run(now: Date = new Date()): Promise<void> {
 
   if (today) {
     log.info("founder_meeting_balance_check.meeting_today");
-    await sendWeekBalance();
+    await sendWeekBalance(now);
     await runFocusCumpridoAsk(now);
     return;
   }
 
-  if (now.getDay() !== 0) {
+  if (now.getDay() !== 1) {
     log.debug("founder_meeting_balance_check.no_action");
     return;
   }
 
-  let scheduledThisWeek = false;
+  // Today is Monday: the week to recap is the one that just ended
+  // (yesterday, Sunday, was its last day) — not the new week starting
+  // today, which would have no priorities/completions yet.
+  const lastWeekReference = new Date(now);
+  lastWeekReference.setDate(lastWeekReference.getDate() - 1);
+
+  let scheduledLastWeek = false;
   try {
-    scheduledThisWeek = await meetingScheduledThisWeek(now);
+    scheduledLastWeek = await meetingScheduledInWeekOf(lastWeekReference);
   } catch (err) {
     log.error("founder_meeting_balance_check.week_lookup_failed", {
       message: err instanceof Error ? err.message : String(err),
@@ -90,12 +99,12 @@ export async function run(now: Date = new Date()): Promise<void> {
     // same reasoning as founder-meeting-check.ts's Monday fallback.
   }
 
-  if (scheduledThisWeek) {
-    log.info("founder_meeting_balance_check.sunday_skipped_meeting_scheduled");
+  if (scheduledLastWeek) {
+    log.info("founder_meeting_balance_check.monday_skipped_meeting_scheduled");
     return;
   }
 
-  log.info("founder_meeting_balance_check.sunday_fallback_sent");
-  await sendWeekBalance();
+  log.info("founder_meeting_balance_check.monday_fallback_sent");
+  await sendWeekBalance(lastWeekReference);
   await runFocusCumpridoAsk(now);
 }

@@ -10,6 +10,7 @@ import type {
   FounderFocusEntry,
   FounderName,
   OpenTask,
+  Status,
 } from "../types.js";
 
 /**
@@ -40,11 +41,32 @@ function fmtTaskNoOwner(t: OpenTask): string {
   return `• ${title}${tail}`;
 }
 
+// 🟢 Feito, 🟡 Em curso, 🔴 To do (as asked) — ⚪ covers Cancelado, which
+// wasn't part of the spec and doesn't read as "still outstanding".
+function statusEmoji(status: Status): string {
+  switch (status) {
+    case "Feito":
+      return "🟢";
+    case "Em curso":
+      return "🟡";
+    case "To do":
+      return "🔴";
+    default:
+      return "⚪";
+  }
+}
+
+function fmtTaskColored(t: OpenTask): string {
+  const title = escapeMd(t.title);
+  const tail = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
+  return `${statusEmoji(t.status)} ${title}${tail}`;
+}
+
 // ----- Friday balance -----
 
 export interface FridayBalanceArgs {
   weekLabel: string;
-  priorities: OpenTask[];
+  prioritiesByFounder: Record<FounderName, OpenTask[]>;
   completed: OpenTask[];
   overdue: OpenTask[];
   focus: FounderFocusEntry[];
@@ -55,24 +77,26 @@ export function formatFridayBalance(args: FridayBalanceArgs): string {
   lines.push(`*balanço de sexta — ${escapeMd(args.weekLabel)}*`);
   lines.push("");
 
-  // Foco operacional definido por cada uma
-  if (args.focus.length > 0) {
-    lines.push("*foco da semana*");
-    for (const f of args.focus) {
-      lines.push(
-        `• ${escapeMd(f.founder)}: ${escapeMd(f.focoOperacional)}`,
-      );
+  const founders: FounderName[] = ["Madalena", "Mafalda", "Beatriz"];
+  const focusMap = new Map<FounderName, string>();
+  for (const f of args.focus) focusMap.set(f.founder, f.focoOperacional);
+
+  for (const founder of founders) {
+    const tasks = args.prioritiesByFounder[founder] ?? [];
+    const focus = focusMap.get(founder);
+    if (tasks.length === 0 && !focus) continue;
+
+    lines.push(`*${escapeMd(founder)}*`);
+    if (focus) {
+      lines.push(`_foco_: ${escapeMd(focus)}`);
+    }
+    if (tasks.length === 0) {
+      lines.push(escapeMd("(sem prioridades marcadas)"));
+    } else {
+      for (const t of tasks) lines.push(fmtTaskColored(t));
     }
     lines.push("");
   }
-
-  lines.push("*prioridades semanais*");
-  if (args.priorities.length === 0) {
-    lines.push(escapeMd("(ninguém marcou prioridades esta semana)"));
-  } else {
-    for (const t of args.priorities) lines.push(fmtTask(t));
-  }
-  lines.push("");
 
   lines.push(`*feito esta semana \\(${args.completed.length}\\)*`);
   if (args.completed.length === 0) {

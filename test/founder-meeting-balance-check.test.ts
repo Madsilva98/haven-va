@@ -35,7 +35,8 @@ function meetingEvent(iso: string, title = "Recurring Founders Meeting"): FakeEv
 // 2026-09-14 is a Monday (see test/remind.test.ts / test/founder-meeting-check.test.ts).
 const MONDAY = new Date("2026-09-14T07:00:00.000Z"); // 08:00 Lisbon
 const TUESDAY = new Date("2026-09-15T07:00:00.000Z"); // 08:00 Lisbon
-const SUNDAY = new Date("2026-09-20T07:00:00.000Z"); // 08:00 Lisbon
+const WEDNESDAY = new Date("2026-09-16T07:00:00.000Z"); // 08:00 Lisbon
+const SUNDAY_BEFORE_MONDAY = new Date("2026-09-13T07:00:00.000Z"); // yesterday relative to MONDAY
 
 describe("founder-meeting-balance-check", () => {
   const originalTz = process.env.TZ;
@@ -54,39 +55,41 @@ describe("founder-meeting-balance-check", () => {
     runFocusCumpridoAsk.mockClear();
   });
 
-  it("sends when the meeting is scheduled for today, even on a non-Sunday", async () => {
+  it("sends when the meeting is scheduled for today, even on a non-Monday", async () => {
     listEventsInRange.mockResolvedValueOnce([meetingEvent("2026-09-15T13:30:00.000Z")]);
     await run(TUESDAY);
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
-    // Early return: never bothers checking "scheduled this week".
+    expect(sendWeekBalance).toHaveBeenCalledWith(TUESDAY);
+    // Early return: never bothers checking "scheduled last week".
     expect(listEventsInRange).toHaveBeenCalledTimes(1);
     // Focus ask fires together with the team message, same `now`.
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
     expect(runFocusCumpridoAsk).toHaveBeenCalledWith(TUESDAY);
   });
 
-  it("does nothing on a non-Sunday when the meeting isn't today", async () => {
+  it("does nothing on a non-Monday when the meeting isn't today", async () => {
     listEventsInRange.mockResolvedValueOnce([]);
-    await run(MONDAY);
+    await run(WEDNESDAY);
     expect(sendWeekBalance).not.toHaveBeenCalled();
     expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
-  it("sends the Sunday fallback when no meeting happened today and none was scheduled this week", async () => {
+  it("sends the Monday fallback, recapping the week that just ended, when no meeting happened today and none was scheduled last week", async () => {
     listEventsInRange
       .mockResolvedValueOnce([]) // not scheduled today
-      .mockResolvedValueOnce([]); // nothing scheduled all week
-    await run(SUNDAY);
+      .mockResolvedValueOnce([]); // nothing scheduled last week
+    await run(MONDAY);
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
+    expect(sendWeekBalance).toHaveBeenCalledWith(SUNDAY_BEFORE_MONDAY);
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
-    expect(runFocusCumpridoAsk).toHaveBeenCalledWith(SUNDAY);
+    expect(runFocusCumpridoAsk).toHaveBeenCalledWith(MONDAY);
   });
 
-  it("skips the Sunday fallback when the meeting already happened earlier this week", async () => {
+  it("skips the Monday fallback when the meeting was scheduled last week", async () => {
     listEventsInRange
-      .mockResolvedValueOnce([]) // not scheduled today (Sunday)
-      .mockResolvedValueOnce([meetingEvent("2026-09-15T13:30:00.000Z")]); // Tuesday meeting on the calendar
-    await run(SUNDAY);
+      .mockResolvedValueOnce([]) // not scheduled today (Monday)
+      .mockResolvedValueOnce([meetingEvent("2026-09-08T13:30:00.000Z")]); // Tuesday of last week
+    await run(MONDAY);
     expect(sendWeekBalance).not.toHaveBeenCalled();
     expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
@@ -98,12 +101,13 @@ describe("founder-meeting-balance-check", () => {
     expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
-  it("sends anyway on Sunday if the 'scheduled this week' lookup fails (fail-safe)", async () => {
+  it("sends anyway on Monday if the 'scheduled last week' lookup fails (fail-safe)", async () => {
     listEventsInRange
       .mockResolvedValueOnce([]) // not scheduled today
       .mockRejectedValueOnce(new Error("calendar API down"));
-    await run(SUNDAY);
+    await run(MONDAY);
     expect(sendWeekBalance).toHaveBeenCalledTimes(1);
+    expect(sendWeekBalance).toHaveBeenCalledWith(SUNDAY_BEFORE_MONDAY);
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
   });
 });

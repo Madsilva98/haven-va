@@ -10,7 +10,7 @@
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM, sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel, weekOfYear } from "../lib/week.js";
+import { currentWeekLabel } from "../lib/week.js";
 import { formatDailyMadalenaPlaceholder, formatMondayPriorities, } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 const FOUNDERS = ["Madalena", "Mafalda", "Beatriz"];
@@ -18,7 +18,7 @@ export async function run() {
     const weekLabel = currentWeekLabel();
     const [priorities, focus] = await Promise.all([
         notion.getWeeklyPriorities(weekLabel),
-        safeFounderFocus(weekOfYear()),
+        safeFounderFocus(),
     ]);
     const prioritiesByFounder = {
         Madalena: [],
@@ -59,9 +59,14 @@ export async function run() {
         priorities: priorities.length,
     });
 }
-async function safeFounderFocus(weekNumber) {
+// getActiveFounderFocuses (not getFounderFocusForWeek) — same fix as
+// founder-focus-cycle.ts's runFocusCumpridoAsk and week-balance.ts: a
+// founder's active row can carry a Semana number from whenever they last
+// set it, which won't always equal weekOfYear(now). See week-balance.ts
+// for the incident this was found from (2026-09-20).
+async function safeFounderFocus() {
     try {
-        return await notion.getFounderFocusForWeek(weekNumber);
+        return await notion.getActiveFounderFocuses();
     }
     catch (err) {
         log.warn("cron.monday_priorities.focus_unavailable", {
