@@ -4,11 +4,22 @@
  * Route: focusask:<pageId>:sim | focusask:<pageId>:nao
  *
  * Sent by the Sunday-18:00 cron (`crons/founder-focus-cycle.ts`). Tapping
- * either button records "Cumprido" on the active row, closes the week's
- * cycle (deactivate old row, activate/create next week's), and asks for
- * next week's goals. "Não" first asks "porquê?" — the next free-text DM
- * from that founder is captured as the comment (see `pendingComments`
- * below, consumed by `src/bot/dm.ts`).
+ * either button records "Cumprido" on the active row and asks for next
+ * week's goals — but does NOT deactivate/roll over that row yet. "Não"
+ * first asks "porquê?" — the next free-text DM from that founder is
+ * captured as the comment (see `pendingComments` below, consumed by
+ * `src/bot/dm.ts`).
+ *
+ * The actual rollover (deactivate this row, activate/create next week's)
+ * only happens once real goal text arrives, in `tryConsumeGoalsAnswer`'s
+ * call to `notion.setFounderFocus` — or, failing that, at the next real
+ * weekly reset via `founder-focus-cycle.ts`'s `runFocusRollover`. Answering
+ * "cumpriste?" and starting next week's cycle are deliberately two
+ * separate steps: an earlier version rolled over eagerly on tap, which
+ * meant the row still holding THIS week's real focus text got replaced by
+ * a blank next-week placeholder the instant someone tapped — breaking any
+ * later read of "this week's focus" (e.g. a balance message re-sent after
+ * the tap) for the rest of that week. Confirmed for real 2026-09-20.
  *
  * The "quais são os teus objetivos desta semana?" reply is captured the
  * same way (`pendingGoals`) rather than relying on the conversational
@@ -72,11 +83,9 @@ function markAwaitingGoals(telegramId: number, weekNumber: number): void {
 async function closeWeekAndAskGoals(
   ctx: Context,
   telegramId: number,
-  founder: FounderName,
   currentWeek: number,
 ): Promise<void> {
   const nextWeek = currentWeek + 1;
-  await notion.rolloverFounderFocusWeek(founder, nextWeek);
   markAwaitingGoals(telegramId, nextWeek);
   await ctx.reply("quais são os teus objetivos desta semana?");
 }
@@ -128,7 +137,7 @@ export async function handleFocusCallback(ctx: Context): Promise<void> {
   if (answer === "sim") {
     await notion.setFounderFocusCumprido(pageId, true);
     await ctx.reply("👍");
-    await closeWeekAndAskGoals(ctx, userId, row.founder, row.weekNumber);
+    await closeWeekAndAskGoals(ctx, userId, row.weekNumber);
     return;
   }
 
@@ -160,7 +169,6 @@ export async function tryConsumeFocusComment(
   const row = await notion.getFounderFocusRow(pending.pageId);
   const weekNumber = row?.weekNumber ?? 0;
   const nextWeek = weekNumber + 1;
-  await notion.rolloverFounderFocusWeek(pending.founder, nextWeek);
   markAwaitingGoals(fromId, nextWeek);
   await ctx.reply("quais são os teus objetivos desta semana?");
   log.info("focus_callback.comment_captured", { founder: pending.founder });

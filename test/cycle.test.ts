@@ -78,16 +78,49 @@ describe("formatFridayBalance", () => {
     expect(out).not.toContain("*Beatriz*");
   });
 
-  it("still reports completed and overdue counts", () => {
+  it("folds completed and overdue tasks into the owning founder's block instead of separate sections", () => {
     const out = formatFridayBalance({
       weekLabel: "Semana 38",
       prioritiesByFounder: emptyPrioritiesByFounder(),
-      completed: [task("a", "Feito"), task("b", "Feito")],
-      overdue: [task("c", "To do")],
+      completed: [task("a", "Feito", { owner: "Mafalda" })],
+      overdue: [task("c", "To do", { owner: "Beatriz" })],
       focus: [],
     });
 
-    expect(out).toContain("feito esta semana \\(2\\)");
-    expect(out).toContain("atrasadas \\(1\\)");
+    expect(out).not.toContain("feito esta semana");
+    expect(out).not.toContain("*atrasadas");
+    expect(out).toContain("*Mafalda*");
+    expect(out).toContain("🟢 a");
+    expect(out).toContain("*Beatriz*");
+    expect(out).toContain("🔴 c ⏰");
+  });
+
+  it("dedupes a task that's both a weekly priority and overdue, keeping the overdue marker", () => {
+    const prioritiesByFounder = emptyPrioritiesByFounder();
+    prioritiesByFounder.Madalena = [task("relatório", "To do")];
+
+    const out = formatFridayBalance({
+      weekLabel: "Semana 38",
+      prioritiesByFounder,
+      completed: [],
+      overdue: [task("relatório", "To do")],
+      focus: [],
+    });
+
+    const occurrences = out.split("relatório").length - 1;
+    expect(occurrences).toBe(1);
+    expect(out).toContain("🔴 relatório ⏰");
+  });
+
+  it("drops unassigned-owner completed/overdue tasks, which have no founder block to land in", () => {
+    const out = formatFridayBalance({
+      weekLabel: "Semana 38",
+      prioritiesByFounder: emptyPrioritiesByFounder(),
+      completed: [task("misc", "Feito", { owner: "Unassigned" })],
+      overdue: [],
+      focus: [],
+    });
+
+    expect(out).not.toContain("misc");
   });
 });

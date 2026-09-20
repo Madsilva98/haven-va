@@ -14,16 +14,6 @@
 export function escapeMd(s) {
     return s.replace(/[_*\[\]()~`>#+\-=|{}.!\\]/g, (m) => `\\${m}`);
 }
-function fmtTask(t) {
-    const title = escapeMd(t.title);
-    const owner = escapeMd(t.owner);
-    const parts = [owner];
-    if (t.priority)
-        parts.push(escapeMd(t.priority.toLowerCase()));
-    if (t.deadline)
-        parts.push(escapeMd(t.deadline));
-    return `• ${title} \\(${parts.join(", ")}\\)`;
-}
 function fmtTaskNoOwner(t) {
     const title = escapeMd(t.title);
     const parts = [];
@@ -48,11 +38,20 @@ function statusEmoji(status) {
             return "⚪";
     }
 }
-function fmtTaskColored(t) {
+// A ⏰ suffix keeps the "this is overdue" signal alive now that atrasadas
+// no longer gets its own section — otherwise a red (To do, overdue) task
+// would be visually identical to a red (To do, not due yet) one.
+function fmtTaskColored(t, overdue) {
     const title = escapeMd(t.title);
     const tail = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
-    return `${statusEmoji(t.status)} ${title}${tail}`;
+    const overdueTag = overdue ? " ⏰" : "";
+    return `${statusEmoji(t.status)} ${title}${tail}${overdueTag}`;
 }
+// No separate "feito"/"atrasadas" sections (dropped 2026-09-20, founder's
+// call) — completed and overdue tasks are folded into each founder's own
+// block instead, deduped against her weekly priorities by task id. Tasks
+// with no owner (Unassigned) have no founder block to land in and are
+// dropped from this view.
 export function formatFridayBalance(args) {
     const lines = [];
     lines.push(`*balanço de sexta — ${escapeMd(args.weekLabel)}*`);
@@ -61,8 +60,18 @@ export function formatFridayBalance(args) {
     const focusMap = new Map();
     for (const f of args.focus)
         focusMap.set(f.founder, f.focoOperacional);
+    const overdueIds = new Set(args.overdue.map((t) => t.id));
     for (const founder of founders) {
-        const tasks = args.prioritiesByFounder[founder] ?? [];
+        const byId = new Map();
+        for (const t of args.prioritiesByFounder[founder] ?? [])
+            byId.set(t.id, t);
+        for (const t of args.completed)
+            if (t.owner === founder)
+                byId.set(t.id, t);
+        for (const t of args.overdue)
+            if (t.owner === founder)
+                byId.set(t.id, t);
+        const tasks = [...byId.values()];
         const focus = focusMap.get(founder);
         if (tasks.length === 0 && !focus)
             continue;
@@ -71,38 +80,15 @@ export function formatFridayBalance(args) {
             lines.push(`_foco_: ${escapeMd(focus)}`);
         }
         if (tasks.length === 0) {
-            lines.push(escapeMd("(sem prioridades marcadas)"));
+            lines.push(escapeMd("(sem tasks esta semana)"));
         }
         else {
             for (const t of tasks)
-                lines.push(fmtTaskColored(t));
+                lines.push(fmtTaskColored(t, overdueIds.has(t.id)));
         }
         lines.push("");
     }
-    lines.push(`*feito esta semana \\(${args.completed.length}\\)*`);
-    if (args.completed.length === 0) {
-        lines.push(escapeMd("nada fechado ainda"));
-    }
-    else {
-        for (const t of args.completed.slice(0, 15))
-            lines.push(fmtTask(t));
-        if (args.completed.length > 15) {
-            lines.push(escapeMd(`... +${args.completed.length - 15} outras`));
-        }
-    }
-    lines.push("");
-    lines.push(`*atrasadas \\(${args.overdue.length}\\)*`);
-    if (args.overdue.length === 0) {
-        lines.push(escapeMd("nenhuma — boa"));
-    }
-    else {
-        for (const t of args.overdue.slice(0, 10))
-            lines.push(fmtTask(t));
-        if (args.overdue.length > 10) {
-            lines.push(escapeMd(`... +${args.overdue.length - 10} outras`));
-        }
-    }
-    return lines.join("\n");
+    return lines.join("\n").trimEnd();
 }
 export function formatMondayPriorities(args) {
     const lines = [];
