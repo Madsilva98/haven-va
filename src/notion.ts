@@ -352,6 +352,21 @@ function readNumber(prop: unknown): number | null {
   return null;
 }
 
+// A Founder Focus row's Semana number can be missing when the row was
+// created by hand in Notion instead of through /focus (which always
+// writes it as a real number) — a founder types a title like "Objetivos
+// Bia W38" but never fills in the matching Semana field. Falls back to
+// parsing "W<n>" out of the title so a manually created row still counts
+// for the week it's clearly named after. Confirmed for real 2026-09-20:
+// Mafalda's and Beatriz's "...W38" rows both had Semana = null despite
+// their titles saying W38.
+function readFocusWeekNumber(props: Record<string, unknown>): number | null {
+  const direct = readNumber(props["Semana"]);
+  if (direct !== null) return direct;
+  const match = readPlainText(props["Nome"]).match(/W(\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
 function buildEditPatch(field: EditableField, newValue: string): Record<string, unknown> {
   const property = FIELD_TO_PROPERTY[field];
   switch (field) {
@@ -1105,7 +1120,7 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
   const activeRow = res.results.find((row) => "properties" in row);
   const activeWeek =
     activeRow && "properties" in activeRow
-      ? readNumber((activeRow.properties as Record<string, unknown>)["Semana"])
+      ? readFocusWeekNumber(activeRow.properties as Record<string, unknown>)
       : undefined;
 
   if (activeRow && activeWeek === entry.weekNumber) {
@@ -1141,29 +1156,39 @@ async function setFounderFocus(entry: FounderFocusEntry): Promise<void> {
 
 async function getFounderFocusForWeek(weekNumber: number): Promise<FounderFocusEntry[]> {
   if (!NOTION_FOUNDER_FOCUS_DB_ID) return [];
-  const res = await withRetry("getFounderFocusForWeek", () =>
-    client.dataSources.query({
-      data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
-      filter: { property: "Semana", number: { equals: weekNumber } },
-      sorts: [{ timestamp: "created_time", direction: "descending" }],
-    }),
-  );
-  // Latest entry per founder is the active focus.
+  // No server-side "Semana equals N" filter on purpose: a row's Semana can
+  // be null (a row created by hand in Notion rather than via /focus — see
+  // readFocusWeekNumber), and Notion's `number: { equals }` filter would
+  // silently never match a null field, even when the title clearly says
+  // "W<N>". Matching happens client-side instead, through that fallback.
   const seen = new Set<string>();
   const entries: FounderFocusEntry[] = [];
-  for (const row of res.results) {
-    if (!("properties" in row)) continue;
-    const props = row.properties as Record<string, unknown>;
-    const founderName = readSelectName(props["Founder"]);
-    if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") continue;
-    if (seen.has(founderName)) continue;
-    seen.add(founderName);
-    entries.push({
-      founder: founderName,
-      weekNumber: readNumber(props["Semana"]) ?? weekNumber,
-      focoOperacional: readPlainText(props["Objetivos"]),
-    });
-  }
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getFounderFocusForWeek", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_FOUNDER_FOCUS_DB_ID!),
+        sorts: [{ timestamp: "created_time", direction: "descending" }],
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      const founderName = readSelectName(props["Founder"]);
+      if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") continue;
+      if (readFocusWeekNumber(props) !== weekNumber) continue;
+      // Latest entry per founder is the active focus.
+      if (seen.has(founderName)) continue;
+      seen.add(founderName);
+      entries.push({
+        founder: founderName,
+        weekNumber,
+        focoOperacional: readPlainText(props["Objetivos"]),
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
   log.debug("notion.founder_focus_fetched", { weekNumber, count: entries.length });
   return entries;
 }
@@ -1190,7 +1215,7 @@ async function getActiveFounderFocuses(): Promise<FounderFocusEntry[]> {
     seen.add(founderName);
     entries.push({
       founder: founderName,
-      weekNumber: readNumber(props["Semana"]) ?? 0,
+      weekNumber: readFocusWeekNumber(props) ?? 0,
       focoOperacional: readPlainText(props["Objetivos"]),
     });
   }
@@ -1266,7 +1291,7 @@ async function getFounderFocusRow(
   if (founderName !== "Madalena" && founderName !== "Mafalda" && founderName !== "Beatriz") return null;
   return {
     founder: founderName,
-    weekNumber: readNumber(props["Semana"]) ?? 0,
+    weekNumber: readFocusWeekNumber(props) ?? 0,
     focoOperacional: readPlainText(props["Objetivos"]),
     ativo: readCheckbox(props["Ativo"]),
   };
