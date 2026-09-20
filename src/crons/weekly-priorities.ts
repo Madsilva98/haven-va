@@ -10,7 +10,7 @@
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendDM, sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel } from "../lib/week.js";
+import { currentWeekLabel, weekOfYear } from "../lib/week.js";
 import {
   formatDailyMadalenaPlaceholder,
   formatMondayPriorities,
@@ -24,7 +24,7 @@ export async function run(): Promise<void> {
   const weekLabel = currentWeekLabel();
   const [priorities, focus] = await Promise.all([
     notion.getWeeklyPriorities(weekLabel),
-    safeFounderFocus(),
+    safeFounderFocus(weekOfYear()),
   ]);
 
   const prioritiesByFounder: Record<FounderName, OpenTask[]> = {
@@ -71,14 +71,15 @@ export async function run(): Promise<void> {
   });
 }
 
-// getActiveFounderFocuses (not getFounderFocusForWeek) — same fix as
-// founder-focus-cycle.ts's runFocusCumpridoAsk and week-balance.ts: a
-// founder's active row can carry a Semana number from whenever they last
-// set it, which won't always equal weekOfYear(now). See week-balance.ts
-// for the incident this was found from (2026-09-20).
-async function safeFounderFocus(): Promise<FounderFocusEntry[]> {
+// getFounderFocusForWeek(weekNumber) by design — see week-balance.ts's
+// safeFounderFocus for why this reads by explicit week number rather than
+// "whatever's currently active": a founder's Ativo row can already point
+// at next week (she answered "cumpriste?" and rolled over) even though
+// this message is about the week that was just reset, so filtering by
+// week number is what keeps this correct across that rollover.
+async function safeFounderFocus(weekNumber: number): Promise<FounderFocusEntry[]> {
   try {
-    return await notion.getActiveFounderFocuses();
+    return await notion.getFounderFocusForWeek(weekNumber);
   } catch (err) {
     log.warn("cron.monday_priorities.focus_unavailable", {
       err: err instanceof Error ? err.message : String(err),

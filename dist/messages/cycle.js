@@ -38,14 +38,10 @@ function statusEmoji(status) {
             return "⚪";
     }
 }
-// A ⏰ suffix keeps the "this is overdue" signal alive now that atrasadas
-// no longer gets its own section — otherwise a red (To do, overdue) task
-// would be visually identical to a red (To do, not due yet) one.
-function fmtTaskColored(t, overdue) {
-    const title = escapeMd(t.title);
-    const tail = t.deadline ? ` \\(${escapeMd(t.deadline)}\\)` : "";
-    const overdueTag = overdue ? " ⏰" : "";
-    return `${statusEmoji(t.status)} ${title}${tail}${overdueTag}`;
+// No deadline date and no separate overdue marker (dropped 2026-09-20,
+// founder's call) — the status color alone is the signal here.
+function fmtTaskColored(t) {
+    return `${statusEmoji(t.status)} ${escapeMd(t.title)}`;
 }
 // No separate "feito"/"atrasadas" sections (dropped 2026-09-20, founder's
 // call) — completed and overdue tasks are folded into each founder's own
@@ -60,7 +56,6 @@ export function formatFridayBalance(args) {
     const focusMap = new Map();
     for (const f of args.focus)
         focusMap.set(f.founder, f.focoOperacional);
-    const overdueIds = new Set(args.overdue.map((t) => t.id));
     for (const founder of founders) {
         const byId = new Map();
         for (const t of args.prioritiesByFounder[founder] ?? [])
@@ -84,7 +79,7 @@ export function formatFridayBalance(args) {
         }
         else {
             for (const t of tasks)
-                lines.push(fmtTaskColored(t, overdueIds.has(t.id)));
+                lines.push(fmtTaskColored(t));
         }
         lines.push("");
     }

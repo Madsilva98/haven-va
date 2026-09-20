@@ -92,10 +92,24 @@ describe("formatFridayBalance", () => {
     expect(out).toContain("*Mafalda*");
     expect(out).toContain("🟢 a");
     expect(out).toContain("*Beatriz*");
-    expect(out).toContain("🔴 c ⏰");
+    expect(out).toContain("🔴 c");
   });
 
-  it("dedupes a task that's both a weekly priority and overdue, keeping the overdue marker", () => {
+  it("shows no clock emoji or deadline date on any task", () => {
+    const out = formatFridayBalance({
+      weekLabel: "Semana 38",
+      prioritiesByFounder: emptyPrioritiesByFounder(),
+      completed: [],
+      overdue: [task("relatório", "To do", { deadline: "2026-09-18" })],
+      focus: [],
+    });
+
+    expect(out).toContain("🔴 relatório");
+    expect(out).not.toContain("⏰");
+    expect(out).not.toContain("2026-09-18");
+  });
+
+  it("dedupes a task that's both a weekly priority and overdue", () => {
     const prioritiesByFounder = emptyPrioritiesByFounder();
     prioritiesByFounder.Madalena = [task("relatório", "To do")];
 
@@ -109,7 +123,6 @@ describe("formatFridayBalance", () => {
 
     const occurrences = out.split("relatório").length - 1;
     expect(occurrences).toBe(1);
-    expect(out).toContain("🔴 relatório ⏰");
   });
 
   it("drops unassigned-owner completed/overdue tasks, which have no founder block to land in", () => {

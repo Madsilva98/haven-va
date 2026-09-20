@@ -15,7 +15,7 @@
  */
 import { log } from "../lib/log.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import { currentWeekLabel, mondayOf } from "../lib/week.js";
+import { currentWeekLabel, mondayOf, weekOfYear } from "../lib/week.js";
 import { formatFridayBalance } from "../messages/cycle.js";
 import * as notion from "../notion.js";
 const FOUNDERS = ["Madalena", "Mafalda", "Beatriz"];
@@ -26,7 +26,7 @@ export async function run(now = new Date()) {
         notion.getWeeklyPriorities(weekLabel),
         notion.getWeeklyCompletedSince(mondayIso),
         notion.getWeeklyOverdueTasks(),
-        safeFounderFocus(),
+        safeFounderFocus(weekOfYear(now)),
     ]);
     const prioritiesByFounder = {
         Madalena: [],
@@ -50,18 +50,21 @@ export async function run(now = new Date()) {
         focusEntries: focus.length,
     });
 }
-// getActiveFounderFocuses (not getFounderFocusForWeek) on purpose — same
-// fix as founder-focus-cycle.ts's runFocusCumpridoAsk: a founder's active
-// row can carry a Semana number from whenever they actually set it, which
-// won't always equal weekOfYear(now) once this trigger can fire on any
-// weekday. Filtering by weekNumber silently dropped founders whose focus
-// row hadn't been touched since a prior ISO week even though it was still
-// their live, unanswered focus for right now — confirmed for real
-// 2026-09-20 (balance showed only Madalena's focus, Mafalda's and
-// Beatriz's were both written but tagged under a different Semana).
-async function safeFounderFocus() {
+// getFounderFocusForWeek(weekNumber) — deliberately BY WEEK NUMBER, not
+// getActiveFounderFocuses(). This is a recap of a specific, already-closed
+// week (Semana N): whatever a founder wrote for that week must keep
+// showing here even after she's tapped "cumpriste?" and rolled over to
+// the next week's row — the "active" row at read time is no longer this
+// week's, it's next week's, so filtering on Ativo would show next week's
+// (possibly still-blank) focus for a recap of last week. Since a rollover
+// deactivates the old row rather than deleting it, its Semana number
+// still matches and this query still finds it regardless of Ativo.
+// (An earlier version of this switched to getActiveFounderFocuses() to
+// fix a different symptom — some founders' focus missing entirely — but
+// that broke this case instead; confirmed for real 2026-09-20.)
+async function safeFounderFocus(weekNumber) {
     try {
-        return await notion.getActiveFounderFocuses();
+        return await notion.getFounderFocusForWeek(weekNumber);
     }
     catch (err) {
         log.warn("cron.friday_balance.focus_unavailable", {
