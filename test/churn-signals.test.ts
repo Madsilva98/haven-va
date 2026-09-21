@@ -170,6 +170,20 @@ describe("computeChurnFlags", () => {
     expect(detail).not.toContain("01/06/2026");
   });
 
+  it("does not let a since-cancelled booking reset the no-booking gap", () => {
+    // A recent booking that was later cancelled must not make someone look
+    // engaged — only a still-valid "Booked" reservation counts.
+    const subs = [subscriber("j@x.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
+    const bookings: BookingRecord[] = [
+      { email: "j@x.com", bookingDate: new Date("2026-07-01T00:00:00Z"), eventDate: new Date("2026-07-01T00:00:00Z"), status: "Booked" },
+      { email: "j@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-20T00:00:00Z"), status: "Canceled" },
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    expect(flags).toHaveLength(1);
+    const detail = flags[0]!.signals.find((s) => s.type === "Sem reservas 14+ dias")!.detail;
+    expect(detail).toContain("01/07/2026"); // cites the real last Booked reservation, not the cancelled one
+  });
+
   it("excludes staff/test accounts even if they'd otherwise be flagged", () => {
     const subs = [subscriber("madsilva3+test1@gmail.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
     const flags = computeChurnFlags(subs, [], [], NOW);

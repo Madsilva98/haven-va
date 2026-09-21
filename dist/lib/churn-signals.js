@@ -124,10 +124,18 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
         // stretch) so a pause/resume can't leak in: pausing and resuming creates a
         // new subscription row with its own start date, so a booking made before
         // pausing must never count as "last booking" once someone's back — that
-        // would cite a stale pre-pause date and overstate the gap.
+        // would cite a stale pre-pause date and overstate the gap. Only "Booked"
+        // counts — a since-cancelled reservation (status "Canceled"/"Waitlist
+        // canceled"/"Waitlist") must not reset the gap, or someone who booked
+        // then backed out would look fine despite never actually coming back
+        // (found 2026-09-21, founder's question). "última reserva" is measured
+        // by when the booking was MADE, not the class date — booking a future
+        // class still counts as current engagement, on purpose.
         const tenureDays = (nowMs - sub.subscriptionStartsAt.getTime()) / 86_400_000;
         if (tenureDays >= NO_BOOKING_GAP_DAYS) {
-            const bookingsThisStretch = subBookings.filter((b) => b.bookingDate.getTime() <= nowMs && b.bookingDate >= sub.subscriptionStartsAt);
+            const bookingsThisStretch = subBookings.filter((b) => b.status === "Booked" &&
+                b.bookingDate.getTime() <= nowMs &&
+                b.bookingDate >= sub.subscriptionStartsAt);
             const lastBooking = bookingsThisStretch.reduce((latest, b) => (!latest || b.bookingDate > latest ? b.bookingDate : latest), null);
             const gapDays = lastBooking
                 ? (nowMs - lastBooking.getTime()) / 86_400_000
