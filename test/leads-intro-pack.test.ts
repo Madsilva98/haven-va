@@ -64,17 +64,22 @@ describe("leads-intro-pack", () => {
 
     await run();
 
-    expect(findLeadByEmailAny).toHaveBeenCalledWith("marta@x.com");
+    expect(findLeadByEmailAny).toHaveBeenCalledWith("marta@x.com", "Intro Pack");
     expect(findLeadByEmail).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
   });
 
-  it("creates a lead for a genuinely new candidate", async () => {
+  it("creates a lead for a genuinely new candidate, scoping the dedup check to the Intro Pack channel", async () => {
+    // notion.findLeadByEmailAny(email, "Intro Pack") is relied on in
+    // production to filter by Canal too — a Perdido/Convertido row on an
+    // unrelated channel (e.g. not yet archived after a transient failure)
+    // must not match and block this create.
     findUnconvertedIntroPacks.mockResolvedValue([candidate]);
     findLeadByEmailAny.mockResolvedValue(null);
 
     await run();
 
+    expect(findLeadByEmailAny).toHaveBeenCalledWith("marta@x.com", "Intro Pack");
     expect(createLead).toHaveBeenCalledWith(
       "Marta Somborn",
       "marta@x.com",

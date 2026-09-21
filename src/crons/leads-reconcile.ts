@@ -65,13 +65,18 @@ export async function run(): Promise<void> {
   }
 
   let archivedClosed = 0;
+  let keptPerdidoIntroPack = 0;
   try {
     const closed = await notion.getLeadsByEstado(["Perdido", "Convertido"]);
     for (const row of closed) {
       // See the module docstring's EXCEPTION: archiving a Perdido Intro Pack
       // row would make it invisible to leads-intro-pack.ts's dedup check,
       // which would then recreate it the following Monday.
-      if (row.estado === "Perdido" && row.canal === "Intro Pack") continue;
+      if (row.estado === "Perdido" && row.canal === "Intro Pack") {
+        keptPerdidoIntroPack++;
+        log.debug("leads_reconcile.kept_perdido_intro_pack", { pageId: row.id });
+        continue;
+      }
       try {
         await notion.archivePage(row.id);
         archivedClosed++;
@@ -127,5 +132,5 @@ export async function run(): Promise<void> {
     }
   }
 
-  log.info("leads_reconcile.done", { archivedClosed, archivedConverted });
+  log.info("leads_reconcile.done", { archivedClosed, archivedConverted, keptPerdidoIntroPack });
 }
