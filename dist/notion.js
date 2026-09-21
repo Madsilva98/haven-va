@@ -1257,7 +1257,7 @@ async function createCompetitorIntelFinding(finding) {
                 ? { "Data do email": { date: { start: finding.dataEmail } } }
                 : {}),
             "Assunto do email": richText(finding.assuntoEmail),
-            "Link Gmail": { url: finding.linkGmail },
+            Link: { url: finding.link },
         },
     }));
     log.info("notion.competitor_intel_created", { nome: finding.nome, fonte: finding.fonte });
@@ -1675,8 +1675,10 @@ async function createEvent(nome, owner, originalMsg) {
 // to us) — leads-instagram-scan.ts passes "Contactado" for the opposite
 // direction, a contact the studio itself cold-messaged with no reply, so
 // the row correctly reflects "we already reached out" instead of
-// implying it's still waiting on us.
-async function createPartner(nome, owner, originalMsg, categoria, status = "A contactar") {
+// implying it's still waiting on us. `ultimoContacto` (ISO date) is
+// optional too — leads-instagram-scan.ts passes the DM thread's last
+// message timestamp, when known.
+async function createPartner(nome, owner, originalMsg, categoria, status = "A contactar", ultimoContacto) {
     if (!NOTION_PARTNER_DB_ID) {
         throw new Error("NOTION_PARTNER_DB_ID not set");
     }
@@ -1688,6 +1690,7 @@ async function createPartner(nome, owner, originalMsg, categoria, status = "A co
             Status: { select: { name: status } },
             Origem: richText(originalMsg),
             ...(categoria ? { Categoria: { select: { name: categoria } } } : {}),
+            ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
         },
     }));
     await withRetry("createPartner.sections", () => client.blocks.children.append({
@@ -1710,7 +1713,9 @@ async function createPartner(nome, owner, originalMsg, categoria, status = "A co
 // create_entity tool) leave it for the founder to fill in by hand;
 // src/crons/leads-instagram-scan.ts always passes "Instagram DM", since
 // that's known at creation time (there's no other source for this cron).
-async function createInfluencer(nome, owner, originalMsg, canalContacto) {
+// `ultimoContacto` (ISO date) is optional too — leads-instagram-scan.ts
+// passes the DM thread's last message timestamp, when known.
+async function createInfluencer(nome, owner, originalMsg, canalContacto, ultimoContacto) {
     if (!NOTION_INFLUENCER_DB_ID) {
         throw new Error("NOTION_INFLUENCER_DB_ID not set");
     }
@@ -1722,6 +1727,7 @@ async function createInfluencer(nome, owner, originalMsg, canalContacto) {
             Status: { select: { name: "A contactar" } },
             Origem: richText(originalMsg),
             ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
+            ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
         },
     }));
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({

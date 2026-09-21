@@ -1,13 +1,16 @@
 /**
- * One-off backfill for the competitor-intel pipeline: processes whatever is
- * currently tagged with COMPETITOR_INTEL_LABEL (default "email marketing
- * concorrência") right now — the real backlog that predates this code —
- * without touching the Inbox/tidy phase at all. Reuses the exact same
- * processing logic as the weekly cron (src/crons/competitor-intel.ts).
+ * ONE-OFF, GMAIL-ONLY backfill for the pre-migration Gmail backlog: processes
+ * whatever is currently tagged with COMPETITOR_INTEL_LABEL (default "email
+ * marketing concorrência") in yourhavenpilates@gmail.com. No longer shares
+ * logic with the live weekly cron (src/crons/competitor-intel.ts) — that
+ * moved to a dedicated Outlook mailbox (see
+ * docs/knowledge-base/competitor-intel.md for why). This script and
+ * src/lib/competitor-intel-pipeline.ts exist purely to get the real Gmail
+ * backlog into Notion once; safe to delete both after that final run.
  *
  * Run this once after /auth_gmail has been completed, to get the existing
- * backlog into Notion immediately instead of waiting for the next Monday
- * run. Safe to re-run — anything already labelled "processado" is skipped.
+ * backlog into Notion. Safe to re-run — anything already labelled
+ * "processado" is skipped.
  *
  * Usage:
  *   npm run build

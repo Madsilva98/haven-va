@@ -219,7 +219,7 @@ const dbs = [
       ["Resumo", "text", "", ""],
       ["Data do email", "date", "", ""],
       ["Assunto do email", "text", "", ""],
-      ["Link Gmail", "url", "", "link direto para o email de origem, mesmo depois de arquivado"],
+      ["Link", "url", "", "link direto para o email de origem (Outlook webLink, ou Gmail durante o backfill), mesmo depois de arquivado"],
     ],
   },
 ];

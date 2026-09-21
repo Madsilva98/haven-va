@@ -351,7 +351,13 @@ export interface ChurnRiskRow {
   status: ChurnStatus;
 }
 
-// ----- Competitor intel (Gmail newsletters → Notion) -----
+// ----- Competitor intel (newsletters → Notion) -----
+// Founder-maintained sender list (CompetitorSourceRow) is provider-agnostic —
+// fed historically by a one-off Gmail backfill (src/lib/gmail.ts,
+// scripts/backfill-competitor-intel.mjs) and, going forward, by the live
+// weekly cron reading a dedicated Outlook shared mailbox
+// (src/lib/outlook-competitor-intel-pipeline.ts). See
+// docs/knowledge-base/competitor-intel.md for why the split exists.
 
 export type CompetitorSourceCategory = "Concorrência" | "Inspiração";
 
@@ -370,5 +376,22 @@ export interface CompetitorIntelFinding {
   resumo: string;
   dataEmail: string | null;
   assuntoEmail: string;
-  linkGmail: string;
+  link: string;
+}
+
+// `findings` shape mirrors CompetitorIntelExtraction (src/lib/extract-competitor-intel.ts)
+// structurally — not imported directly, to keep this file dependency-free.
+export interface CompetitorIntelProcessedMessage {
+  fromName: string;
+  fromEmail: string;
+  subject: string;
+  findings: { tipo: string; resumo: string }[];
+}
+
+export interface CompetitorIntelRunSummary {
+  messagesSeen: number;
+  messagesProcessed: number;
+  findingsWritten: number;
+  errors: number;
+  byMessage: CompetitorIntelProcessedMessage[];
 }

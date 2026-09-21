@@ -5,7 +5,7 @@
  */
 
 import { escapeMd } from "./cycle.js";
-import type { CompetitorIntelRunSummary } from "../lib/competitor-intel-pipeline.js";
+import type { CompetitorIntelRunSummary } from "../types.js";
 
 export interface CompetitorIntelDigestArgs {
   tidiedCount: number;

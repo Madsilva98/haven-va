@@ -101,7 +101,13 @@ function setCheckpoint(state, contact, classification, notionPageId) {
 }
 async function processContact(contact, customers, state) {
     const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
-    const handle = contact.username ? `@${contact.username}` : contact.platformUserId;
+    // contact.platformUserId is Meta's internal numeric id — never surface it
+    // as if it were a usable handle (it isn't searchable/linkable). Most
+    // historical (manual_upload) contacts have no username at all — Instagram's
+    // "download your data" export doesn't include the other person's @handle,
+    // only their display name — found 2026-09-21 after shipping this without
+    // it: the founder couldn't re-contact anyone from the Origem field alone.
+    const handle = contact.username ? `@${contact.username}` : "sem @ (só nome no Instagram)";
     const origem = `Instagram DM · ${handle} · ${contact.messageCount} mensagens · contacto ${contact.id}`;
     // A contact the studio cold-messaged (e.g. an influencer/brand outreach
     // campaign) who never replied still has a non-empty transcript — our
@@ -118,7 +124,7 @@ async function processContact(contact, customers, state) {
             return null;
         }
         try {
-            const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "Contactado");
+            const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "Contactado", contact.lastMessageAt);
             setCheckpoint(state, contact, "parceiro", pageId);
             return { type: "partner", summary: { nome: name } };
         }
@@ -146,7 +152,7 @@ async function processContact(contact, customers, state) {
     }
     if (classification === "parceiro") {
         try {
-            const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria");
+            const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "A contactar", contact.lastMessageAt);
             setCheckpoint(state, contact, classification, pageId);
             return { type: "partner", summary: { nome: name } };
         }
@@ -157,7 +163,7 @@ async function processContact(contact, customers, state) {
     }
     if (classification === "influencer") {
         try {
-            const pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM");
+            const pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM", contact.lastMessageAt);
             setCheckpoint(state, contact, classification, pageId);
             return { type: "influencer", summary: { nome: name } };
         }

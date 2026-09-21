@@ -77,6 +77,7 @@ export function groupMessagesByContact(contactRows, messageRows) {
         displayName: row.display_name,
         username: row.username,
         messageCount: row.message_count,
+        lastMessageAt: row.last_message_at,
         messages: messagesByContact.get(row.id) ?? [],
     }));
 }
@@ -90,7 +91,7 @@ export async function fetchInstagramContactsWithMessages() {
     if (!isStudioDbAvailable())
         return [];
     const [contactRows, messageRows] = await Promise.all([
-        query(`select id, platform_user_id, display_name, username, message_count
+        query(`select id, platform_user_id, display_name, username, message_count, last_message_at
          from inbox_contacts where platform = 'instagram'`),
         query(`select contact_id, direction, text, sent_at
          from inbox_messages where platform = 'instagram' order by sent_at asc`),
