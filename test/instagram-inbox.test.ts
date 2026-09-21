@@ -139,8 +139,8 @@ describe("isExcludedInstagramContact", () => {
 describe("groupMessagesByContact", () => {
   it("attaches each contact's messages and keeps unrelated contacts separate", () => {
     const contacts = [
-      { id: "c1", platform_user_id: "p1", display_name: "A", username: null, message_count: 2 },
-      { id: "c2", platform_user_id: "p2", display_name: "B", username: null, message_count: 0 },
+      { id: "c1", platform_user_id: "p1", display_name: "A", username: null, message_count: 2, last_message_at: "2026-01-01T00:01:00Z" },
+      { id: "c2", platform_user_id: "p2", display_name: "B", username: null, message_count: 0, last_message_at: null },
     ];
     const messages = [
       { contact_id: "c1", direction: "in" as const, text: "oi", sent_at: "2026-01-01T00:00:00Z" },

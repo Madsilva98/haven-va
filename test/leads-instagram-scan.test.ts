@@ -74,6 +74,7 @@ const contact = {
   displayName: "Joana Ferreira",
   username: "joanaf",
   messageCount: 3,
+  lastMessageAt: "2026-01-01T00:00:00Z",
   messages: [{ direction: "in" as const, text: "quanto custa?", sentAt: "2026-01-01T00:00:00Z" }],
 };
 
@@ -133,7 +134,14 @@ describe("leads-instagram-scan", () => {
 
     await run();
 
-    expect(createPartner).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Parceria");
+    expect(createPartner).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Parceria",
+      "A contactar",
+      "2026-01-01T00:00:00Z",
+    );
     expect(createLead).not.toHaveBeenCalled();
     expect(checkExistingCustomer).not.toHaveBeenCalled();
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
@@ -148,7 +156,13 @@ describe("leads-instagram-scan", () => {
 
     await run();
 
-    expect(createInfluencer).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Instagram DM");
+    expect(createInfluencer).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Instagram DM",
+      "2026-01-01T00:00:00Z",
+    );
     expect(createPartner).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
@@ -188,7 +202,14 @@ describe("leads-instagram-scan", () => {
 
     expect(classifyInstagramDM).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
-    expect(createPartner).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Parceria", "Contactado");
+    expect(createPartner).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Parceria",
+      "Contactado",
+      "2026-01-01T00:00:00Z",
+    );
   });
 
   it("skips a studio-only outreach contact with no text at all (edge case)", async () => {
