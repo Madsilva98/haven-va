@@ -41,6 +41,9 @@ import type {
   LeadStatus,
   ChurnSignalType,
   ChurnStatus,
+  CompetitorSourceRow,
+  CompetitorSourceCategory,
+  CompetitorIntelFinding,
 } from "./types.js";
 import { normalizeText, scoreMatch, significantWords } from "./lib/fuzzy-match.js";
 import { log } from "./lib/log.js";
@@ -64,6 +67,8 @@ const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
 const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
 const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
+const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
+const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
 if (!NOTION_API_KEY) {
   throw new Error("notion: NOTION_API_KEY is required");
@@ -99,6 +104,8 @@ export async function initialize(): Promise<void> {
     NOTION_LISTS_DB_ID,
     NOTION_LEADS_DB_ID,
     NOTION_CHURN_RISK_DB_ID,
+    NOTION_COMPETITOR_SOURCES_DB_ID,
+    NOTION_COMPETITOR_INTEL_DB_ID,
   ]);
 }
 
@@ -1436,6 +1443,63 @@ async function getAllPartnerContacts(): Promise<PartnerContact[]> {
   } while (cursor);
   log.debug("notion.all_partner_contacts_fetched", { count: rows.length });
   return rows;
+}
+
+// Fontes list for the competitor-intel Gmail pipeline — founder-maintained
+// in Notion so senders can be added/paused without a redeploy.
+async function getActiveCompetitorSources(): Promise<CompetitorSourceRow[]> {
+  if (!NOTION_COMPETITOR_SOURCES_DB_ID) return [];
+  const rows: CompetitorSourceRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getActiveCompetitorSources", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_COMPETITOR_SOURCES_DB_ID!),
+        filter: { property: "Ativo", checkbox: { equals: true } },
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        nome: readPlainText(props["Nome"]),
+        emailOuDominio: readPlainText(props["Email/Domínio"]),
+        categoria: readSelectName(props["Categoria"]) as CompetitorSourceCategory | null,
+        ativo: readCheckbox(props["Ativo"]),
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  log.debug("notion.competitor_sources_fetched", { count: rows.length });
+  return rows;
+}
+
+// Findings from the competitor-intel Gmail pipeline. Categoria is
+// deliberately left unset here — the founder classifies each finding by
+// hand in Notion rather than the bot guessing.
+async function createCompetitorIntelFinding(finding: CompetitorIntelFinding): Promise<void> {
+  if (!NOTION_COMPETITOR_INTEL_DB_ID) {
+    throw new Error("NOTION_COMPETITOR_INTEL_DB_ID not set");
+  }
+  await withRetry("createCompetitorIntelFinding", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_COMPETITOR_INTEL_DB_ID!) },
+      properties: {
+        Nome: { title: [{ text: { content: finding.nome } }] },
+        Fonte: richText(finding.fonte),
+        Tipo: { multi_select: finding.tipos.map((name) => ({ name })) },
+        Resumo: richText(finding.resumo),
+        ...(finding.dataEmail
+          ? { "Data do email": { date: { start: finding.dataEmail } } }
+          : {}),
+        "Assunto do email": richText(finding.assuntoEmail),
+        "Link Gmail": { url: finding.linkGmail },
+      } as Parameters<typeof client.pages.create>[0]["properties"],
+    }),
+  );
+  log.info("notion.competitor_intel_created", { nome: finding.nome, fonte: finding.fonte });
 }
 
 // Alerts founders when a content-calendar item is due to publish within
@@ -2879,6 +2943,9 @@ export {
   createChurnFlag,
   updateChurnFlag,
   getChurnRowsByStatus,
+  // Competitor intel
+  getActiveCompetitorSources,
+  createCompetitorIntelFinding,
 };
 
 export const notion = {
@@ -2951,4 +3018,7 @@ export const notion = {
   createChurnFlag,
   updateChurnFlag,
   getChurnRowsByStatus,
+  // Competitor intel
+  getActiveCompetitorSources,
+  createCompetitorIntelFinding,
 };

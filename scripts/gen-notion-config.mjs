@@ -196,6 +196,32 @@ const dbs = [
       ["Comentários", "text", "", "justificação quando Cumprido = Não — escrito pelo bot ou manualmente"],
     ],
   },
+  {
+    sheet: "Fontes Conc-Inspo",
+    envVar: "NOTION_COMPETITOR_SOURCES_DB_ID",
+    rows: [
+      ["Propriedade", "Tipo", "Valores possíveis", "Notas"],
+      ["Nome", "title", "", ""],
+      ["Email/Domínio", "text", "", "remetente/domínio que o cron usa para encontrar newsletters na Inbox"],
+      ["Categoria", "select", "Concorrência | Inspiração", "referência do founder — não é copiado para o Competitor Intel"],
+      ["Ativo", "checkbox", "", "desmarcar pausa a fonte sem apagar a linha"],
+    ],
+  },
+  {
+    sheet: "Competitor Intel",
+    envVar: "NOTION_COMPETITOR_INTEL_DB_ID",
+    rows: [
+      ["Propriedade", "Tipo", "Valores possíveis", "Notas"],
+      ["Nome", "title", "", "gerado pelo bot a partir do resumo"],
+      ["Fonte", "text", "", "nome do remetente"],
+      ["Categoria", "select", "Concorrência | Inspiração", "deixado por preencher pelo bot — o founder classifica à mão"],
+      ["Tipo", "multi_select", "", "cria automaticamente novos valores — Evento, Promoção/Campanha, Posicionamento/Mensagem, Produto/Serviço, ou outros propostos pelo extrator"],
+      ["Resumo", "text", "", ""],
+      ["Data do email", "date", "", ""],
+      ["Assunto do email", "text", "", ""],
+      ["Link Gmail", "url", "", "link direto para o email de origem, mesmo depois de arquivado"],
+    ],
+  },
 ];
 
 const wb = XLSX.utils.book_new();

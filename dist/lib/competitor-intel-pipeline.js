@@ -1,0 +1,121 @@
+/**
+ * Shared "process phase" for the competitor-intel pipeline — the one place
+ * that turns tagged-but-unprocessed Gmail messages into Notion findings.
+ * Used both by the weekly cron (src/crons/competitor-intel.ts) and the
+ * one-off backfill script (scripts/backfill-competitor-intel.mjs), so
+ * there's exactly one implementation to keep correct.
+ *
+ * A message only gets the "processado" label once extraction AND every
+ * Notion write for it succeeded — an error leaves it unlabelled so it's
+ * retried on the next run instead of silently dropped.
+ */
+import * as gmail from "./gmail.js";
+import { extractCompetitorIntel } from "./extract-competitor-intel.js";
+import * as notion from "../notion.js";
+import { log } from "./log.js";
+export const DEFAULT_LABEL = "email marketing concorrência";
+export const DEFAULT_PROCESSED_LABEL = "email marketing concorrência: processado";
+export function competitorIntelLabel() {
+    return process.env.COMPETITOR_INTEL_LABEL ?? DEFAULT_LABEL;
+}
+export function competitorIntelProcessedLabel() {
+    return process.env.COMPETITOR_INTEL_PROCESSED_LABEL ?? DEFAULT_PROCESSED_LABEL;
+}
+export function isDryRun() {
+    return process.env.COMPETITOR_INTEL_DRY_RUN === "true";
+}
+function truncate(text, max) {
+    const trimmed = text.trim();
+    return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
+}
+export async function processTaggedCompetitorEmails() {
+    const dryRun = isDryRun();
+    const summary = {
+        messagesSeen: 0,
+        messagesProcessed: 0,
+        findingsWritten: 0,
+        errors: 0,
+        byMessage: [],
+    };
+    const processedLabelId = dryRun
+        ? await gmail.findLabelByName(competitorIntelProcessedLabel())
+        : await gmail.getOrCreateLabel(competitorIntelProcessedLabel());
+    if (!processedLabelId && !dryRun) {
+        log.error("competitor_intel.processed_label_unavailable");
+        return summary;
+    }
+    const messages = await gmail.listMessagesByLabel(competitorIntelLabel(), competitorIntelProcessedLabel());
+    summary.messagesSeen = messages.length;
+    for (const msg of messages) {
+        let findings;
+        try {
+            findings = await extractCompetitorIntel({
+                fromName: msg.fromName,
+                fromEmail: msg.fromEmail,
+                subject: msg.subject,
+                body: msg.body,
+            });
+        }
+        catch (err) {
+            log.error("competitor_intel.extraction_failed", {
+                messageId: msg.id,
+                subject: msg.subject,
+                message: err instanceof Error ? err.message : String(err),
+            });
+            summary.errors++;
+            continue; // no "processado" label — retried next run
+        }
+        try {
+            for (const finding of findings) {
+                if (dryRun) {
+                    log.info("competitor_intel.would_write", {
+                        fonte: msg.fromName,
+                        tipo: finding.tipo,
+                        resumo: finding.resumo,
+                    });
+                    continue;
+                }
+                await notion.createCompetitorIntelFinding({
+                    nome: truncate(finding.resumo, 70),
+                    fonte: msg.fromName,
+                    tipos: [finding.tipo],
+                    resumo: finding.resumo,
+                    dataEmail: msg.date.slice(0, 10),
+                    assuntoEmail: msg.subject,
+                    linkGmail: msg.webLink,
+                });
+                summary.findingsWritten++;
+            }
+        }
+        catch (err) {
+            log.error("competitor_intel.notion_write_failed", {
+                messageId: msg.id,
+                subject: msg.subject,
+                message: err instanceof Error ? err.message : String(err),
+            });
+            summary.errors++;
+            continue; // partial write — leave unlabelled, retried next run (may duplicate some findings)
+        }
+        summary.byMessage.push({
+            fromName: msg.fromName,
+            fromEmail: msg.fromEmail,
+            subject: msg.subject,
+            findings,
+        });
+        summary.messagesProcessed++;
+        if (dryRun) {
+            log.info("competitor_intel.would_label_processado", { messageId: msg.id, subject: msg.subject });
+        }
+        else if (processedLabelId) {
+            await gmail.applyLabel(msg.id, processedLabelId);
+        }
+    }
+    log.info("competitor_intel.process_done", {
+        dryRun,
+        messagesSeen: summary.messagesSeen,
+        messagesProcessed: summary.messagesProcessed,
+        findingsWritten: summary.findingsWritten,
+        errors: summary.errors,
+    });
+    return summary;
+}

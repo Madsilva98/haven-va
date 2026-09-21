@@ -29,6 +29,7 @@ Three problems this folder solves:
 | [`outlook-partnerships-sync.md`](outlook-partnerships-sync.md) | Outlook → Notion Partner Pipeline sync: Azure setup, design decisions, gotchas. Adjacent tooling, not part of the live bot | When the Graph integration, keyword list, or checkpoint mechanism changes |
 | [`pulse-views.md`](pulse-views.md) | The studio numbers: the `haven_va` Postgres role, which `v_pulse_*` view answers what, data-as-of, `member_id`, `pulse_cases` / `/flag` / "porquê?", the `kenko_` guard | When a view is added or its rule changes, when a case teaches a new gotcha, when the connection or role changes |
 | [`tidy-mailboxes.md`](tidy-mailboxes.md) | Fully automatic Outlook inbox tidying (archive/forward). A real live-bot cron, unlike its sibling above | When the classifier prompt, invoice heuristic, or fail-safe defaults change |
+| [`competitor-intel.md`](competitor-intel.md) | Weekly Gmail newsletter → Notion competitor/inspiration intel cron: tidy+process split, dual Google OAuth, dry-run, backfill | When the extractor prompt, label names, or sender-list source change |
 | [`failure-modes-2026-05-15.md`](failure-modes-2026-05-15.md) | Catalog of 30+ failure modes ranked Critical → Low | Frozen — start a new dated file when you do the next audit |
 | [`cost-and-latency-2026-05-15.md`](cost-and-latency-2026-05-15.md) | Anthropic + Notion cost baseline, optimization ROI table | Frozen — start a new dated file when costs grow or pricing changes |
 

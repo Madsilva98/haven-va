@@ -10,6 +10,7 @@
  */
 import { Bot } from "grammy";
 import * as calendar from "../lib/calendar.js";
+import * as gmail from "../lib/gmail.js";
 import { getFounderName, isFounder } from "../lib/founders.js";
 import { isWhyQuestion } from "../lib/pulse-source.js";
 import { log } from "../lib/log.js";
@@ -54,6 +55,7 @@ function parseCaptionForFileTarget(text) {
 }
 let botInstance = null;
 let awaitingAuthCodeFrom = null;
+let awaitingGmailAuthCodeFrom = null;
 let botInfoUserId = null;
 const dedupedUpdates = new Set();
 const DEDUPE_MAX = 200;
@@ -185,6 +187,19 @@ export function buildBot() {
         awaitingAuthCodeFrom = ctx.from.id;
         await ctx.reply("Abre o link, autoriza, copia o valor de code= da barra de endereço e cola aqui:");
         await ctx.reply(calendar.getAuthUrl());
+    });
+    // Gmail auth for the competitor-intel pipeline — separate account
+    // (yourhavenpilates@gmail.com) from Calendar above, so a separate flag
+    // and code intercept keep the two authorizations from clobbering each
+    // other. Madalena's private DM only.
+    bot.command("auth_gmail", async (ctx) => {
+        if (ctx.chat.type !== "private")
+            return;
+        if (getFounderName(ctx.from?.id ?? 0) !== "Madalena")
+            return;
+        awaitingGmailAuthCodeFrom = ctx.from.id;
+        await ctx.reply("Abre o link, autoriza com a conta yourhavenpilates@gmail.com, copia o valor de code= da barra de endereço e cola aqui:");
+        await ctx.reply(gmail.getAuthUrl());
     });
     bot.command("cals", async (ctx) => {
         if (ctx.chat.type !== "private")
@@ -322,6 +337,19 @@ export function buildBot() {
                 catch (err) {
                     log.warn("auth.exchange_failed", { err: String(err) });
                     await ctx.reply("Código inválido. Tenta /auth de novo.");
+                }
+                return;
+            }
+            // Gmail auth code intercept — kept independent of the Calendar one above.
+            if (awaitingGmailAuthCodeFrom === fromId && text.startsWith("4/")) {
+                try {
+                    await gmail.exchangeCodeForToken(text.trim());
+                    awaitingGmailAuthCodeFrom = null;
+                    await ctx.reply("✅ Gmail autenticado! O competitor-intel já pode correr.");
+                }
+                catch (err) {
+                    log.warn("auth_gmail.exchange_failed", { err: String(err) });
+                    await ctx.reply("Código inválido. Tenta /auth_gmail de novo.");
                 }
                 return;
             }

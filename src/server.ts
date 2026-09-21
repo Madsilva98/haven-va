@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
+import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
@@ -114,6 +115,14 @@ const tasks = [
     () =>
       runChurnRisk().catch((e) =>
         log.error("cron.churn_risk", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "30 8 * * 1",
+    () =>
+      runCompetitorIntel().catch((e) =>
+        log.error("cron.competitor_intel", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

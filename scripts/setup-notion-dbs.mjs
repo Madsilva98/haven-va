@@ -26,6 +26,8 @@ const EVENTS_DB_ID           = process.env.NOTION_EVENT_DB_ID;
 const LISTS_DB_ID            = process.env.NOTION_LISTS_DB_ID;
 const LEADS_DB_ID            = process.env.NOTION_LEADS_DB_ID;
 const CHURN_RISK_DB_ID       = process.env.NOTION_CHURN_RISK_DB_ID;
+const COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
+const COMPETITOR_INTEL_DB_ID   = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
 if (!BACKLOG_DB_ID) {
   console.error("missing NOTION_BACKLOG_DB_ID env var — fill .env first");
@@ -270,6 +272,31 @@ const churnRiskProperties = {
   "Criado em": { created_time: {} },
 };
 
+// ── Fontes Concorrência/Inspiração ──────────────────────────────────────────
+// Founder-maintained sender list driving the competitor-intel Gmail tidy step.
+const competitorSourcesProperties = {
+  "Email/Domínio": { rich_text: {} },
+  Categoria: { select: { options: [
+    { name: "Concorrência" }, { name: "Inspiração" },
+  ] } },
+  Ativo: { checkbox: {} },
+};
+
+// ── Competitor Intel ─────────────────────────────────────────────────────────
+// "Tipo" is intentionally omitted — it's a multi-select whose options grow
+// dynamically as the extractor proposes new tags; including it here with a
+// fixed (or empty) options list would wipe any options not listed on every
+// run (see docs/knowledge-base/notion-api-gotchas.md TL;DR item 8).
+// "Categoria" is left for the founder to set by hand, so it's also omitted
+// here — set it up manually in Notion with Concorrência/Inspiração options.
+const competitorIntelProperties = {
+  Fonte: { rich_text: {} },
+  Resumo: { rich_text: {} },
+  "Data do email": { date: {} },
+  "Assunto do email": { rich_text: {} },
+  "Link Gmail": { url: {} },
+};
+
 async function setup(label, dbId, props) {
   console.log(`\n→ ${label} (${dbId})`);
   try {
@@ -321,6 +348,10 @@ async function main() {
   else console.log("· Leads a contactar DB id not set — skipping");
   if (CHURN_RISK_DB_ID)       await setup("Clientes em risco", CHURN_RISK_DB_ID,      churnRiskProperties);
   else console.log("· Clientes em risco DB id not set — skipping");
+  if (COMPETITOR_SOURCES_DB_ID) await setup("Fontes Concorrência/Inspiração", COMPETITOR_SOURCES_DB_ID, competitorSourcesProperties);
+  else console.log("· Fontes Concorrência/Inspiração DB id not set — skipping");
+  if (COMPETITOR_INTEL_DB_ID)   await setup("Competitor Intel", COMPETITOR_INTEL_DB_ID, competitorIntelProperties);
+  else console.log("· Competitor Intel DB id not set — skipping");
 }
 
 main().catch((err) => {
