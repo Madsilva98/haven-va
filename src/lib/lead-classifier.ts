@@ -39,10 +39,13 @@ function initRuntime(promptKey: PromptKey): { client: Anthropic; prompt: string;
 }
 
 /**
- * Defaults to false (don't classify as a lead) on any API error — a missed
- * lead is far cheaper than a crashed cron.
+ * Returns the model's raw trimmed/uppercased one-word answer, or "" on any
+ * API error — callers decide their own safe default from that, but every
+ * prompt variant here is written to bias toward the cheapest-to-miss
+ * outcome (NÃO/NENHUM) when uncertain, so "" behaves the same way a
+ * genuine NÃO/NENHUM answer would in every caller below.
  */
-async function classify(text: string, promptKey: PromptKey): Promise<boolean> {
+async function callClassifier(text: string, promptKey: PromptKey): Promise<string> {
   const { client, prompt, model } = initRuntime(promptKey);
   try {
     const response = await client.messages.create({
@@ -52,23 +55,34 @@ async function classify(text: string, promptKey: PromptKey): Promise<boolean> {
       messages: [{ role: "user", content: text.slice(0, 8000) }],
     });
     const block = response.content.find((b) => b.type === "text");
-    const answer = block && block.type === "text" ? block.text.trim().toUpperCase() : "";
-    return answer.startsWith("SIM");
+    return block && block.type === "text" ? block.text.trim().toUpperCase() : "";
   } catch (err) {
     log.warn("lead_classifier.request_failed", {
       promptKey,
       message: err instanceof Error ? err.message : String(err),
     });
-    return false;
+    return "";
   }
 }
 
 /** `text` should be the email's subject + body (plain text). */
 export async function isGenuineInformationRequest(text: string): Promise<boolean> {
-  return classify(text, "email");
+  const answer = await callClassifier(text, "email");
+  return answer.startsWith("SIM");
 }
 
-/** `text` should be a chronological Cliente/Haven Instagram DM transcript. */
-export async function isGenuineInformationRequestDM(text: string): Promise<boolean> {
-  return classify(text, "dm");
+export type InstagramDMClassification = "cliente" | "parceiro" | "nenhum";
+
+/**
+ * `text` should be a chronological Cliente/Haven Instagram DM transcript.
+ * "cliente" = genuine information request from a prospective client;
+ * "parceiro" = another business/professional reaching out for networking,
+ * not asking to become a client; "nenhum" = neither (also the fallback for
+ * an API error or an unrecognized answer).
+ */
+export async function classifyInstagramDM(text: string): Promise<InstagramDMClassification> {
+  const answer = await callClassifier(text, "dm");
+  if (answer.startsWith("CLIENTE")) return "cliente";
+  if (answer.startsWith("PARCEIRO")) return "parceiro";
+  return "nenhum";
 }

@@ -1915,7 +1915,22 @@ async function createEvent(nome: string, owner: OwnerValue, originalMsg: string)
   return page.id;
 }
 
-async function createPartner(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
+// `categoria` is optional — existing callers (e.g. the assistant's
+// create_entity tool) leave Categoria for the founder to fill in by hand;
+// src/crons/leads-instagram-scan.ts passes "Parceria" for Instagram DM
+// networking contacts, since that's known at creation time.
+// `status` defaults to "A contactar" (the normal case: someone reached out
+// to us) — leads-instagram-scan.ts passes "Contactado" for the opposite
+// direction, a contact the studio itself cold-messaged with no reply, so
+// the row correctly reflects "we already reached out" instead of
+// implying it's still waiting on us.
+async function createPartner(
+  nome: string,
+  owner: OwnerValue,
+  originalMsg: string,
+  categoria?: "Corporate" | "Eventos" | "Parceria",
+  status: PartnerStatus = "A contactar",
+): Promise<string> {
   if (!NOTION_PARTNER_DB_ID) {
     throw new Error("NOTION_PARTNER_DB_ID not set");
   }
@@ -1925,8 +1940,9 @@ async function createPartner(nome: string, owner: OwnerValue, originalMsg: strin
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { select: { name: "A contactar" satisfies PartnerStatus } },
+        Status: { select: { name: status } },
         Origem: richText(originalMsg),
+        ...(categoria ? { Categoria: { select: { name: categoria } } } : {}),
       },
     }),
   );

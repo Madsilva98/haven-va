@@ -99,7 +99,7 @@ const partnerProperties = {
   Owner: { select: { options: OWNER_OPTIONS } },
   Status: { select: { options: [
     { name: "A contactar" }, { name: "Contactado" },
-    { name: "A aguardar resposta" }, { name: "Em negociação" },
+    { name: "A aguardar resposta" }, { name: "Em negociação" }, { name: "On hold" },
     { name: "Fechado" }, { name: "Arquivado" },
   ] } },
   "Último contacto": { date: {} },

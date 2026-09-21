@@ -25,12 +25,14 @@ const buildTranscript = vi.fn();
 const extractVolunteeredEmail = vi.fn();
 const extractVolunteeredPhone = vi.fn();
 const isExcludedInstagramContact = vi.fn().mockReturnValue(false);
+const hasInboundMessage = vi.fn().mockReturnValue(true);
 vi.mock("../src/lib/instagram-inbox.js", () => ({
   fetchInstagramContactsWithMessages: (...args: unknown[]) => fetchInstagramContactsWithMessages(...args),
   buildTranscript: (...args: unknown[]) => buildTranscript(...args),
   extractVolunteeredEmail: (...args: unknown[]) => extractVolunteeredEmail(...args),
   extractVolunteeredPhone: (...args: unknown[]) => extractVolunteeredPhone(...args),
   isExcludedInstagramContact: (...args: unknown[]) => isExcludedInstagramContact(...args),
+  hasInboundMessage: (...args: unknown[]) => hasInboundMessage(...args),
 }));
 
 const checkExistingCustomer = vi.fn();
@@ -40,9 +42,9 @@ vi.mock("../src/lib/leads.js", () => ({
   fetchAllCustomerNames: (...args: unknown[]) => fetchAllCustomerNames(...args),
 }));
 
-const isGenuineInformationRequestDM = vi.fn();
+const classifyInstagramDM = vi.fn();
 vi.mock("../src/lib/lead-classifier.js", () => ({
-  isGenuineInformationRequestDM: (...args: unknown[]) => isGenuineInformationRequestDM(...args),
+  classifyInstagramDM: (...args: unknown[]) => classifyInstagramDM(...args),
 }));
 
 const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
@@ -55,9 +57,11 @@ vi.mock("../src/lib/telegram.js", () => ({
   sendGroupMessage: (...args: unknown[]) => sendGroupMessage(...args),
 }));
 
-const createLead = vi.fn().mockResolvedValue("new-page-id");
+const createLead = vi.fn().mockResolvedValue("new-lead-page-id");
+const createPartner = vi.fn().mockResolvedValue("new-partner-page-id");
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
+  createPartner: (...args: unknown[]) => createPartner(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -84,20 +88,22 @@ describe("leads-instagram-scan", () => {
     extractVolunteeredEmail.mockReset();
     extractVolunteeredPhone.mockReset();
     isExcludedInstagramContact.mockReset().mockReturnValue(false);
+    hasInboundMessage.mockReset().mockReturnValue(true);
     checkExistingCustomer.mockReset();
     fetchAllCustomerNames.mockReset().mockResolvedValue([]);
-    isGenuineInformationRequestDM.mockReset();
+    classifyInstagramDM.mockReset();
     isStudioSupabaseAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
-    createLead.mockClear().mockResolvedValue("new-page-id");
+    createLead.mockClear().mockResolvedValue("new-lead-page-id");
+    createPartner.mockClear().mockResolvedValue("new-partner-page-id");
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
 
-  it("creates a lead for a genuine information request with no existing CRM match", async () => {
+  it("creates a lead for a genuine client information request with no existing CRM match", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: quanto custa?");
-    isGenuineInformationRequestDM.mockResolvedValue(true);
+    classifyInstagramDM.mockResolvedValue("cliente");
     extractVolunteeredEmail.mockReturnValue(null);
     extractVolunteeredPhone.mockReturnValue(null);
     checkExistingCustomer.mockResolvedValue({ isExistingCustomer: false, fuzzyMatch: null });
@@ -113,17 +119,34 @@ describe("leads-instagram-scan", () => {
       expect.any(String),
       { telefone: null },
     );
+    expect(createPartner).not.toHaveBeenCalled();
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("does not create a lead when the transcript isn't a genuine information request", async () => {
+  it("routes a business/networking contact to Partner Pipeline instead of Leads a contactar", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
+    classifyInstagramDM.mockResolvedValue("parceiro");
+
+    await run();
+
+    expect(createPartner).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Parceria");
+    expect(createLead).not.toHaveBeenCalled();
+    expect(checkExistingCustomer).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("parceiro");
+  });
+
+  it("does not create a lead or partner when the transcript is neither", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: adoro o vosso estúdio!");
-    isGenuineInformationRequestDM.mockResolvedValue(false);
+    classifyInstagramDM.mockResolvedValue("nenhum");
 
     await run();
 
     expect(createLead).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
     expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
@@ -133,53 +156,105 @@ describe("leads-instagram-scan", () => {
 
     await run();
 
-    expect(isGenuineInformationRequestDM).not.toHaveBeenCalled();
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
+    expect(createLead).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
+  });
+
+  it("logs a studio-only outreach contact (no reply) as an already-contacted partner, without calling the classifier — regression for the 2026-09-21 false-partner-classification incident", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    hasInboundMessage.mockReturnValue(false);
+    buildTranscript.mockReturnValue("Haven: queríamos explorar uma parceria convosco!");
+
+    await run();
+
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
+    expect(createLead).not.toHaveBeenCalled();
+    expect(createPartner).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Parceria", "Contactado");
+  });
+
+  it("skips a studio-only outreach contact with no text at all (edge case)", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    hasInboundMessage.mockReturnValue(false);
+    buildTranscript.mockReturnValue("");
+
+    await run();
+
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
   });
 
   it("skips a contact with no new activity since it was already checked", async () => {
-    fsState = { "contact-1": { messageCountSeen: 3, isLead: false, notionPageId: null, classifiedAt: "x" } };
+    fsState = {
+      "contact-1": { messageCountSeen: 3, classification: "nenhum", notionPageId: null, classifiedAt: "x" },
+    };
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
 
     await run();
 
-    expect(isGenuineInformationRequestDM).not.toHaveBeenCalled();
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
   });
 
   it("reclassifies a previously-rejected contact once new messages arrive", async () => {
-    fsState = { "contact-1": { messageCountSeen: 1, isLead: false, notionPageId: null, classifiedAt: "x" } };
+    fsState = {
+      "contact-1": { messageCountSeen: 1, classification: "nenhum", notionPageId: null, classifiedAt: "x" },
+    };
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]); // now messageCount: 3
     buildTranscript.mockReturnValue("Cliente: quanto custa?");
-    isGenuineInformationRequestDM.mockResolvedValue(true);
+    classifyInstagramDM.mockResolvedValue("cliente");
     extractVolunteeredEmail.mockReturnValue(null);
     extractVolunteeredPhone.mockReturnValue(null);
     checkExistingCustomer.mockResolvedValue({ isExistingCustomer: false, fuzzyMatch: null });
 
     await run();
 
-    expect(isGenuineInformationRequestDM).toHaveBeenCalled();
+    expect(classifyInstagramDM).toHaveBeenCalled();
     expect(createLead).toHaveBeenCalled();
   });
 
   it("never creates a second lead for a contact that already has a notionPageId, even with new messages", async () => {
     fsState = {
-      "contact-1": { messageCountSeen: 1, isLead: true, notionPageId: "existing-page", classifiedAt: "x" },
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "cliente",
+        notionPageId: "existing-page",
+        classifiedAt: "x",
+      },
     };
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]); // now messageCount: 3, i.e. new activity
 
     await run();
 
-    expect(isGenuineInformationRequestDM).not.toHaveBeenCalled();
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
     // the checkpoint's message count is still refreshed to stay accurate
     expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(3);
   });
 
+  it("never creates a second partner page for a contact that already has one, even with new messages", async () => {
+    fsState = {
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "parceiro",
+        notionPageId: "existing-partner-page",
+        classifiedAt: "x",
+      },
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+
+    await run();
+
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
+  });
+
   it("does not create a lead for someone who already has a real purchase on file", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: quanto custa?");
-    isGenuineInformationRequestDM.mockResolvedValue(true);
+    classifyInstagramDM.mockResolvedValue("cliente");
     extractVolunteeredEmail.mockReturnValue("joana@example.com");
     extractVolunteeredPhone.mockReturnValue(null);
     checkExistingCustomer.mockResolvedValue({ isExistingCustomer: true, fuzzyMatch: null });
@@ -192,7 +267,7 @@ describe("leads-instagram-scan", () => {
   it("flags a fuzzy CRM name match for manual review instead of suppressing the write", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: quanto custa?");
-    isGenuineInformationRequestDM.mockResolvedValue(true);
+    classifyInstagramDM.mockResolvedValue("cliente");
     extractVolunteeredEmail.mockReturnValue(null);
     extractVolunteeredPhone.mockReturnValue(null);
     checkExistingCustomer.mockResolvedValue({

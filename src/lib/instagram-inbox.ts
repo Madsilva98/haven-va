@@ -145,6 +145,23 @@ export async function fetchInstagramContactsWithMessages(): Promise<InstagramCon
 const DEFAULT_MAX_CHARS = 8000;
 
 /**
+ * True if the contact ever sent at least one message with text — as
+ * opposed to a contact who exists in the table only because the STUDIO
+ * cold-messaged them (e.g. an influencer/brand outreach campaign) and got
+ * no reply. Those "out"-only threads still contain the studio's own
+ * "queríamos explorar uma parceria" language, which fooled the classifier
+ * into flagging them as a "parceiro" candidate (found in production
+ * 2026-09-21, e.g. "Piiiton", zero inbound messages, only the studio's own
+ * outreach) — a page should only ever get created from something the
+ * CONTACT said, never from our own message being read back to us. Callers
+ * must check this before classifying at all, not just before building the
+ * transcript, since an out-only transcript is still non-empty text.
+ */
+export function hasInboundMessage(messages: InstagramTranscriptMessage[]): boolean {
+  return messages.some((m) => m.direction === "in" && m.text);
+}
+
+/**
  * Chronological "Cliente:"/"Haven:" transcript for the classifier — both
  * directions, since a one-word reply from the client often only makes
  * sense next to what we said before it. Capped from the start (earliest

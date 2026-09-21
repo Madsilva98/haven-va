@@ -2,14 +2,16 @@
  * Read-only rehearsal for src/crons/leads-instagram-scan.ts, run once
  * before that cron is ever deployed. Runs the exact same fetch/exclude/
  * classify/match pipeline against real Studio Supabase + real Anthropic,
- * but never calls notion.createLead and never touches the checkpoint file
- * — purely diagnostic. Prints every contact that WOULD become a lead, so
- * the founder can review before the standing cron runs for real:
+ * but never calls notion.createLead/createPartner and never touches the
+ * checkpoint file — purely diagnostic. Prints every contact that WOULD
+ * become a lead or a potential-partner candidate, so the founder can
+ * review before the standing cron runs for real:
  *   - confirm the exclusion list catches everyone it should (staff,
  *     founders, known peer/business contacts) — anyone that shouldn't be
  *     here but is, hand their exact display name/username back to be
  *     added to EXCLUDED_INSTAGRAM_NAMES in src/lib/instagram-inbox.ts
- *   - spot-check a few borderline classifications
+ *   - spot-check a few borderline classifications, including
+ *     cliente-vs-parceiro calls
  *   - confirm extracted emails/phones look right
  *
  * Usage:
@@ -22,10 +24,11 @@ import {
   extractVolunteeredEmail,
   extractVolunteeredPhone,
   fetchInstagramContactsWithMessages,
+  hasInboundMessage,
   isExcludedInstagramContact,
 } from "../dist/lib/instagram-inbox.js";
 import { checkExistingCustomer, fetchAllCustomerNames } from "../dist/lib/leads.js";
-import { isGenuineInformationRequestDM } from "../dist/lib/lead-classifier.js";
+import { classifyInstagramDM } from "../dist/lib/lead-classifier.js";
 
 async function main() {
   const [contacts, customers] = await Promise.all([
@@ -35,13 +38,35 @@ async function main() {
   console.log(`Fetched ${contacts.length} Instagram contacts, ${customers.length} CRM customers.\n`);
 
   let excluded = 0;
+  let alreadyContacted = 0;
   let noText = 0;
-  let notLead = 0;
-  let candidates = 0;
+  let nenhum = 0;
+  let clienteCandidates = 0;
+  let parceiroCandidates = 0;
 
   for (const contact of contacts) {
     if (isExcludedInstagramContact(contact)) {
       excluded++;
+      continue;
+    }
+
+    const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
+    const handle = contact.username ? `@${contact.username}` : contact.platformUserId;
+
+    // The studio's own cold outreach (e.g. an influencer/brand campaign)
+    // that never got a reply — must be checked before classifying, since
+    // an out-only transcript still contains our own "parceria" language
+    // and would otherwise fool the classifier into a false "parceiro".
+    // No classification needed: it's still logged, just as an
+    // already-contacted partner, not a judgment call.
+    if (!hasInboundMessage(contact.messages)) {
+      if (!buildTranscript(contact.messages)) {
+        noText++;
+        continue;
+      }
+      alreadyContacted++;
+      console.log(`[já contactado] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
+      console.log('  -> seria criado em Partner Pipeline (Categoria = "Parceria", Status = "Contactado")\n');
       continue;
     }
 
@@ -51,19 +76,26 @@ async function main() {
       continue;
     }
 
-    const isLead = await isGenuineInformationRequestDM(transcript);
-    if (!isLead) {
-      notLead++;
+    const classification = await classifyInstagramDM(transcript);
+
+    if (classification === "nenhum") {
+      nenhum++;
       continue;
     }
 
+    if (classification === "parceiro") {
+      parceiroCandidates++;
+      console.log(`[parceiro] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
+      console.log('  -> seria criado em Partner Pipeline (Categoria = "Parceria", Status = "A contactar")\n');
+      continue;
+    }
+
+    // classification === "cliente"
     const email = extractVolunteeredEmail(contact.messages);
     const phone = extractVolunteeredPhone(contact.messages);
-    const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
     const check = await checkExistingCustomer(email, name, customers);
-    const handle = contact.username ? `@${contact.username}` : contact.platformUserId;
 
-    candidates++;
+    clienteCandidates++;
     console.log(`[candidato] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
     console.log(`  email: ${email ?? "(nenhum)"} · telefone: ${phone ?? "(nenhum)"}`);
     if (check.isExistingCustomer) {
@@ -79,7 +111,7 @@ async function main() {
   }
 
   console.log(
-    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${noText} sem texto · ${notLead} não são pedidos de informação · ${candidates} candidatos a lead.`,
+    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${alreadyContacted} já contactados por nós (Partner Pipeline, Status="Contactado") · ${noText} sem texto · ${nenhum} nem cliente nem parceiro · ${clienteCandidates} candidatos a lead · ${parceiroCandidates} candidatos a parceiro.`,
   );
   console.log(
     "\nEste script é só de leitura — não escreveu no Notion nem no checkpoint. Revê os candidatos acima antes de confiar no próximo run real do cron.",

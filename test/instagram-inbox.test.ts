@@ -5,9 +5,36 @@ import {
   extractVolunteeredEmail,
   extractVolunteeredPhone,
   groupMessagesByContact,
+  hasInboundMessage,
   isExcludedInstagramContact,
   type InstagramTranscriptMessage,
 } from "../src/lib/instagram-inbox.js";
+
+describe("hasInboundMessage", () => {
+  it("is true when the contact sent at least one message with text", () => {
+    const messages: InstagramTranscriptMessage[] = [
+      { direction: "out", text: "Queríamos explorar uma parceria!", sentAt: "x" },
+      { direction: "in", text: "Não tenho interesse, obrigada", sentAt: "y" },
+    ];
+    expect(hasInboundMessage(messages)).toBe(true);
+  });
+
+  it("is false for a studio-only outreach thread with no reply — regression for the 2026-09-21 false-partner incident", () => {
+    const messages: InstagramTranscriptMessage[] = [
+      { direction: "out", text: "Queríamos explorar uma parceria convosco!", sentAt: "x" },
+    ];
+    expect(hasInboundMessage(messages)).toBe(false);
+  });
+
+  it("is false for an inbound message with no text (media-only)", () => {
+    const messages: InstagramTranscriptMessage[] = [{ direction: "in", text: null, sentAt: "x" }];
+    expect(hasInboundMessage(messages)).toBe(false);
+  });
+
+  it("is false for no messages at all", () => {
+    expect(hasInboundMessage([])).toBe(false);
+  });
+});
 
 describe("buildTranscript", () => {
   it("renders both directions chronologically, labelled Cliente/Haven", () => {
