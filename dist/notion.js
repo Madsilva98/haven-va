@@ -1745,6 +1745,33 @@ async function createInfluencer(nome, owner, originalMsg, canalContacto, ultimoC
     log.info("notion.influencer_created", { pageId: page.id, nome, owner });
     return page.id;
 }
+// "Current state" property update for an existing Influencer Pipeline
+// page — Status/Tipo de colaboração/Nicho/Próximo passo/Último contacto,
+// as opposed to createInfluencer's free-text toggle sections. Every field
+// is optional and only included in the update when given, so a caller can
+// refresh just what it actually knows without clobbering the rest (e.g.
+// Owner/Notas stay founder-managed, untouched here).
+async function updateInfluencerFields(pageId, fields) {
+    const properties = {};
+    if (fields.status)
+        properties["Status"] = { select: { name: fields.status } };
+    if (fields.tipoColaboracao && fields.tipoColaboracao.length > 0) {
+        properties["Tipo de colaboração"] = { multi_select: fields.tipoColaboracao.map((name) => ({ name })) };
+    }
+    if (fields.nicho)
+        properties["Nicho"] = richText(fields.nicho);
+    if (fields.proximoPasso)
+        properties["Próximo passo"] = richText(fields.proximoPasso);
+    if (fields.ultimoContacto)
+        properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+    if (Object.keys(properties).length === 0)
+        return;
+    await withRetry("updateInfluencerFields", () => client.pages.update({
+        page_id: pageId,
+        properties: properties,
+    }));
+    log.info("notion.influencer_fields_updated", { pageId, fields: Object.keys(properties) });
+}
 async function createLead(nome, email, canal, motivo, verificacao, origem, opts = {}) {
     if (!NOTION_LEADS_DB_ID) {
         throw new Error("NOTION_LEADS_DB_ID not set");
@@ -2442,7 +2469,7 @@ getAllPartnerContacts, getContentCalendarNeedsScheduling, createReminder, getDue
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Feature D — entities
-createProject, createEvent, createPartner, createInfluencer, 
+createProject, createEvent, createPartner, createInfluencer, updateInfluencerFields, 
 // Feature E — entity lookup
 findEntityByName, 
 // Lists
@@ -2498,6 +2525,7 @@ export const notion = {
     createEvent,
     createPartner,
     createInfluencer,
+    updateInfluencerFields,
     // Feature E — entity lookup
     findEntityByName,
     // Lists

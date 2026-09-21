@@ -74,12 +74,14 @@ const createPartner = vi.fn().mockResolvedValue("new-partner-page-id");
 const createInfluencer = vi.fn().mockResolvedValue("new-influencer-page-id");
 const appendToPageSection = vi.fn().mockResolvedValue(undefined);
 const replacePageSection = vi.fn().mockResolvedValue(undefined);
+const updateInfluencerFields = vi.fn().mockResolvedValue(undefined);
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
   createPartner: (...args: unknown[]) => createPartner(...args),
   createInfluencer: (...args: unknown[]) => createInfluencer(...args),
   appendToPageSection: (...args: unknown[]) => appendToPageSection(...args),
   replacePageSection: (...args: unknown[]) => replacePageSection(...args),
+  updateInfluencerFields: (...args: unknown[]) => updateInfluencerFields(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -124,6 +126,7 @@ describe("leads-instagram-scan", () => {
     createInfluencer.mockClear().mockResolvedValue("new-influencer-page-id");
     appendToPageSection.mockClear().mockResolvedValue(undefined);
     replacePageSection.mockClear().mockResolvedValue(undefined);
+    updateInfluencerFields.mockClear().mockResolvedValue(undefined);
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
@@ -388,6 +391,10 @@ describe("leads-instagram-scan", () => {
     findBestNameMatch.mockReturnValue({ name: "Joana F.", email: null, score: 0.7 });
     enrichInfluencerFromTranscript.mockResolvedValue({
       sobre: "Cria conteúdo de lifestyle",
+      nicho: "lifestyle",
+      tipoColaboracao: ["Visita ao estúdio"],
+      status: "Em conversa",
+      proximoPasso: "confirmar data da aula",
       log: "Propôs experimentar uma aula.",
     });
 
@@ -405,6 +412,13 @@ describe("leads-instagram-scan", () => {
       expect.stringContaining("Propôs experimentar uma aula."),
       "Relação e histórico",
     );
+    expect(updateInfluencerFields).toHaveBeenCalledWith("new-influencer-page-id", {
+      status: "Em conversa",
+      tipoColaboracao: ["Visita ao estúdio"],
+      nicho: "lifestyle",
+      proximoPasso: "confirmar data da aula",
+      ultimoContacto: "2026-01-01T00:00:00Z",
+    });
   });
 
   it("a first-time enrichment failure never affects the checkpoint or fails the run", async () => {
@@ -461,6 +475,52 @@ describe("leads-instagram-scan", () => {
     // never creates a second page
     expect(createPartner).not.toHaveBeenCalled();
     expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(3);
+  });
+
+  it("re-enriches an existing influencer page: refreshes Status/Tipo/Nicho/Próximo passo/Último contacto from the full transcript", async () => {
+    fsState = {
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "influencer",
+        notionPageId: "existing-influencer-page",
+        classifiedAt: "x",
+      },
+    };
+    const grownContact = {
+      ...contact,
+      messageCount: 3,
+      lastMessageAt: "2026-02-05T10:00:00Z",
+      messages: [
+        { direction: "in" as const, text: "primeira mensagem", sentAt: "2026-01-01T00:00:00Z" },
+        { direction: "out" as const, text: "resposta", sentAt: "2026-01-01T00:01:00Z" },
+        { direction: "in" as const, text: "aceito!", sentAt: "2026-02-05T10:00:00Z" },
+      ],
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([grownContact]);
+    buildTranscript.mockImplementation((messages: unknown[]) =>
+      messages.length ? `transcript-of-${messages.length}-messages` : "",
+    );
+    extractVolunteeredEmail.mockReturnValue(null);
+    enrichInfluencerFromTranscript.mockResolvedValue({
+      sobre: "Sobre atualizado",
+      nicho: "fitness",
+      tipoColaboracao: ["Post patrocinado"],
+      status: "Proposta enviada",
+      proximoPasso: "aguardar confirmação",
+      log: "ignorado aqui",
+    });
+    summarizeRelationshipUpdate.mockResolvedValue("Aceitou a proposta.");
+
+    await run();
+
+    expect(updateInfluencerFields).toHaveBeenCalledWith("existing-influencer-page", {
+      status: "Proposta enviada",
+      tipoColaboracao: ["Post patrocinado"],
+      nicho: "fitness",
+      proximoPasso: "aguardar confirmação",
+      ultimoContacto: "2026-02-05T10:00:00Z",
+    });
+    expect(createInfluencer).not.toHaveBeenCalled();
   });
 
   it("leaves the checkpoint stale when re-enrichment fails, so the next run retries", async () => {
