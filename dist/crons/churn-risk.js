@@ -23,10 +23,12 @@
  *    a churned customer's row was sitting open indefinitely since nothing
  *    ever re-checked it once their subscription dropped out of the
  *    "Active" filter in churn-signals.ts) or because they're still active
- *    but resolved every signal (e.g. booked again). A row that resolved
- *    SOME signals but still has at least one open one is handled by #2
- *    instead — it stays open and in the digest, since that's still worth
- *    watching or contacting about.
+ *    but resolved every signal (e.g. booked again — this case only is
+ *    mentioned in the digest as a bare count, not by name: also the
+ *    founder's call, same day). A row that resolved SOME signals but
+ *    still has at least one open one is handled by #2 instead — it stays
+ *    open and named in the digest, since that's still worth watching or
+ *    contacting about.
  *
  * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
  * the birthday cron.
@@ -102,9 +104,9 @@ export async function run() {
     }
     // Reconcile every other still-open row: not touched above because
     // Studio Supabase doesn't flag that email at all this week — zero
-    // current signals either way, so archive it (silently, like the
-    // Resolvido/Arquivado sweep above — not something to nag the founder
-    // about in the digest).
+    // current signals either way, so archive it. Still-active resolutions
+    // get a bare count in the digest (not each name); churned ones are
+    // logged only, same as the Resolvido/Arquivado sweep above.
     let archivedResolved = 0;
     let archivedChurned = 0;
     try {
@@ -132,7 +134,7 @@ export async function run() {
     catch (err) {
         log.error("churn_risk.fetch_open_failed", { message: errMsg(err) });
     }
-    const message = formatChurnDigest(changed);
+    const message = formatChurnDigest(changed, archivedResolved);
     if (!message) {
         log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedResolved, archivedChurned });
         return;

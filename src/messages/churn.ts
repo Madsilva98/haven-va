@@ -1,8 +1,12 @@
 /**
  * Weekly "Clientes em risco de churn" digest — src/crons/churn-risk.ts.
- * Only lists people newly flagged or who gained a new signal this week;
- * rows already open in Notion from a prior week are the founder's manual
- * follow-up, not re-nagged here. Returns null (silent) when nothing changed.
+ * Lists people newly flagged, or who gained/lost a signal but still have at
+ * least one open (still worth watching or contacting by name); rows already
+ * open in Notion from a prior week with nothing new are the founder's manual
+ * follow-up, not re-nagged here. People who resolved EVERY signal get
+ * archived automatically and are only ever summarised as a count — the
+ * founder's call (2026-09-21): no need to name each one individually.
+ * Returns null (silent) when nothing happened at all this week.
  */
 
 export interface ChurnDigestEntry {
@@ -10,12 +14,18 @@ export interface ChurnDigestEntry {
   sinais: string[];
 }
 
-export function formatChurnDigest(entries: ChurnDigestEntry[]): string | null {
-  if (entries.length === 0) return null;
+export function formatChurnDigest(entries: ChurnDigestEntry[], resolvedCount = 0): string | null {
+  if (entries.length === 0 && resolvedCount === 0) return null;
 
-  const lines: string[] = [`⚠️ *${entries.length} cliente(s) em risco de churn:*`];
-  for (const entry of entries) {
-    lines.push(`• ${entry.nome} — ${entry.sinais.join(", ")}`);
+  const lines: string[] = [];
+  if (entries.length > 0) {
+    lines.push(`⚠️ *${entries.length} cliente(s) em risco de churn:*`);
+    for (const entry of entries) {
+      lines.push(`• ${entry.nome} — ${entry.sinais.join(", ")}`);
+    }
+  }
+  if (resolvedCount > 0) {
+    lines.push(`✅ ${resolvedCount} resolvida(s) esta semana (sem sinais de risco, arquivadas automaticamente).`);
   }
   return lines.join("\n");
 }

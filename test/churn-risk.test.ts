@@ -138,18 +138,29 @@ describe("churn-risk", () => {
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("archives a still-active row once it resolves every signal — nothing left to watch", async () => {
-    mockOpenAndClosedRows([], [{ id: "row-d", nome: "Diana", email: "d@x.com", status: "Aberto" }]);
-    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com"]) });
+  it("archives a still-active row once it resolves every signal, and reports it as a bare count — not by name", async () => {
+    mockOpenAndClosedRows(
+      [],
+      [
+        { id: "row-d", nome: "Diana", email: "d@x.com", status: "Aberto" },
+        { id: "row-f", nome: "Filipe", email: "f@x.com", status: "Aberto" },
+      ],
+    );
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com", "f@x.com"]) });
 
     await run();
 
     expect(archivePage).toHaveBeenCalledWith("row-d");
+    expect(archivePage).toHaveBeenCalledWith("row-f");
     expect(updateChurnFlag).not.toHaveBeenCalled();
-    expect(sendGroupMessage).not.toHaveBeenCalled(); // silent, like any other archive
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("2 resolvida(s)");
+    expect(message).not.toContain("Diana");
+    expect(message).not.toContain("Filipe");
   });
 
-  it("auto-archives an open row once the person is no longer an active subscriber at all", async () => {
+  it("auto-archives an open row once the person is no longer an active subscriber at all, silently (no digest)", async () => {
     mockOpenAndClosedRows([], [{ id: "row-e", nome: "Andrew", email: "e@x.com", status: "Aberto" }]);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set() });
 
@@ -157,5 +168,6 @@ describe("churn-risk", () => {
 
     expect(archivePage).toHaveBeenCalledWith("row-e");
     expect(updateChurnFlag).not.toHaveBeenCalled();
+    expect(sendGroupMessage).not.toHaveBeenCalled(); // churn (not resolution) stays log-only, no digest noise
   });
 });
