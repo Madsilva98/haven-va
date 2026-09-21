@@ -125,11 +125,19 @@ const INFLUENCER_ENRICHED_STATUSES = [
     "Fechado",
     "Arquivado",
 ];
+/** Case/punctuation-tolerant match against a fixed option list — models
+ * aren't perfectly deterministic about casing/trailing punctuation even
+ * when the prompt asks for an exact value, and a near-miss should still
+ * resolve rather than silently fall back to null. Still constrained to
+ * the canonical list; anything that doesn't match a known option is
+ * genuinely unrecognized, not accepted as-is. */
+function matchCanonical(value, options) {
+    const normalized = value.trim().replace(/[.。]+$/, "").toLowerCase();
+    return options.find((opt) => opt.toLowerCase() === normalized) ?? null;
+}
 function parseInfluencerStatus(reply) {
     const value = extractField(reply, "STATUS");
-    return INFLUENCER_ENRICHED_STATUSES.includes(value ?? "")
-        ? value
-        : null;
+    return value ? matchCanonical(value, INFLUENCER_ENRICHED_STATUSES) : null;
 }
 /** Matches the Influencer Pipeline Notion DB's real Tipo de colaboração
  * multi-select options. */
@@ -146,8 +154,8 @@ function parseCollabTypes(reply) {
         return [];
     return raw
         .split(",")
-        .map((s) => s.trim())
-        .filter((s) => INFLUENCER_COLLAB_TYPES.includes(s));
+        .map((s) => matchCanonical(s, INFLUENCER_COLLAB_TYPES))
+        .filter((s) => s !== null);
 }
 export async function enrichInfluencerFromTranscript(transcript) {
     const reply = await callFreeform(transcript, "influencerEnrichment", 500);
