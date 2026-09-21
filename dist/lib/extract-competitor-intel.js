@@ -25,7 +25,9 @@ const SYSTEM_INSTRUCTION = "Analisas newsletters de concorrentes e de negócios 
     "lançamentos ou alterações de produtos/serviços. " +
     `As categorias conhecidas são: ${KNOWN_TIPOS.join(", ")}. ` +
     "Se um achado não encaixar bem em nenhuma, podes propor uma categoria nova curta em pt-PT em vez de forçar uma das existentes — o founder revê e limpa depois. " +
-    "Ignora ruído sem valor competitivo: rodapés, disclaimers legais, links de unsubscribe, saudações genéricas sem novidade nenhuma. " +
+    "Ignora ruído sem valor competitivo: rodapés, disclaimers legais, links de unsubscribe, saudações genéricas sem novidade nenhuma, e mudanças operacionais rotineiras sem impacto estratégico — " +
+    "por exemplo, um novo instrutor a juntar-se à equipa ou a assumir um horário existente NÃO é \"Produto/Serviço\" a menos que traga algo genuinamente novo consigo " +
+    "(uma especialidade nova, um formato de aula novo, uma reputação/nome que sinalize posicionamento). Contratações e escalas de instrutores são ruído operacional, não achado competitivo. " +
     "Um email pode conter zero, um, ou vários achados distintos — extrai cada achado separadamente, não os agregues num só. " +
     "Se o email não tiver nada de relevante, devolve uma lista vazia. " +
     'Responde APENAS com um array JSON válido, nada antes nem depois, nesta forma exata: ' +
