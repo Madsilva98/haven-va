@@ -241,6 +241,7 @@ const leadsProperties = {
   ] } },
   Estado: { select: { options: [
     { name: "Novo" }, { name: "Contactado" }, { name: "Convertido" }, { name: "Perdido" },
+    { name: "Inconclusivo" },
   ] } },
   Notas: { rich_text: {} },
   Origem: { rich_text: {} },

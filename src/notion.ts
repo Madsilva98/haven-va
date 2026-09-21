@@ -2086,9 +2086,10 @@ async function setLeadEstado(pageId: string, estado: LeadStatus): Promise<void> 
   log.info("notion.lead_estado_set", { pageId, estado });
 }
 
-// Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
-// any — used to avoid creating a duplicate row for the same person across
-// runs. A closed lead (already converted/lost) does not block a new one.
+// Returns an OPEN lead (Estado not Convertido/Perdido/Inconclusivo) for
+// this email, if any — used to avoid creating a duplicate row for the same
+// person across runs. A closed lead (already converted/lost/inconclusive)
+// does not block a new one.
 async function findLeadByEmail(email: string): Promise<{ id: string; estado: LeadStatus } | null> {
   if (!NOTION_LEADS_DB_ID) return null;
   const res = await withRetry("findLeadByEmail", () =>
@@ -2099,6 +2100,7 @@ async function findLeadByEmail(email: string): Promise<{ id: string; estado: Lea
           { property: "Email", email: { equals: email } },
           { property: "Estado", select: { does_not_equal: "Convertido" } },
           { property: "Estado", select: { does_not_equal: "Perdido" } },
+          { property: "Estado", select: { does_not_equal: "Inconclusivo" } },
         ],
       },
       page_size: 1,
@@ -2146,15 +2148,29 @@ async function getLeadsByEstado(
   return rows;
 }
 
-// Same as findLeadByEmail but WITHOUT the open-only filter — for one-off
-// data repairs that need to reach a lead regardless of its current Estado
-// (e.g. fixing the Motivo text on a row already marked Convertido).
-async function findLeadByEmailAny(email: string): Promise<{ id: string; estado: LeadStatus } | null> {
+// Same as findLeadByEmail but WITHOUT the open-only filter — reaches a lead
+// regardless of its current Estado. Used for (a) one-off data repairs that
+// need to reach a lead no matter its status (e.g. fixing the Motivo text on
+// a row already marked Convertido), and (b) leads-intro-pack.ts's dedup,
+// which must still see a Perdido row (leads-reconcile.ts deliberately
+// leaves Perdido+Intro-Pack rows un-archived so this keeps finding them —
+// see that file's docstring). Pass `canal` to scope the match to one
+// channel — leads-intro-pack.ts always does, since without it a closed
+// lead on an unrelated channel (Email/WhatsApp/Instagram) that hasn't been
+// archived yet (e.g. a transient archivePage failure) would silently block
+// creation of a legitimate new Intro Pack lead for that same email.
+async function findLeadByEmailAny(
+  email: string,
+  canal?: LeadChannel,
+): Promise<{ id: string; estado: LeadStatus } | null> {
   if (!NOTION_LEADS_DB_ID) return null;
+  const filter = canal
+    ? { and: [{ property: "Email", email: { equals: email } }, { property: "Canal", select: { equals: canal } }] }
+    : { property: "Email", email: { equals: email } };
   const res = await withRetry("findLeadByEmailAny", () =>
     client.dataSources.query({
       data_source_id: dsId(NOTION_LEADS_DB_ID!),
-      filter: { property: "Email", email: { equals: email } },
+      filter,
       page_size: 1,
     }),
   );

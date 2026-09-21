@@ -4,12 +4,33 @@
  * wants the list "viva" (alive) — whatever she sets Estado to by hand,
  * the next cron pass tidies away.
  *
- * 1. Any row marked Estado="Perdido" OR Estado="Convertido" gets archived
- *    unconditionally — those are both closed states the founder sets by
- *    hand in Notion, this is just the "next time the cron runs, tidy it
- *    away" half of that workflow. (Convertido is never the bot's own
- *    write — see point 2 — only ever a manual override, but once it's set
- *    the row shouldn't stick around either.)
+ * 1. Any row marked Estado="Perdido", "Convertido", or "Inconclusivo" gets
+ *    archived unconditionally — all three are closed states the founder
+ *    sets by hand in Notion, this is just the "next time the cron runs,
+ *    tidy it away" half of that workflow. ("Inconclusivo" added 2026-09-21:
+ *    for when the message thread alone doesn't say whether the person
+ *    converted or was lost — same terminal weight as the other two, not an
+ *    open one. Convertido/Inconclusivo are never the bot's own write — see
+ *    point 2 — only ever a manual override, but once set the row shouldn't
+ *    stick around either.)
+ *
+ *    EXCEPTION: Perdido/Inconclusivo rows on the Intro Pack channel are
+ *    left alone, NOT archived. Archiving makes a page invisible to every
+ *    future Notion query (Notion excludes archived pages from query
+ *    results, with no way to opt back in) — and leads-intro-pack.ts
+ *    re-derives the same candidate every Monday for as long as that
+ *    person's pack stays unconverted (there's no independent "already
+ *    rejected" signal for it the way there is for Convertido, which the
+ *    Studio Supabase purchase data itself guarantees won't recur).
+ *    Archiving a Perdido Intro Pack row made it invisible to
+ *    leads-intro-pack.ts's dedup check, so the following Monday it
+ *    silently recreated the same person as a fresh "Novo" lead — undoing
+ *    the founder's Perdido call (broke in production 2026-09-21, e.g.
+ *    Marta Somborn). Inconclusivo carries the exact same risk for the same
+ *    reason, so it gets the same treatment pre-emptively. Leaving the row
+ *    un-archived keeps it visible to that dedup check forever, at the cost
+ *    of it staying visible in Notion instead of disappearing — the
+ *    founder's explicit trade-off.
  * 2. Any still-open row (Novo/Contactado) that has genuinely converted
  *    gets archived too — automatically, without the founder having to
  *    notice and flip the status herself. The bot marking it "Convertido"
@@ -49,9 +70,19 @@ export async function run(): Promise<void> {
   }
 
   let archivedClosed = 0;
+  let keptClosedIntroPack = 0;
   try {
-    const closed = await notion.getLeadsByEstado(["Perdido", "Convertido"]);
+    const closed = await notion.getLeadsByEstado(["Perdido", "Convertido", "Inconclusivo"]);
     for (const row of closed) {
+      // See the module docstring's EXCEPTION: archiving a Perdido or
+      // Inconclusivo Intro Pack row would make it invisible to
+      // leads-intro-pack.ts's dedup check, which would then recreate it
+      // the following Monday.
+      if ((row.estado === "Perdido" || row.estado === "Inconclusivo") && row.canal === "Intro Pack") {
+        keptClosedIntroPack++;
+        log.debug("leads_reconcile.kept_closed_intro_pack", { pageId: row.id, estado: row.estado });
+        continue;
+      }
       try {
         await notion.archivePage(row.id);
         archivedClosed++;
@@ -107,5 +138,5 @@ export async function run(): Promise<void> {
     }
   }
 
-  log.info("leads_reconcile.done", { archivedClosed, archivedConverted });
+  log.info("leads_reconcile.done", { archivedClosed, archivedConverted, keptClosedIntroPack });
 }
