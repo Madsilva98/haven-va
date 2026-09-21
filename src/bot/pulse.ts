@@ -33,7 +33,7 @@ export async function handleFlag(ctx: Context): Promise<void> {
     return;
   }
   if (!isStudioDbAvailable()) {
-    await ctx.reply("Supabase do estúdio não configurado — não consigo registar o caso.");
+    await ctx.reply("Base de dados do estúdio não configurada — não consigo registar o caso.");
     return;
   }
   // The view named in the message being replied to wins; else the last
@@ -62,7 +62,7 @@ export async function handleFlag(ctx: Context): Promise<void> {
 export async function handleCasos(ctx: Context): Promise<void> {
   if (!getFounderName(ctx.from?.id ?? 0)) return;
   if (!isStudioDbAvailable()) {
-    await ctx.reply("Supabase do estúdio não configurado.");
+    await ctx.reply("Base de dados do estúdio não configurada.");
     return;
   }
   try {
@@ -87,7 +87,7 @@ export async function handleWhy(ctx: Context, repliedToText: string | undefined)
   const views = replied.length > 0 ? replied : lastSource(ctx.chat.id);
   if (views.length === 0) return false;
   if (!isStudioDbAvailable()) {
-    await ctx.reply("Supabase do estúdio não configurado — não consigo ler a regra.");
+    await ctx.reply("Base de dados do estúdio não configurada — não consigo ler a regra.");
     return true;
   }
   const parts: string[] = [];

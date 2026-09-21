@@ -21,9 +21,9 @@ export interface PulseCaseInput {
 }
 
 export async function insertPulseCase(input: PulseCaseInput): Promise<number> {
-  // insert + currval in one transaction: the id is not a column of the
-  // insert-only view, and the pooler may split two plain queries across
-  // backends.
+  // insert + lastval() in one transaction: the id is not a column of the
+  // insert-only view, and a transaction-mode pooler could split two plain
+  // queries across backends (harmless in session mode, kept anyway).
   const id = await withTransaction(async (client) => {
     await client.query(
       `insert into pulse_cases (raised_by, source, view_name, subject, observed, expected, evidence)
@@ -38,7 +38,7 @@ export async function insertPulseCase(input: PulseCaseInput): Promise<number> {
         input.evidence ?? null,
       ],
     );
-    const res = await client.query<{ id: string | number }>("select currval('public.pulse_cases_id_seq') as id");
+    const res = await client.query<{ id: string | number }>("select lastval() as id");
     return Number(res.rows[0]?.id);
   });
   log.info("pulse_cases.inserted", {

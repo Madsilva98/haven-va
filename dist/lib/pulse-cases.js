@@ -9,9 +9,9 @@
 import { log } from "./log.js";
 import { query, withTransaction } from "./studio-db.js";
 export async function insertPulseCase(input) {
-    // insert + currval in one transaction: the id is not a column of the
-    // insert-only view, and the pooler may split two plain queries across
-    // backends.
+    // insert + lastval() in one transaction: the id is not a column of the
+    // insert-only view, and a transaction-mode pooler could split two plain
+    // queries across backends (harmless in session mode, kept anyway).
     const id = await withTransaction(async (client) => {
         await client.query(`insert into pulse_cases (raised_by, source, view_name, subject, observed, expected, evidence)
        values ($1, $2, $3, $4, $5, $6, $7)`, [
@@ -23,7 +23,7 @@ export async function insertPulseCase(input) {
             input.expected,
             input.evidence ?? null,
         ]);
-        const res = await client.query("select currval('public.pulse_cases_id_seq') as id");
+        const res = await client.query("select lastval() as id");
         return Number(res.rows[0]?.id);
     });
     log.info("pulse_cases.inserted", {
