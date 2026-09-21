@@ -1,20 +1,22 @@
 import { fetchUpcomingBirthdays } from "../lib/birthdays.js";
 import { log } from "../lib/log.js";
-import { sendGroupMessage } from "../lib/telegram.js";
+import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
+import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatBirthdayDigest } from "../messages/birthdays.js";
 
 /**
- * Daily birthday digest. Looks up kenko_customers in Studio Supabase for
- * birthdays TODAY only (no upcoming-week preview — dropped 2026-09-15,
+ * Daily birthday digest. Looks up v_pulse_member_identity (filtered to the
+ * active audience, see src/lib/birthdays.ts) for birthdays TODAY only (no upcoming-week preview — dropped 2026-09-15,
  * founder's call), sends one formatted message to the founders' group.
  * Silent (no message sent) when nobody has a birthday today.
  *
  * Schedule: 08:00 Europe/Lisbon every day. Registered in src/server.ts.
  */
 export async function run(): Promise<void> {
-  let birthdays: Awaited<ReturnType<typeof fetchUpcomingBirthdays>>;
+  let birthdays: Awaited<ReturnType<typeof fetchUpcomingBirthdays>>["birthdays"];
+  let asOf: string | null;
   try {
-    birthdays = await fetchUpcomingBirthdays(new Date(), 0);
+    ({ birthdays, asOf } = await fetchUpcomingBirthdays(new Date(), 0));
   } catch (err) {
     log.error("cron.birthdays.fetch_failed", {
       message: err instanceof Error ? err.message : String(err),
@@ -29,7 +31,11 @@ export async function run(): Promise<void> {
   }
 
   try {
-    const messageId = await sendGroupMessage(message);
+    const messageId = await sendGroupMessageWithSource(
+      message,
+      [PULSE_VIEW.memberIdentity, PULSE_VIEW.membershipState, PULSE_VIEW.classpackState, PULSE_VIEW.introHolderState],
+      asOf,
+    );
     log.info("cron.birthdays.posted", { messageId, today: birthdays.length });
   } catch (err) {
     log.error("cron.birthdays.send_failed", {

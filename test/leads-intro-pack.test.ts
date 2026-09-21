@@ -7,9 +7,9 @@ vi.mock("../src/lib/intro-pack-conversion.js", () => ({
   describePostExpiryVisit: (...args: unknown[]) => describePostExpiryVisit(...args),
 }));
 
-const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
-vi.mock("../src/lib/studio-supabase.js", () => ({
-  isStudioSupabaseAvailable: () => isStudioSupabaseAvailable(),
+const isStudioDbAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../src/lib/studio-db.js", () => ({
+  isStudioDbAvailable: () => isStudioDbAvailable(),
 }));
 
 const sendGroupMessage = vi.fn().mockResolvedValue("msg-id");
@@ -48,7 +48,7 @@ describe("leads-intro-pack", () => {
     delete process.env.NOTION_LEADS_DB_ID;
     findUnconvertedIntroPacks.mockReset();
     describePostExpiryVisit.mockReset().mockReturnValue(null);
-    isStudioSupabaseAvailable.mockReturnValue(true);
+    isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
     findLeadByEmail.mockReset();
     findLeadByEmailAny.mockReset();
@@ -56,7 +56,7 @@ describe("leads-intro-pack", () => {
   });
 
   it("does not recreate a lead the founder already marked Perdido — regression for the 2026-09-21 resurrection incident (Marta Somborn)", async () => {
-    findUnconvertedIntroPacks.mockResolvedValue([candidate]);
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18" });
     // The row is un-archived (leads-reconcile.ts now leaves Perdido Intro
     // Pack rows alone) but Estado=Perdido, so only the unfiltered dedup
     // check sees it.
@@ -74,7 +74,7 @@ describe("leads-intro-pack", () => {
     // production to filter by Canal too — a Perdido/Convertido row on an
     // unrelated channel (e.g. not yet archived after a transient failure)
     // must not match and block this create.
-    findUnconvertedIntroPacks.mockResolvedValue([candidate]);
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18" });
     findLeadByEmailAny.mockResolvedValue(null);
 
     await run();

@@ -18,6 +18,8 @@ export const HELP_MESSAGE = `Recap rápido de como funciono:
    /task <descrição>  → força uma task se eu não detectar
    /help              → estas regras
    /status            → como me estou a sair hoje
+   /flag <texto>      → um número do estúdio está errado (vai para pulse_cases)
+   /casos             → casos abertos
 
 Os meus erros são corrigíveis: ❌ ignora, ou editem directamente
 no Notion. Eu aprendo com cada ❌ e correcção que me derem.`;

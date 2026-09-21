@@ -1,16 +1,25 @@
 /**
- * Purchase-check for the Leads a contactar pipeline (src/crons/leads-email-scan.ts,
+ * Purchase-check and identity lookups for the Leads a contactar pipeline
+ * (src/crons/leads-reconcile.ts, the disabled src/crons/leads-email-scan.ts,
  * and eventually the still-blocked WhatsApp/Instagram webhook path — see
  * docs/plans/leads-whatsapp-instagram.md on the worktree-cuddly-skipping-taco
  * branch). A lead only gets written to Notion if this says they never
  * purchased anything — writing a real paying customer as a "lead" would be
- * an embarrassing miss, so this checks BOTH kenko_payments and
- * kenko_sale_items rather than trusting either alone.
+ * an embarrassing miss.
+ *
+ * Both answers come from the studio's views (docs/plans/2026-09-21-pulse-views-spec.md):
+ * - "ever paid?" = a row in v_pulse_first_paid (a Paid payment or a sale
+ *   item with total_sales > 0; absent = a lead). Replaced the bot's own
+ *   two-table count 2026-09-21.
+ * - name / email / phone = v_pulse_member_identity, the one PII view,
+ *   joined on member_id = md5(lower(email)). Staff and test accounts are
+ *   already excluded there.
  */
 
 import { scoreMatch } from "./fuzzy-match.js";
 import { log } from "./log.js";
-import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
+import { fetchMemberIdentity, hasEverPaid, memberIdFromEmail } from "./pulse-views.js";
+import { isStudioDbAvailable } from "./studio-db.js";
 
 export interface CustomerNameRecord {
   name: string;
@@ -37,25 +46,15 @@ export interface PurchaseCheckResult {
 const FUZZY_MATCH_THRESHOLD = 0.5;
 
 /**
- * Every kenko_customers name/email, fetched once per caller (e.g. once per
- * cron run) and passed into checkExistingCustomer — same "small enough to
- * pull whole and filter client-side" reasoning as src/lib/birthdays.ts.
+ * Every name/email/phone the identity view has, fetched once per caller
+ * (e.g. once per cron run) and passed into the pure lookups below.
  */
 export async function fetchAllCustomerNames(): Promise<CustomerNameRecord[]> {
-  if (!studioSupabase) {
-    log.warn("leads.fetch_customers_skipped", { reason: "studio_supabase_not_configured" });
+  if (!isStudioDbAvailable()) {
+    log.warn("leads.fetch_customers_skipped", { reason: "studio_db_not_configured" });
     return [];
   }
-  const rows = await fetchAllPages<{
-    contact_name: string | null;
-    contact_email: string | null;
-    contact_phone: string | null;
-  }>((from, to) =>
-    studioSupabase!
-      .from("kenko_customers")
-      .select("contact_name, contact_email, contact_phone")
-      .range(from, to),
-  );
+  const rows = await fetchMemberIdentity();
   return rows
     .filter((r) => r.contact_name)
     .map((r) => ({
@@ -67,10 +66,10 @@ export async function fetchAllCustomerNames(): Promise<CustomerNameRecord[]> {
 
 /**
  * Pure — no I/O. Exact (case-insensitive) email match against `customers`
- * for a phone number, if `kenko_customers` has one on file. Independent of
- * the purchase check — `kenko_customers` includes Leads alongside real
- * customers (see src/lib/studio-supabase.ts), so a phone can be on file
- * even for someone who never bought anything.
+ * for a phone number, if the identity view has one on file. Independent of
+ * the purchase check — the identity view includes leads alongside real
+ * customers, so a phone can be on file even for someone who never bought
+ * anything.
  */
 export function findPhoneByEmail(email: string | null, customers: CustomerNameRecord[]): string | null {
   if (!email) return null;
@@ -80,39 +79,21 @@ export function findPhoneByEmail(email: string | null, customers: CustomerNameRe
 }
 
 /**
- * True if `email` has a real, paid purchase on file (kenko_payments OR
- * kenko_sale_items) — the same check used before writing a new lead,
- * also reused by src/crons/leads-reconcile.ts to auto-archive an
- * already-open lead the moment they convert.
+ * True if `email` has a real, paid purchase on file (v_pulse_first_paid) —
+ * the same check used before writing a new lead, also reused by
+ * src/crons/leads-reconcile.ts to auto-archive an already-open lead the
+ * moment they convert. The input is trimmed (a Notion/email-scan value may
+ * carry whitespace); the view's key never is.
  */
 export async function hasRealPurchase(email: string): Promise<boolean> {
-  if (!studioSupabase) return false;
-  const normalized = email.trim().toLowerCase();
-
-  const [paymentsRes, saleItemsRes] = await Promise.all([
-    studioSupabase
-      .from("kenko_payments")
-      .select("id", { count: "exact", head: true })
-      .ilike("contact_email", normalized)
-      .eq("payment_status", "Paid"),
-    studioSupabase
-      .from("kenko_sale_items")
-      .select("id", { count: "exact", head: true })
-      .ilike("contact_email", normalized)
-      .eq("sale_type", "Purchase")
-      .gt("total_sales", 0),
-  ]);
-
-  if (paymentsRes.error) throw new Error(`leads: kenko_payments query failed: ${paymentsRes.error.message}`);
-  if (saleItemsRes.error) throw new Error(`leads: kenko_sale_items query failed: ${saleItemsRes.error.message}`);
-
-  return (paymentsRes.count ?? 0) > 0 || (saleItemsRes.count ?? 0) > 0;
+  if (!isStudioDbAvailable()) return false;
+  return hasEverPaid(memberIdFromEmail(email.trim()));
 }
 
 /**
  * Pure — no I/O. Best fuzzy match of `name` against `customers`, above
  * FUZZY_MATCH_THRESHOLD, or null if nothing clears the bar. Exported for
- * unit testing without a Supabase call.
+ * unit testing without a database call.
  */
 export function findBestNameMatch(
   name: string,

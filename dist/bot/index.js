@@ -12,6 +12,7 @@ import { Bot } from "grammy";
 import * as calendar from "../lib/calendar.js";
 import * as gmail from "../lib/gmail.js";
 import { getFounderName, isFounder } from "../lib/founders.js";
+import { isWhyQuestion } from "../lib/pulse-source.js";
 import { log } from "../lib/log.js";
 import { ErrorRateLimit, ERROR_MESSAGE } from "../messages/errors.js";
 import { WELCOME_MESSAGE } from "../messages/welcome.js";
@@ -24,6 +25,7 @@ import { pushRecent, getPriors, lastBotRepliesByChat } from "./history.js";
 import { handleWeek } from "./week.js";
 import { handleFocus } from "./focus.js";
 import { handleRemind } from "./remind.js";
+import { handleCasos, handleFlag, handleWhy } from "./pulse.js";
 import { handleToDiscussCommand, handleToDiscussCallback, } from "./todiscuss.js";
 import { handleFocusCallback } from "./focusCallbacks.js";
 const errorLimit = new ErrorRateLimit();
@@ -173,6 +175,8 @@ export function buildBot() {
     bot.command("partners", handlePartners);
     bot.command("events", handleEvents);
     bot.command("influencers", handleInfluencers);
+    bot.command("flag", handleFlag);
+    bot.command("casos", handleCasos);
     bot.command("calendar", handleCalendar);
     // Google Calendar auth — Madalena's private DM only.
     bot.command("auth", async (ctx) => {
@@ -370,6 +374,10 @@ export function buildBot() {
             ctx.message.document ||
             ctx.message.sticker);
         pushRecent(chatId, senderName, text);
+        // "porquê?" about a number the bot posted → the source view's COMMENT.
+        // Before the length guard: "why" is 3 characters.
+        if (isWhyQuestion(text) && (await handleWhy(ctx, repliedToText)))
+            return;
         if (text.trim().length < 4)
             return;
         if (hasNonTextMedia)

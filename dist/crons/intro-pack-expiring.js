@@ -10,20 +10,22 @@
  */
 import { findExpiringIntroPacksToWatch } from "../lib/intro-pack-conversion.js";
 import { log } from "../lib/log.js";
-import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
-import { sendGroupMessage } from "../lib/telegram.js";
+import { isStudioDbAvailable } from "../lib/studio-db.js";
+import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
+import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatExpiringIntroPacksDigest } from "../messages/intro-pack-expiring.js";
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
 }
 export async function run() {
-    if (!isStudioSupabaseAvailable()) {
-        log.debug("intro_pack_expiring.skipped", { reason: "studio_supabase_not_configured" });
+    if (!isStudioDbAvailable()) {
+        log.debug("intro_pack_expiring.skipped", { reason: "studio_db_not_configured" });
         return;
     }
     let packs;
+    let asOf;
     try {
-        packs = await findExpiringIntroPacksToWatch();
+        ({ packs, asOf } = await findExpiringIntroPacksToWatch());
     }
     catch (err) {
         log.error("intro_pack_expiring.fetch_failed", { message: errMsg(err) });
@@ -35,7 +37,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessage(message);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion], asOf);
         log.info("intro_pack_expiring.posted", { messageId, count: packs.length });
     }
     catch (err) {

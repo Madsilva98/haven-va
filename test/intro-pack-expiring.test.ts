@@ -8,6 +8,7 @@ function pack(overrides: Partial<ExpiringIntroPackToWatch>): ExpiringIntroPackTo
     email: "x@x.com",
     name: "Someone",
     phone: null,
+    pack: "2-Class",
     packName: "2 Classes | Premium",
     expiresAt: new Date("2026-09-22T22:59:00Z"),
     visitCount: 1,
@@ -33,6 +34,7 @@ describe("formatExpiringIntroPacksDigest", () => {
     const out = formatExpiringIntroPacksDigest([
       pack({
         name: "Dina Silvestre",
+        pack: "10-Day",
         packName: "10-Day Unlimited Pass",
         visitCount: 15,
         expiresAt: new Date("2026-09-20T22:59:00Z"),
@@ -46,7 +48,8 @@ describe("formatExpiringIntroPacksDigest", () => {
   it("includes both sections when both kinds of candidates are present", () => {
     const out = formatExpiringIntroPacksDigest([
       pack({ name: "Ashley Li", packName: "2 Classes | Premium", visitCount: 1 }),
-      pack({ name: "Dina Silvestre", packName: "10-Day Unlimited Pass", visitCount: 15 }),
+      pack({ name: "Dina Silvestre", pack: "10-Day",
+        packName: "10-Day Unlimited Pass", visitCount: 15 }),
     ]);
     expect(out).toContain("2 Classes — só usaram 1 aula:");
     expect(out).toContain("10-Day Unlimited — já fizeram mais de 5 aulas:");

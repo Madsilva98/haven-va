@@ -47,9 +47,9 @@ vi.mock("../src/lib/lead-classifier.js", () => ({
   classifyInstagramDM: (...args: unknown[]) => classifyInstagramDM(...args),
 }));
 
-const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
-vi.mock("../src/lib/studio-supabase.js", () => ({
-  isStudioSupabaseAvailable: () => isStudioSupabaseAvailable(),
+const isStudioDbAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../src/lib/studio-db.js", () => ({
+  isStudioDbAvailable: () => isStudioDbAvailable(),
 }));
 
 const sendGroupMessage = vi.fn().mockResolvedValue("msg-id");
@@ -94,7 +94,7 @@ describe("leads-instagram-scan", () => {
     checkExistingCustomer.mockReset();
     fetchAllCustomerNames.mockReset().mockResolvedValue([]);
     classifyInstagramDM.mockReset();
-    isStudioSupabaseAvailable.mockReturnValue(true);
+    isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
     createLead.mockClear().mockResolvedValue("new-lead-page-id");
     createPartner.mockClear().mockResolvedValue("new-partner-page-id");

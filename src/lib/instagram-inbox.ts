@@ -1,16 +1,20 @@
 /**
- * Reads Mafalda's own Instagram inbox tables (public.inbox_contacts /
- * public.inbox_messages) in the same Studio Supabase project haven-va
- * already reads from elsewhere — those tables are NOT created by any
- * haven-va migration, they're owned by her separate tooling (the live
- * webhook receiver + the one-time "download your data" backfill). See
+ * Reads Mafalda's own Instagram inbox tables (inbox_contacts /
+ * inbox_messages) in the studio project — NOT created by any haven-va
+ * migration, they're owned by her separate tooling (the live webhook
+ * receiver + the one-time "download your data" backfill). See
  * docs/knowledge-base for the full schema notes.
+ *
+ * Read over the bot's own Postgres connection (src/lib/studio-db.ts, role
+ * haven_va, search_path va): va.inbox_contacts and va.inbox_messages are
+ * read-only mirrors of Mafalda's tables (pulse_cases #24, live since
+ * 2026-09-21). 471 Instagram contacts / 5,944 messages on that day.
  *
  * Used by src/crons/leads-instagram-scan.ts.
  */
 
 import { normalizeText } from "./fuzzy-match.js";
-import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
+import { isStudioDbAvailable, query } from "./studio-db.js";
 
 export interface InstagramContact {
   id: string; // inbox_contacts.id (uuid) — stable, used as the checkpoint key
@@ -130,23 +134,16 @@ export function groupMessagesByContact(
  * src/lib/leads.ts already documents for kenko_customers.
  */
 export async function fetchInstagramContactsWithMessages(): Promise<InstagramContactWithMessages[]> {
-  if (!studioSupabase) return [];
+  if (!isStudioDbAvailable()) return [];
 
   const [contactRows, messageRows] = await Promise.all([
-    fetchAllPages<InboxContactRow>((from, to) =>
-      studioSupabase!
-        .from("inbox_contacts")
-        .select("id, platform_user_id, display_name, username, message_count")
-        .eq("platform", "instagram")
-        .range(from, to),
+    query<InboxContactRow>(
+      `select id, platform_user_id, display_name, username, message_count
+         from inbox_contacts where platform = 'instagram'`,
     ),
-    fetchAllPages<InboxMessageRow>((from, to) =>
-      studioSupabase!
-        .from("inbox_messages")
-        .select("contact_id, direction, text, sent_at")
-        .eq("platform", "instagram")
-        .order("sent_at", { ascending: true })
-        .range(from, to),
+    query<InboxMessageRow>(
+      `select contact_id, direction, text, sent_at
+         from inbox_messages where platform = 'instagram' order by sent_at asc`,
     ),
   ]);
 

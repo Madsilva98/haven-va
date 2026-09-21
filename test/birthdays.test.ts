@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { filterUpcomingBirthdays } from "../src/lib/birthdays.js";
+import { activeMemberIdsForBirthdays, filterUpcomingBirthdays } from "../src/lib/birthdays.js";
 import { formatBirthdayDigest } from "../src/messages/birthdays.js";
 
 function customer(name: string, email: string, dob: string | null) {
@@ -142,5 +142,26 @@ describe("formatBirthdayDigest", () => {
     ]);
     expect(out).toContain("• Joana");
     expect(out).toContain("• Bruno");
+  });
+});
+
+describe("activeMemberIdsForBirthdays", () => {
+  it("unions paying members, live class packs with credits, and live intro holders — as of the data date", () => {
+    const ids = activeMemberIdsForBirthdays(
+      new Map([
+        ["m1", { memberId: "m1", tier: "4x", plan: "Premium", membershipName: "4x Monthly | Premium", memberSince: "2026-01-01" }],
+      ]),
+      [
+        { member_id: "p1", started: "2026-09-01", expires: "2026-12-01", has_credits: true },
+        { member_id: "p2", started: "2026-09-01", expires: "2026-12-01", has_credits: false }, // used up
+        { member_id: "p3", started: "2026-01-01", expires: "2026-02-01", has_credits: true }, // expired
+      ],
+      [
+        { member_id: "i1", started: "2026-09-10", expires: "2026-09-30" },
+        { member_id: "i2", started: "2026-08-01", expires: "2026-08-22" }, // expired
+      ],
+      "2026-09-18",
+    );
+    expect([...ids].sort()).toEqual(["i1", "m1", "p1"]);
   });
 });

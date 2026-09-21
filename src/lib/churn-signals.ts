@@ -1,109 +1,76 @@
 /**
- * Churn-risk signal computation for src/crons/churn-risk.ts.
+ * Churn-risk signal computation for src/crons/churn-risk.ts — since
+ * 2026-09-21 entirely on the studio's v_pulse_* views (spec:
+ * docs/plans/2026-09-21-pulse-views-spec.md). The bot no longer defines
+ * "active", "attended", "paused" or "utilization"; it reads them:
  *
- * Three signals were empirically validated against real Studio Supabase
- * data (staff/test accounts and people who "cancelled" but reactivated
- * under another subscription/pack excluded first — see docs/knowledge-base
- * for the session that derived these):
+ * - Roster: paying cycles in v_pulse_membership_state overlapping the
+ *   DATA date (v_pulse_data_as_of), never the calendar — a renewal after
+ *   the last import is not a churn (Tatyana Khvesko, case #6); Cancelation
+ *   scheduled and pause-scheduled (NULL) are paying (Andreia taboleiros,
+ *   case #5); a stale Active row in kenko_subscriptions is not (Esen
+ *   Sekerkarar, case #1). Tenure (member_since) from v_pulse_member_tenure;
+ *   names, emails and phones from v_pulse_member_identity on member_id.
+ * - Signal 1 "Sem reservas 14+ dias": v_pulse_member_activity's
+ *   next_or_last_booked (Booked/Waitlist class days; a future booking is
+ *   engagement), measured from the later of member_since or the end of
+ *   the member's most recent stretched (paused) cycle in
+ *   v_pulse_pause_history — Sofia Barata, paused 27/07-27/08, must not
+ *   read as "64 dias sem reservar" (2026-09-21). That cycle_end is the
+ *   next charge, not the return date (case #2): the person was back by
+ *   then at the latest, so the detail says "de volta até dd/mm". A member
+ *   whose pause is_current is skipped outright.
+ * - Signal 2 "Pagamento falhado": v_pulse_failed_payments.failed_45d > 0.
+ * - Signal 3 "Baixa utilização": v_pulse_utilization_monthly under 50% in
+ *   EACH of the last 3 full calendar months before the data date, reading
+ *   only is_full_month rows (case #23) without had_pause (Raquel Saraiva,
+ *   Francesca Buoncristiani, 2026-09-21), and never Unlimited (allowance
+ *   NULL).
  *
- * 1. No booking in >14 days on a subscription that's still Active (only
- *    once the subscription itself is >=14 days old, so brand-new signups
- *    aren't flagged before they've had a first class). Originally set to
- *    21 days (39.6% of real cancellations vs. 7.0% of active members had
- *    that gap); re-derived 2026-09-16 at the founder's request ("21 dias
- *    é já muito, quase um mês sem aproveitar") by testing a range of
- *    thresholds against the same churned-vs-active comparison — 14 days
- *    gave the best separation of any candidate tested (54.2% of
- *    cancellations vs. 20.0% of active members, a wider gap than 21 days'
- *    40.4% vs 10.0%), not just a shorter one. Trade-off: roughly 1 in 5
- *    currently-active members will show this gap at some point (vs. 1 in
- *    10 at 21 days) — more coverage, more noise. See
- *    docs/knowledge-base for the full table across 7/10/14/17/21/24/28/30
- *    days if this ever needs re-deriving again.
- * 2. A failed payment in the last 45 days on a still-Active subscription.
- * 3. Utilization under 50% of the plan's monthly credit allowance in EACH
- *    of the last 3 full calendar months — a month only counts if the
- *    subscription already existed for the whole month (otherwise a brand
- *    new member's pre-signup months get counted as "0 bookings = underuse",
- *    a real bug found and fixed while validating this), AND if it doesn't
- *    overlap a paused/stretched billing cycle (see PAUSE_STRETCH_THRESHOLD_DAYS
- *    below) — found 2026-09-21 via two real customers (Raquel Saraiva,
- *    Francesca Buoncristiani) both showing "0% utilização" for a month they
- *    were fully paused, because kenko_subscriptions only ever holds ONE row
- *    per person with their ORIGINAL signup date — a pause/resume does NOT
- *    reliably create a new row there (unlike what one early test case,
- *    esens33@hotmail.com, suggested), so the existing "not a member yet"
- *    exclusion above never caught it. kenko_memberships DOES capture pauses
- *    faithfully, as an abnormally long cycle (Raquel's: 80 days instead of
- *    the usual ~28-31; Francesca's: ~122) — confirmed empirically across
- *    ~640 real Subscription-type cycles: the bulk cluster at 28-31 days,
- *    then thin out fast, so PAUSE_STRETCH_THRESHOLD_DAYS=45 safely separates
- *    "normal cycle, maybe a few days of billing-date jitter" from "this
- *    cycle got stretched by a pause" without needing an explicit pause flag.
- *
- * Explicitly tested and rejected (do not resurrect without re-validating):
- * raw unused-credits snapshot, no-show rate, "never booked at all" — none
- * discriminated churned vs. active members once the above noise was removed.
+ * The thresholds themselves (14 days, 45 days, 50% × 3 months) were
+ * empirically validated in session against churned-vs-active members —
+ * see the git history of this file for the derivation tables. No staff
+ * list lives here: the views exclude staff.
  */
 
 import type { ChurnSignalType } from "../types.js";
-import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
-
-// Staff/test accounts — not secrets, rarely change, kept here (not .env)
-// so they're easy to find and extend.
-const STAFF_TEST_EXACT_EMAILS = new Set([
-  "oliveiraneuza1999@gmail.com",
-  "santi.viquez@gmail.com",
-]);
-const STAFF_TEST_EMAIL_PATTERNS = [/^madsilva3(\+[^@]*)?@gmail\.com$/i, /@thehavenpilates\.pt$/i];
-
-export function isExcludedEmail(email: string): boolean {
-  const e = email.toLowerCase().trim();
-  if (STAFF_TEST_EXACT_EMAILS.has(e)) return true;
-  return STAFF_TEST_EMAIL_PATTERNS.some((re) => re.test(e));
-}
-
-/** "4x Monthly | Premium" -> 4. "Unlimited | Premium" -> null (not evaluated for signal 3). */
-export function parseMonthlyAllowance(membershipName: string): number | null {
-  const m = membershipName.match(/^(\d+)x/i);
-  return m ? Number(m[1]) : null;
-}
+import {
+  activeMembersAsOf,
+  fetchDataAsOf,
+  fetchFailedPayments,
+  fetchMemberActivity,
+  fetchMemberIdentity,
+  fetchMembershipState,
+  fetchMemberTenure,
+  fetchPauseHistory,
+  fetchUtilizationMonthly,
+  type FailedPaymentsRow,
+  type MemberActivityRow,
+  type PauseHistoryRow,
+  type UtilizationMonthRow,
+} from "./pulse-views.js";
+import { isStudioDbAvailable } from "./studio-db.js";
 
 const NO_BOOKING_GAP_DAYS = 14;
-const FAILED_PAYMENT_WINDOW_DAYS = 45;
-const UNDERUSE_RATIO = 0.5;
+const UNDERUSE_PCT = 50;
 const UNDERUSE_MONTHS = 3;
-const PAUSE_STRETCH_THRESHOLD_DAYS = 45;
 
 export interface ActiveSubscriber {
+  memberId: string;
   email: string;
   name: string;
-  membershipName: string;
-  subscriptionStartsAt: Date;
+  membershipName: string; // "4x Monthly | Premium"
+  memberSince: string; // YYYY-MM-DD — v_pulse_member_tenure.member_since
 }
 
-export interface BookingRecord {
-  email: string;
-  bookingDate: Date;
-  eventDate: Date;
-  status: string;
-}
-
-export interface FailedPaymentRecord {
-  email: string;
-  paymentDate: Date;
-}
-
-/** A Subscription-type billing cycle from kenko_memberships longer than
- * PAUSE_STRETCH_THRESHOLD_DAYS — i.e. one that almost certainly contains a
- * pause. Any calendar month signal 3 evaluates that overlaps this window is
- * excluded, same as a month before the person even signed up. */
-export interface PausedCycleWindow {
-  email: string;
-  start: Date;
-  end: Date;
+export interface ChurnInputs {
+  asOf: string; // YYYY-MM-DD, the data date
+  members: ActiveSubscriber[];
+  activityByMember: Map<string, MemberActivityRow>;
+  failedByMember: Map<string, FailedPaymentsRow>;
+  utilization: UtilizationMonthRow[];
+  pauseHistory: Pick<PauseHistoryRow, "member_id" | "cycle_end" | "is_current">[];
 }
 
 export interface ChurnFlag {
@@ -114,175 +81,117 @@ export interface ChurnFlag {
   signals: { type: ChurnSignalType; detail: string }[];
 }
 
-function formatDatePt(d: Date): string {
-  return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+function formatDatePt(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
 }
 
-function monthLabelPt(d: Date): string {
-  return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon", month: "short" });
+function monthLabelPt(monthIso: string): string {
+  return new Date(`${monthIso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("pt-PT", {
+    timeZone: "Europe/Lisbon",
+    month: "short",
+  });
 }
 
-export function dedupeLatestPerEmail(subscribers: ActiveSubscriber[]): Map<string, ActiveSubscriber> {
-  const byEmail = new Map<string, ActiveSubscriber>();
-  for (const s of subscribers) {
-    const email = s.email.toLowerCase().trim();
-    if (!email || isExcludedEmail(email)) continue;
-    const existing = byEmail.get(email);
-    if (!existing || s.subscriptionStartsAt > existing.subscriptionStartsAt) {
-      byEmail.set(email, { ...s, email });
-    }
-  }
-  return byEmail;
+function daysBetween(a: string, b: string): number {
+  return (Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000;
 }
 
 /**
- * Full calendar months preceding `now`, most recent first, excluding the
- * current (incomplete) month. Running on 2026-09-16 with monthsBack=3
- * yields [August, July, June] (2026).
+ * First days of the `monthsBack` full calendar months before the month
+ * `asOf` falls in, most recent first. asOf 2026-09-18, 3 → [2026-08-01,
+ * 2026-07-01, 2026-06-01].
  */
-function fullCalendarMonthsBefore(now: Date, monthsBack: number): { start: Date; end: Date }[] {
-  const months: { start: Date; end: Date }[] = [];
-  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+export function fullMonthsBefore(asOf: string, monthsBack: number): string[] {
+  const [y, m] = asOf.slice(0, 10).split("-").map(Number) as [number, number];
+  const out: string[] = [];
   for (let i = 1; i <= monthsBack; i++) {
-    const start = new Date(Date.UTC(currentMonthStart.getUTCFullYear(), currentMonthStart.getUTCMonth() - i, 1));
-    const end = new Date(Date.UTC(currentMonthStart.getUTCFullYear(), currentMonthStart.getUTCMonth() - i + 1, 1));
-    months.push({ start, end });
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    out.push(d.toISOString().slice(0, 10));
   }
-  return months;
+  return out;
 }
 
 /**
- * Pure — no I/O. Applies the three validated signals to already-fetched
- * Supabase rows. `now` is injectable for tests.
+ * Pure — no I/O. Applies the three signals to already-fetched view rows.
  */
-export function computeChurnFlags(
-  subscribers: ActiveSubscriber[],
-  bookings: BookingRecord[],
-  failedPayments: FailedPaymentRecord[],
-  pausedCycles: PausedCycleWindow[],
-  now: Date,
-): ChurnFlag[] {
-  const activeByEmail = dedupeLatestPerEmail(subscribers);
-
-  const bookingsByEmail = new Map<string, BookingRecord[]>();
-  for (const b of bookings) {
-    const email = b.email.toLowerCase().trim();
-    if (!activeByEmail.has(email)) continue;
-    const list = bookingsByEmail.get(email) ?? [];
-    list.push(b);
-    bookingsByEmail.set(email, list);
-  }
-
-  const failedByEmail = new Map<string, FailedPaymentRecord[]>();
-  for (const p of failedPayments) {
-    const email = p.email.toLowerCase().trim();
-    if (!activeByEmail.has(email)) continue;
-    const list = failedByEmail.get(email) ?? [];
-    list.push(p);
-    failedByEmail.set(email, list);
-  }
-
-  const pausedCyclesByEmail = new Map<string, PausedCycleWindow[]>();
-  for (const c of pausedCycles) {
-    const email = c.email.toLowerCase().trim();
-    if (!activeByEmail.has(email)) continue;
-    // Only a cycle genuinely stretched past the norm counts as a pause —
-    // this check lives here (not just in fetchChurnFlags) so the business
-    // rule is testable directly against computeChurnFlags.
-    if ((c.end.getTime() - c.start.getTime()) / 86_400_000 <= PAUSE_STRETCH_THRESHOLD_DAYS) continue;
-    const list = pausedCyclesByEmail.get(email) ?? [];
-    list.push(c);
-    pausedCyclesByEmail.set(email, list);
-  }
-
-  const nowMs = now.getTime();
+export function computeChurnFlags(inputs: ChurnInputs): ChurnFlag[] {
+  const { asOf, members, activityByMember, failedByMember, utilization, pauseHistory } = inputs;
   const flags: ChurnFlag[] = [];
 
-  for (const [email, sub] of activeByEmail) {
+  const utilByMember = new Map<string, Map<string, UtilizationMonthRow>>();
+  for (const u of utilization) {
+    const byMonth = utilByMember.get(u.member_id) ?? new Map<string, UtilizationMonthRow>();
+    byMonth.set(u.month.slice(0, 10), u);
+    utilByMember.set(u.member_id, byMonth);
+  }
+  const lastPauseEndByMember = new Map<string, string>();
+  const pausedNow = new Set<string>();
+  for (const p of pauseHistory) {
+    if (p.is_current) pausedNow.add(p.member_id);
+    const end = p.cycle_end?.slice(0, 10);
+    if (!end || end > asOf) continue;
+    const prev = lastPauseEndByMember.get(p.member_id);
+    if (!prev || end > prev) lastPauseEndByMember.set(p.member_id, end);
+  }
+  const months = fullMonthsBefore(asOf, UNDERUSE_MONTHS);
+
+  for (const m of members) {
     const signals: ChurnFlag["signals"] = [];
-    const subBookings = bookingsByEmail.get(email) ?? [];
 
-    // Signal 1 — no booking in >21 days, subscription itself old enough to judge.
-    // The reference point for "how long has this stretch run" is the LATER
-    // of subscriptionStartsAt or the end of the most recent paused/stretched
-    // cycle (same pausedCyclesByEmail data signal 3 uses) — kenko_subscriptions
-    // keeps the ORIGINAL signup date regardless of pauses, so without this a
-    // pause gets silently absorbed into the gap: found 2026-09-21 (Sofia
-    // Barata, paused 27/07-27/08) showing "64 dias sem reservar" measured
-    // from her last real booking before the pause, when the honest answer is
-    // "hasn't booked since resuming, ~17 dias" — she can't be faulted for the
-    // ~31 days she was paused and physically couldn't book. Only "Booked"
-    // counts — a since-cancelled reservation (status "Canceled"/"Waitlist
-    // canceled"/"Waitlist") must not reset the gap, or someone who booked
-    // then backed out would look fine despite never actually coming back
-    // (found 2026-09-21, founder's question). "última reserva" is measured
-    // by when the booking was MADE, not the class date — booking a future
-    // class still counts as current engagement, on purpose.
-    const pausedWindows = pausedCyclesByEmail.get(email) ?? [];
-    const mostRecentPauseEnd = pausedWindows
-      .map((w) => w.end)
-      .filter((end) => end.getTime() <= nowMs)
-      .reduce<Date | null>((latest, end) => (!latest || end > latest ? end : latest), null);
-    const stretchStart =
-      mostRecentPauseEnd && mostRecentPauseEnd > sub.subscriptionStartsAt
-        ? mostRecentPauseEnd
-        : sub.subscriptionStartsAt;
-    const resumedFromPause = stretchStart === mostRecentPauseEnd;
-
-    const tenureDays = (nowMs - stretchStart.getTime()) / 86_400_000;
-    if (tenureDays >= NO_BOOKING_GAP_DAYS) {
-      const bookingsThisStretch = subBookings.filter(
-        (b) => b.status === "Booked" && b.bookingDate.getTime() <= nowMs && b.bookingDate >= stretchStart,
-      );
-      const lastBooking = bookingsThisStretch.reduce<Date | null>(
-        (latest, b) => (!latest || b.bookingDate > latest ? b.bookingDate : latest),
-        null,
-      );
-      const gapDays = lastBooking
-        ? (nowMs - lastBooking.getTime()) / 86_400_000
-        : tenureDays; // never booked since this active stretch began (new signup, or resumed from a pause) — treat as a full gap
-      if (gapDays > NO_BOOKING_GAP_DAYS) {
-        const detail = lastBooking
-          ? `${Math.round(gapDays)} dias sem reservar (última reserva: ${formatDatePt(lastBooking)})`
-          : resumedFromPause
-            ? `${Math.round(gapDays)} dias sem reservar desde que voltou da pausa (${formatDatePt(stretchStart)})`
-            : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
-        signals.push({ type: "Sem reservas 14+ dias", detail });
+    // Signal 1 — the stretch to judge starts at the later of member_since
+    // and the most recent past pause's cycle_end (the next charge: they were
+    // back by then at the latest, the exact return date is not in the
+    // export — case #2). A pause that reads Paused right now is skipped:
+    // nothing to judge yet. The view's next_or_last_booked is the latest
+    // Booked/Waitlist class day, future included.
+    if (!pausedNow.has(m.memberId)) {
+      const pauseEnd = lastPauseEndByMember.get(m.memberId);
+      const stretchStart = pauseEnd && pauseEnd > m.memberSince ? pauseEnd : m.memberSince;
+      const resumedFromPause = stretchStart === pauseEnd;
+      const tenureDays = daysBetween(stretchStart, asOf);
+      if (tenureDays >= NO_BOOKING_GAP_DAYS) {
+        const booked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
+        const lastInStretch = booked && booked >= stretchStart ? booked : null;
+        const gapDays = lastInStretch ? daysBetween(lastInStretch, asOf) : tenureDays;
+        if (gapDays > NO_BOOKING_GAP_DAYS) {
+          const detail = lastInStretch
+            ? `${Math.round(gapDays)} dias sem reservar (última aula marcada: ${formatDatePt(lastInStretch)})`
+            : resumedFromPause
+              ? `${Math.round(gapDays)} dias sem reservar desde a pausa (de volta até ${formatDatePt(stretchStart)})`
+              : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
+          signals.push({ type: "Sem reservas 14+ dias", detail });
+        }
       }
     }
 
-    // Signal 2 — failed payment in the last 45 days.
-    const recentFailed = (failedByEmail.get(email) ?? [])
-      .filter((p) => nowMs - p.paymentDate.getTime() <= FAILED_PAYMENT_WINDOW_DAYS * 86_400_000)
-      .sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime())[0];
-    if (recentFailed) {
-      signals.push({
-        type: "Pagamento falhado",
-        detail: `pagamento falhado a ${formatDatePt(recentFailed.paymentDate)}`,
-      });
+    // Signal 2 — a failed payment in the last 45 days (the view counts them).
+    const failed = failedByMember.get(m.memberId);
+    if (failed && failed.failed_45d > 0 && failed.last_failed_on) {
+      signals.push({ type: "Pagamento falhado", detail: `pagamento falhado a ${formatDatePt(failed.last_failed_on)}` });
     }
 
-    // Signal 3 — <50% plan utilization in each of the last 3 full calendar months.
-    const allowance = parseMonthlyAllowance(sub.membershipName);
-    if (allowance !== null) {
-      const months = fullCalendarMonthsBefore(now, UNDERUSE_MONTHS);
-      const monthStats = months.map(({ start, end }) => {
-        if (sub.subscriptionStartsAt > start) return null; // not a member for the whole month
-        if (pausedWindows.some((w) => w.start < end && w.end > start)) return null; // paused for some/all of this month
-        const count = subBookings.filter(
-          (b) => b.status === "Booked" && b.eventDate >= start && b.eventDate < end,
-        ).length;
-        return { start, count, ratio: count / allowance };
+    // Signal 3 — under 50% in each of the last 3 full months, all three
+    // present and clean: is_full_month (the view's word on "member for the
+    // whole month"), no pause overlap, plan with an allowance.
+    const byMonth = utilByMember.get(m.memberId);
+    if (byMonth) {
+      const stats = months.map((month) => {
+        const u = byMonth.get(month);
+        if (!u || !u.is_full_month || u.had_pause || u.allowance === null || u.utilization_pct === null) return null;
+        // Number(): utilization_pct is NUMERIC, which a Postgres driver may
+        // hand over as a string. src/lib/studio-db.ts registers a parser so
+        // it arrives as a number, but the average below silently prints
+        // nonsense (0 + "25" + "0" + "0" = "02500" / 3 = 833%) if that ever
+        // stops being true — caught against real rows, 2026-09-21.
+        return { month, pct: Number(u.utilization_pct) };
       });
-      const allValid = monthStats.every((m) => m !== null);
-      if (allValid && monthStats.every((m) => m!.ratio < UNDERUSE_RATIO)) {
-        const parts = monthStats
-          .map((m) => m!)
+      if (stats.every((s) => s !== null) && stats.every((s) => s!.pct < UNDERUSE_PCT)) {
+        const parts = stats
+          .map((s) => s!)
           .reverse()
-          .map((m) => `${monthLabelPt(m.start)}: ${Math.round(m.ratio * 100)}%`);
-        const avgPct = Math.round(
-          (monthStats.reduce((sum, m) => sum + m!.ratio, 0) / monthStats.length) * 100,
-        );
+          .map((s) => `${monthLabelPt(s.month)}: ${Math.round(s.pct)}%`);
+        const avgPct = Math.round(stats.reduce((sum, s) => sum + s!.pct, 0) / stats.length);
         signals.push({
           type: "Baixa utilização",
           detail: `${avgPct}% de utilização média nos últimos ${UNDERUSE_MONTHS} meses (${parts.join(", ")})`,
@@ -291,7 +200,7 @@ export function computeChurnFlags(
     }
 
     if (signals.length > 0) {
-      flags.push({ email, name: sub.name, plano: sub.membershipName, telefone: null, signals });
+      flags.push({ email: m.email, name: m.name, plano: m.membershipName, telefone: null, signals });
     }
   }
 
@@ -299,127 +208,72 @@ export function computeChurnFlags(
 }
 
 /**
- * Fetches the raw Supabase rows and computes flags. Also returns every
- * email currently on an Active subscription (regardless of whether they're
- * flagged) — src/crons/churn-risk.ts uses this to tell "still active, just
- * no current signal" (update the row, founder decides what to do) apart
- * from "no longer an active subscriber at all" (cancelled/deactivated —
- * safe to auto-archive, nothing left to watch).
+ * Reads the views and computes flags. Also returns every email currently
+ * a paying member (flagged or not) — src/crons/churn-risk.ts uses this to
+ * tell "still active, just no current signal" apart from "no longer a
+ * member" — and the data date the digest should quote.
  *
- * Returns empty (and logs a warn) if Studio Supabase isn't configured —
- * same graceful no-op as src/lib/birthdays.ts.
+ * Returns empty (and logs a warn) if the studio connection isn't
+ * configured — same graceful no-op as src/lib/birthdays.ts.
  */
-export async function fetchChurnFlags(
-  now: Date = new Date(),
-): Promise<{ flags: ChurnFlag[]; activeEmails: Set<string> }> {
-  if (!studioSupabase) {
-    log.warn("churn_signals.fetch_skipped", { reason: "studio_supabase_not_configured" });
-    return { flags: [], activeEmails: new Set() };
+export async function fetchChurnFlags(): Promise<{
+  flags: ChurnFlag[];
+  activeEmails: Set<string>;
+  asOf: string | null;
+}> {
+  if (!isStudioDbAvailable()) {
+    log.warn("churn_signals.fetch_skipped", { reason: "studio_db_not_configured" });
+    return { flags: [], activeEmails: new Set(), asOf: null };
   }
 
-  const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
-  const fortyFiveDaysAgoIso = new Date(now.getTime() - FAILED_PAYMENT_WINDOW_DAYS * 86_400_000).toISOString();
+  const [asOf, stateRows, tenureRows, pauseHistory, activityRows, failedRows, utilization, identity] =
+    await Promise.all([
+      fetchDataAsOf(),
+      fetchMembershipState(),
+      fetchMemberTenure(),
+      fetchPauseHistory(),
+      fetchMemberActivity(),
+      fetchFailedPayments(),
+      fetchUtilizationMonthly(),
+      fetchMemberIdentity(),
+    ]);
 
-  const [subsRows, bookingRows, failedRows, membershipRows] = await Promise.all([
-    fetchAllPages<{
-      contact_email: string | null;
-      contact_name: string | null;
-      membership_name: string | null;
-      subscription_starts_at: string | null;
-    }>((from, to) =>
-      studioSupabase!
-        .from("kenko_subscriptions")
-        .select("contact_email, contact_name, membership_name, subscription_starts_at")
-        .eq("subscription_status", "Active")
-        .range(from, to),
-    ),
-    fetchAllPages<{
-      contact_email: string | null;
-      booking_date: string | null;
-      event_date: string | null;
-      booking_status: string | null;
-    }>((from, to) =>
-      studioSupabase!
-        .from("kenko_bookings")
-        .select("contact_email, booking_date, event_date, booking_status")
-        .gte("booking_date", fourMonthsAgoIso)
-        .range(from, to),
-    ),
-    fetchAllPages<{ contact_email: string | null; payment_date: string | null }>((from, to) =>
-      studioSupabase!
-        .from("kenko_payments")
-        .select("contact_email, payment_date")
-        .eq("payment_status", "Failed")
-        .gte("payment_date", fortyFiveDaysAgoIso)
-        .range(from, to),
-    ),
-    // Not date-bounded: a paused cycle can start well over 4 months back
-    // (Raquel's did) and still overlap a month we're evaluating today.
-    // Subscription-type only — kenko_memberships also holds one-off credit
-    // packs, which are never "paused" in this sense.
-    fetchAllPages<{
-      contact_email: string | null;
-      membership_starts_at: string | null;
-      membership_expires_at: string | null;
-    }>((from, to) =>
-      studioSupabase!
-        .from("kenko_memberships")
-        .select("contact_email, membership_starts_at, membership_expires_at")
-        .eq("membership_type", "Subscription")
-        .range(from, to),
-    ),
-  ]);
+  if (!asOf) {
+    log.warn("churn_signals.no_data_as_of", { rows: stateRows.length });
+    return { flags: [], activeEmails: new Set(), asOf: null };
+  }
+  const active = activeMembersAsOf(stateRows, asOf, new Map(tenureRows.map((t) => [t.member_id, t])));
 
-  const subscribers: ActiveSubscriber[] = subsRows
-    .filter((r) => r.contact_email && r.membership_name && r.subscription_starts_at)
-    .map((r) => ({
-      email: r.contact_email!,
-      name: r.contact_name || r.contact_email!,
-      membershipName: r.membership_name!,
-      subscriptionStartsAt: new Date(r.subscription_starts_at!),
-    }));
-
-  const bookings: BookingRecord[] = bookingRows
-    .filter((r) => r.contact_email && r.booking_date && r.event_date)
-    .map((r) => ({
-      email: r.contact_email!,
-      bookingDate: new Date(r.booking_date!),
-      eventDate: new Date(r.event_date!),
-      status: r.booking_status ?? "",
-    }));
-
-  const failedPayments: FailedPaymentRecord[] = failedRows
-    .filter((r) => r.contact_email && r.payment_date)
-    .map((r) => ({
-      email: r.contact_email!,
-      paymentDate: new Date(r.payment_date!),
-    }));
-
-  // Raw cycle windows, unfiltered — computeChurnFlags itself decides what
-  // counts as a "stretched" cycle (PAUSE_STRETCH_THRESHOLD_DAYS), so that
-  // rule is testable directly against it, not just at this I/O layer.
-  const pausedCycles: PausedCycleWindow[] = membershipRows
-    .filter((r) => r.contact_email && r.membership_starts_at && r.membership_expires_at)
-    .map((r) => ({
-      email: r.contact_email!,
-      start: new Date(r.membership_starts_at!),
-      end: new Date(r.membership_expires_at!),
-    }));
-
-  const flags = computeChurnFlags(subscribers, bookings, failedPayments, pausedCycles, now);
-  const activeEmails = new Set(dedupeLatestPerEmail(subscribers).keys());
-
-  // Phone isn't in kenko_subscriptions — look it up from kenko_customers
-  // (which includes Leads alongside real customers, so this can hit even
-  // for edge cases where a phone was entered without a formal purchase).
-  const customers = await fetchAllCustomerNames();
-  for (const flag of flags) {
-    flag.telefone = findPhoneByEmail(flag.email, customers);
+  const identityByMember = new Map(identity.map((r) => [r.member_id, r]));
+  const members: ActiveSubscriber[] = [];
+  for (const a of active.values()) {
+    const id = identityByMember.get(a.memberId);
+    if (!id?.contact_email) {
+      log.warn("churn_signals.member_without_identity", { memberId: a.memberId });
+      continue;
+    }
+    members.push({
+      memberId: a.memberId,
+      email: id.contact_email.toLowerCase(),
+      name: id.contact_name?.trim() || id.contact_email,
+      membershipName: a.membershipName,
+      memberSince: a.memberSince,
+    });
   }
 
-  log.debug("churn_signals.computed", {
-    subscribers: subscribers.length,
-    flagged: flags.length,
+  const flags = computeChurnFlags({
+    asOf,
+    members,
+    activityByMember: new Map(activityRows.map((r) => [r.member_id, r])),
+    failedByMember: new Map(failedRows.map((r) => [r.member_id, r])),
+    utilization,
+    pauseHistory,
   });
-  return { flags, activeEmails };
+  for (const flag of flags) {
+    const id = identityByMember.get(members.find((m) => m.email === flag.email)!.memberId);
+    flag.telefone = id?.contact_phone ?? null;
+  }
+
+  log.debug("churn_signals.computed", { asOf, members: members.length, flagged: flags.length });
+  return { flags, activeEmails: new Set(members.map((m) => m.email)), asOf };
 }

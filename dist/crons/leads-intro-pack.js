@@ -8,8 +8,9 @@
  */
 import { log } from "../lib/log.js";
 import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
-import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
-import { sendGroupMessage } from "../lib/telegram.js";
+import { isStudioDbAvailable } from "../lib/studio-db.js";
+import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
+import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatLeadsDigest } from "../messages/leads.js";
 import * as notion from "../notion.js";
 function errMsg(err) {
@@ -20,13 +21,14 @@ export async function run() {
         log.debug("leads_intro_pack.skipped", { reason: "NOTION_LEADS_DB_ID not set" });
         return;
     }
-    if (!isStudioSupabaseAvailable()) {
-        log.debug("leads_intro_pack.skipped", { reason: "studio_supabase_not_configured" });
+    if (!isStudioDbAvailable()) {
+        log.debug("leads_intro_pack.skipped", { reason: "studio_db_not_configured" });
         return;
     }
     let candidates;
+    let asOf;
     try {
-        candidates = await findUnconvertedIntroPacks();
+        ({ candidates, asOf } = await findUnconvertedIntroPacks());
     }
     catch (err) {
         log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
@@ -72,7 +74,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessage(message);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion, PULSE_VIEW.memberActivity], asOf);
         log.info("leads_intro_pack.posted", { messageId, count: created.length, skippedExisting });
     }
     catch (err) {

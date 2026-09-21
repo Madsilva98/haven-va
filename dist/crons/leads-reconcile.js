@@ -47,15 +47,15 @@
  *     hasRealPurchase on them is always true and would archive every one
  *     of them regardless of whether they ever came back (this happened in
  *     production on 2026-09-16 and had to be manually reverted). What
- *     "converted" means for them is the same question
- *     src/lib/intro-pack-conversion.ts asks when first writing the lead:
- *     did they start a subscription/non-intro membership AFTER their own
- *     pack's expiry date (src/lib/intro-pack-conversion.ts hasConvertedAfter).
+ *     "converted" means for them is what v_pulse_intro_conversion says:
+ *     converted (a 4x/8x/12x/Unlimited subscription on or after the intro
+ *     purchase — mid-pack counts) OR converted_pack (a real 5x/10x pack;
+ *     never chase as a lead; a drop-in is not a conversion).
  */
-import { hasConvertedAfter, loadConversionCheckData } from "../lib/intro-pack-conversion.js";
+import { loadConversionCheckData } from "../lib/intro-pack-conversion.js";
 import { hasRealPurchase } from "../lib/leads.js";
 import { log } from "../lib/log.js";
-import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
+import { isStudioDbAvailable } from "../lib/studio-db.js";
 import * as notion from "../notion.js";
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
@@ -92,7 +92,7 @@ export async function run() {
         log.error("leads_reconcile.fetch_closed_failed", { message: errMsg(err) });
     }
     let archivedConverted = 0;
-    if (isStudioSupabaseAvailable()) {
+    if (isStudioDbAvailable()) {
         try {
             const open = await notion.getLeadsByEstado(["Novo", "Contactado"]);
             const introPackRows = open.filter((r) => r.canal === "Intro Pack");
@@ -112,7 +112,7 @@ export async function run() {
             }
             if (introPackRows.length > 0) {
                 try {
-                    const { firstPackByEmail, subsByEmail, membershipsByEmail } = await loadConversionCheckData();
+                    const { firstPackByEmail, convertedMemberIds } = await loadConversionCheckData();
                     for (const row of introPackRows) {
                         if (!row.email)
                             continue;
@@ -123,7 +123,7 @@ export async function run() {
                         // guess.
                         if (!pack)
                             continue;
-                        if (hasConvertedAfter(email, pack.expiresAt, subsByEmail, membershipsByEmail)) {
+                        if (convertedMemberIds.has(pack.memberId)) {
                             await notion.archivePage(row.id);
                             archivedConverted++;
                         }
