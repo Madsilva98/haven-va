@@ -1923,13 +1923,16 @@ async function createEvent(nome: string, owner: OwnerValue, originalMsg: string)
 // to us) — leads-instagram-scan.ts passes "Contactado" for the opposite
 // direction, a contact the studio itself cold-messaged with no reply, so
 // the row correctly reflects "we already reached out" instead of
-// implying it's still waiting on us.
+// implying it's still waiting on us. `ultimoContacto` (ISO date) is
+// optional too — leads-instagram-scan.ts passes the DM thread's last
+// message timestamp, when known.
 async function createPartner(
   nome: string,
   owner: OwnerValue,
   originalMsg: string,
   categoria?: "Corporate" | "Eventos" | "Parceria",
   status: PartnerStatus = "A contactar",
+  ultimoContacto?: string | null,
 ): Promise<string> {
   if (!NOTION_PARTNER_DB_ID) {
     throw new Error("NOTION_PARTNER_DB_ID not set");
@@ -1943,6 +1946,7 @@ async function createPartner(
         Status: { select: { name: status } },
         Origem: richText(originalMsg),
         ...(categoria ? { Categoria: { select: { name: categoria } } } : {}),
+        ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
       },
     }),
   );
@@ -1969,11 +1973,14 @@ async function createPartner(
 // create_entity tool) leave it for the founder to fill in by hand;
 // src/crons/leads-instagram-scan.ts always passes "Instagram DM", since
 // that's known at creation time (there's no other source for this cron).
+// `ultimoContacto` (ISO date) is optional too — leads-instagram-scan.ts
+// passes the DM thread's last message timestamp, when known.
 async function createInfluencer(
   nome: string,
   owner: OwnerValue,
   originalMsg: string,
   canalContacto?: "Instagram DM" | "Email" | "Outro",
+  ultimoContacto?: string | null,
 ): Promise<string> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
@@ -1987,6 +1994,7 @@ async function createInfluencer(
         Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
         Origem: richText(originalMsg),
         ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
+        ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
       },
     }),
   );
