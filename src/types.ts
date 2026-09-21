@@ -352,12 +352,11 @@ export interface ChurnRiskRow {
 }
 
 // ----- Competitor intel (newsletters → Notion) -----
-// Founder-maintained sender list (CompetitorSourceRow) is provider-agnostic —
-// fed historically by a one-off Gmail backfill (src/lib/gmail.ts,
-// scripts/backfill-competitor-intel.mjs) and, going forward, by the live
-// weekly cron reading a dedicated Outlook shared mailbox
-// (src/lib/outlook-competitor-intel-pipeline.ts). See
-// docs/knowledge-base/competitor-intel.md for why the split exists.
+// CompetitorSourceRow (the "Fontes" DB) is the founder's own reference list
+// of what she's subscribed and how she's classified each source — not read
+// by the live pipeline (src/lib/outlook-competitor-intel-pipeline.ts), which
+// reads a dedicated Outlook mailbox instead. See
+// docs/knowledge-base/competitor-intel.md for why.
 
 export type CompetitorSourceCategory = "Concorrência" | "Inspiração";
 

@@ -478,6 +478,28 @@ export async function setMessageCategories(
 }
 
 /**
+ * Marks a message read — used as a lightweight "processed" flag by pipelines
+ * reading a dedicated single-purpose mailbox (e.g. competitor-intel), where
+ * nothing else touches the mailbox and there's no need for a category or an
+ * archive move: unread is simply "not yet processed".
+ */
+export async function markMessageRead(mailbox: "me" | string, messageId: string): Promise<void> {
+  const url = `${mailboxBase(mailbox)}/messages/${encodeURIComponent(messageId)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${await getAccessToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ isRead: true }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`outlook.markMessageRead failed (${res.status}): ${text}`);
+  }
+}
+
+/**
  * Moves a message to the mailbox's Archive folder. Not retried on failure
  * (unlike graphFetch's GET helper) — a failed move should surface, not
  * silently retry a mutating call.

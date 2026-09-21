@@ -1,15 +1,14 @@
 /**
- * Telegram MarkdownV2 digest for the weekly competitor-intel cron — one
- * message combining both the tidy phase (what got archived) and the
- * process phase (what got extracted into Notion), grouped by sender.
+ * Telegram MarkdownV2 digest for the weekly competitor-intel cron —
+ * summarizes what got extracted into Notion, grouped by sender.
  */
 import { escapeMd } from "./cycle.js";
 export function formatCompetitorIntelDigest(args) {
-    const { tidiedCount, summary } = args;
+    const { summary } = args;
     const lines = [];
     lines.push("*competitor intel — resumo semanal*");
     lines.push("");
-    lines.push(escapeMd(`${tidiedCount} email(s) arquivado(s), ${summary.messagesProcessed} processado(s), ${summary.findingsWritten} achado(s) novo(s) no Notion.`));
+    lines.push(escapeMd(`${summary.messagesProcessed} email(s) processado(s), ${summary.findingsWritten} achado(s) novo(s) no Notion.`));
     if (summary.errors > 0) {
         lines.push(escapeMd(`⚠️ ${summary.errors} email(s) com erro — ficam por processar, tentamos de novo na próxima corrida.`));
     }
