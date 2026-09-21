@@ -2,9 +2,11 @@ import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
+import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
+import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
@@ -28,9 +30,11 @@ const tasks = [
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 1 * *", () => runTidyMailboxesFeedbackReminder().catch((e) => log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) })), { timezone: TZ }),
     cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("12 8 * * 1", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
     cron.schedule("15 8 * * *", () => runIntroPackExpiring().catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
     cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
     cron.schedule("45 8 * * 1", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("30 8 * * 1", () => runCompetitorIntel().catch((e) => log.error("cron.competitor_intel", { e: String(e) })), { timezone: TZ }),
 ];
 log.info("server.crons_registered", { count: tasks.length });
 const bot = buildBot();

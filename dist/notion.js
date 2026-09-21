@@ -33,6 +33,8 @@ const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
 const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
 const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
+const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
+const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 if (!NOTION_API_KEY) {
     throw new Error("notion: NOTION_API_KEY is required");
 }
@@ -65,6 +67,8 @@ export async function initialize() {
         NOTION_LISTS_DB_ID,
         NOTION_LEADS_DB_ID,
         NOTION_CHURN_RISK_DB_ID,
+        NOTION_COMPETITOR_SOURCES_DB_ID,
+        NOTION_COMPETITOR_INTEL_DB_ID,
     ]);
 }
 // ----- retry helper -----
@@ -1205,6 +1209,59 @@ async function getAllPartnerContacts() {
     log.debug("notion.all_partner_contacts_fetched", { count: rows.length });
     return rows;
 }
+// Fontes list for the competitor-intel Gmail pipeline — founder-maintained
+// in Notion so senders can be added/paused without a redeploy.
+async function getActiveCompetitorSources() {
+    if (!NOTION_COMPETITOR_SOURCES_DB_ID)
+        return [];
+    const rows = [];
+    let cursor;
+    do {
+        const res = await withRetry("getActiveCompetitorSources", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_COMPETITOR_SOURCES_DB_ID),
+            filter: { property: "Ativo", checkbox: { equals: true } },
+            start_cursor: cursor,
+        }));
+        for (const row of res.results) {
+            if (!("properties" in row))
+                continue;
+            const props = row.properties;
+            rows.push({
+                id: row.id,
+                nome: readPlainText(props["Nome"]),
+                emailOuDominio: readPlainText(props["Email/Domínio"]),
+                categoria: readSelectName(props["Categoria"]),
+                ativo: readCheckbox(props["Ativo"]),
+            });
+        }
+        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+    } while (cursor);
+    log.debug("notion.competitor_sources_fetched", { count: rows.length });
+    return rows;
+}
+// Findings from the competitor-intel Gmail pipeline. Categoria is
+// deliberately left unset here — the founder classifies each finding by
+// hand in Notion rather than the bot guessing.
+async function createCompetitorIntelFinding(finding) {
+    if (!NOTION_COMPETITOR_INTEL_DB_ID) {
+        throw new Error("NOTION_COMPETITOR_INTEL_DB_ID not set");
+    }
+    await withRetry("createCompetitorIntelFinding", () => client.pages.create({
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_COMPETITOR_INTEL_DB_ID) },
+        properties: {
+            Nome: { title: [{ text: { content: finding.nome } }] },
+            Fonte: richText(finding.fonte),
+            Tipo: { multi_select: finding.tipos.map((name) => ({ name })) },
+            Resumo: richText(finding.resumo),
+            ...(finding.dataEmail
+                ? { "Data do email": { date: { start: finding.dataEmail } } }
+                : {}),
+            "Assunto do email": richText(finding.assuntoEmail),
+            "Link Gmail": { url: finding.linkGmail },
+        },
+    }));
+    log.info("notion.competitor_intel_created", { nome: finding.nome, fonte: finding.fonte });
+}
 // Alerts founders when a content-calendar item is due to publish within
 // CONTENT_CAL_LOOKAHEAD_DAYS but hasn't reached "Scheduled" yet (still
 // "Planned" or "Drafted"). See pipeline-alerts.ts for the cron that
@@ -1610,7 +1667,16 @@ async function createEvent(nome, owner, originalMsg) {
     log.info("notion.event_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function createPartner(nome, owner, originalMsg) {
+// `categoria` is optional — existing callers (e.g. the assistant's
+// create_entity tool) leave Categoria for the founder to fill in by hand;
+// src/crons/leads-instagram-scan.ts passes "Parceria" for Instagram DM
+// networking contacts, since that's known at creation time.
+// `status` defaults to "A contactar" (the normal case: someone reached out
+// to us) — leads-instagram-scan.ts passes "Contactado" for the opposite
+// direction, a contact the studio itself cold-messaged with no reply, so
+// the row correctly reflects "we already reached out" instead of
+// implying it's still waiting on us.
+async function createPartner(nome, owner, originalMsg, categoria, status = "A contactar") {
     if (!NOTION_PARTNER_DB_ID) {
         throw new Error("NOTION_PARTNER_DB_ID not set");
     }
@@ -1619,8 +1685,9 @@ async function createPartner(nome, owner, originalMsg) {
         properties: {
             "Name": { title: [{ text: { content: nome } }] },
             Owner: { select: { name: owner } },
-            Status: { select: { name: "A contactar" } },
+            Status: { select: { name: status } },
             Origem: richText(originalMsg),
+            ...(categoria ? { Categoria: { select: { name: categoria } } } : {}),
         },
     }));
     await withRetry("createPartner.sections", () => client.blocks.children.append({
@@ -1639,7 +1706,11 @@ async function createPartner(nome, owner, originalMsg) {
     log.info("notion.partner_created", { pageId: page.id, nome, owner });
     return page.id;
 }
-async function createInfluencer(nome, owner, originalMsg) {
+// `canalContacto` is optional — existing callers (e.g. the assistant's
+// create_entity tool) leave it for the founder to fill in by hand;
+// src/crons/leads-instagram-scan.ts always passes "Instagram DM", since
+// that's known at creation time (there's no other source for this cron).
+async function createInfluencer(nome, owner, originalMsg, canalContacto) {
     if (!NOTION_INFLUENCER_DB_ID) {
         throw new Error("NOTION_INFLUENCER_DB_ID not set");
     }
@@ -1650,6 +1721,7 @@ async function createInfluencer(nome, owner, originalMsg) {
             Owner: { select: { name: owner } },
             Status: { select: { name: "A contactar" } },
             Origem: richText(originalMsg),
+            ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
         },
     }));
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({
@@ -1724,9 +1796,10 @@ async function setLeadEstado(pageId, estado) {
     }));
     log.info("notion.lead_estado_set", { pageId, estado });
 }
-// Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
-// any — used to avoid creating a duplicate row for the same person across
-// runs. A closed lead (already converted/lost) does not block a new one.
+// Returns an OPEN lead (Estado not Convertido/Perdido/Inconclusivo) for
+// this email, if any — used to avoid creating a duplicate row for the same
+// person across runs. A closed lead (already converted/lost/inconclusive)
+// does not block a new one.
 async function findLeadByEmail(email) {
     if (!NOTION_LEADS_DB_ID)
         return null;
@@ -1737,6 +1810,7 @@ async function findLeadByEmail(email) {
                 { property: "Email", email: { equals: email } },
                 { property: "Estado", select: { does_not_equal: "Convertido" } },
                 { property: "Estado", select: { does_not_equal: "Perdido" } },
+                { property: "Estado", select: { does_not_equal: "Inconclusivo" } },
             ],
         },
         page_size: 1,
@@ -1780,15 +1854,26 @@ async function getLeadsByEstado(estados) {
     } while (cursor);
     return rows;
 }
-// Same as findLeadByEmail but WITHOUT the open-only filter — for one-off
-// data repairs that need to reach a lead regardless of its current Estado
-// (e.g. fixing the Motivo text on a row already marked Convertido).
-async function findLeadByEmailAny(email) {
+// Same as findLeadByEmail but WITHOUT the open-only filter — reaches a lead
+// regardless of its current Estado. Used for (a) one-off data repairs that
+// need to reach a lead no matter its status (e.g. fixing the Motivo text on
+// a row already marked Convertido), and (b) leads-intro-pack.ts's dedup,
+// which must still see a Perdido row (leads-reconcile.ts deliberately
+// leaves Perdido+Intro-Pack rows un-archived so this keeps finding them —
+// see that file's docstring). Pass `canal` to scope the match to one
+// channel — leads-intro-pack.ts always does, since without it a closed
+// lead on an unrelated channel (Email/WhatsApp/Instagram) that hasn't been
+// archived yet (e.g. a transient archivePage failure) would silently block
+// creation of a legitimate new Intro Pack lead for that same email.
+async function findLeadByEmailAny(email, canal) {
     if (!NOTION_LEADS_DB_ID)
         return null;
+    const filter = canal
+        ? { and: [{ property: "Email", email: { equals: email } }, { property: "Canal", select: { equals: canal } }] }
+        : { property: "Email", email: { equals: email } };
     const res = await withRetry("findLeadByEmailAny", () => client.dataSources.query({
         data_source_id: dsId(NOTION_LEADS_DB_ID),
-        filter: { property: "Email", email: { equals: email } },
+        filter,
         page_size: 1,
     }));
     const row = res.results[0];
@@ -2341,7 +2426,9 @@ getEntitiesForOwner, getTasksForEntity,
 // Leads a contactar
 createLead, updateLeadDetails, setLeadEstado, findLeadByEmail, findLeadByEmailAny, getLeadsByEstado, 
 // Clientes em risco de churn
-getChurnRowByEmail, createChurnFlag, updateChurnFlag, getChurnRowsByStatus, };
+getChurnRowByEmail, createChurnFlag, updateChurnFlag, getChurnRowsByStatus, 
+// Competitor intel
+getActiveCompetitorSources, createCompetitorIntelFinding, };
 export const notion = {
     createTask,
     updateTask,
@@ -2412,4 +2499,7 @@ export const notion = {
     createChurnFlag,
     updateChurnFlag,
     getChurnRowsByStatus,
+    // Competitor intel
+    getActiveCompetitorSources,
+    createCompetitorIntelFinding,
 };
