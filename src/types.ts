@@ -311,7 +311,10 @@ export type LeadVerification =
   | "Match incerto — rever manualmente"
   | "N/A";
 
-export type LeadStatus = "Novo" | "Contactado" | "Convertido" | "Perdido";
+// Inconclusivo (added 2026-09-21): the founder reviewed the row by hand
+// and the message thread alone doesn't say whether the person converted
+// or was lost — a terminal state like Convertido/Perdido, not an open one.
+export type LeadStatus = "Novo" | "Contactado" | "Convertido" | "Perdido" | "Inconclusivo";
 
 export interface LeadRow {
   id: string;

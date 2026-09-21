@@ -2060,9 +2060,10 @@ async function setLeadEstado(pageId: string, estado: LeadStatus): Promise<void> 
   log.info("notion.lead_estado_set", { pageId, estado });
 }
 
-// Returns an OPEN lead (Estado not Convertido/Perdido) for this email, if
-// any — used to avoid creating a duplicate row for the same person across
-// runs. A closed lead (already converted/lost) does not block a new one.
+// Returns an OPEN lead (Estado not Convertido/Perdido/Inconclusivo) for
+// this email, if any — used to avoid creating a duplicate row for the same
+// person across runs. A closed lead (already converted/lost/inconclusive)
+// does not block a new one.
 async function findLeadByEmail(email: string): Promise<{ id: string; estado: LeadStatus } | null> {
   if (!NOTION_LEADS_DB_ID) return null;
   const res = await withRetry("findLeadByEmail", () =>
@@ -2073,6 +2074,7 @@ async function findLeadByEmail(email: string): Promise<{ id: string; estado: Lea
           { property: "Email", email: { equals: email } },
           { property: "Estado", select: { does_not_equal: "Convertido" } },
           { property: "Estado", select: { does_not_equal: "Perdido" } },
+          { property: "Estado", select: { does_not_equal: "Inconclusivo" } },
         ],
       },
       page_size: 1,
