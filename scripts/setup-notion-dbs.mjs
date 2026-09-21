@@ -294,7 +294,7 @@ const competitorIntelProperties = {
   Resumo: { rich_text: {} },
   "Data do email": { date: {} },
   "Assunto do email": { rich_text: {} },
-  "Link Gmail": { url: {} },
+  Link: { url: {} },
 };
 
 async function setup(label, dbId, props) {

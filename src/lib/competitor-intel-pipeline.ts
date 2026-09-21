@@ -1,9 +1,15 @@
 /**
- * Shared "process phase" for the competitor-intel pipeline — the one place
- * that turns tagged-but-unprocessed Gmail messages into Notion findings.
- * Used both by the weekly cron (src/crons/competitor-intel.ts) and the
- * one-off backfill script (scripts/backfill-competitor-intel.mjs), so
- * there's exactly one implementation to keep correct.
+ * GMAIL-ONLY, ONE-OFF-BACKFILL-ONLY as of the Outlook migration — see
+ * docs/knowledge-base/competitor-intel.md. The live weekly cron
+ * (src/crons/competitor-intel.ts) now reads a dedicated Outlook shared
+ * mailbox via src/lib/outlook-competitor-intel-pipeline.ts instead, because
+ * Gmail's `gmail.modify` scope is a Google "restricted" scope: unverified
+ * apps in Testing publishing status get a 7-day refresh-token expiry, which
+ * breaks an unattended weekly cron, and full verification/CASA assessment
+ * wasn't worth it for a single-tenant internal tool. This module is kept
+ * exactly as it was — still a real, working implementation — purely so
+ * scripts/backfill-competitor-intel.mjs can do one last run against the
+ * already-"email marketing concorrência"-tagged Gmail backlog.
  *
  * A message only gets the "processado" label once extraction AND every
  * Notion write for it succeeded — an error leaves it unlabelled so it's
@@ -14,6 +20,7 @@ import * as gmail from "./gmail.js";
 import { extractCompetitorIntel, type CompetitorIntelExtraction } from "./extract-competitor-intel.js";
 import * as notion from "../notion.js";
 import { log } from "./log.js";
+import type { CompetitorIntelRunSummary } from "../types.js";
 
 export const DEFAULT_LABEL = "email marketing concorrência";
 export const DEFAULT_PROCESSED_LABEL = "email marketing concorrência: processado";
@@ -30,20 +37,7 @@ export function isDryRun(): boolean {
   return process.env.COMPETITOR_INTEL_DRY_RUN === "true";
 }
 
-export interface ProcessedMessageResult {
-  fromName: string;
-  fromEmail: string;
-  subject: string;
-  findings: CompetitorIntelExtraction[];
-}
-
-export interface CompetitorIntelRunSummary {
-  messagesSeen: number;
-  messagesProcessed: number;
-  findingsWritten: number;
-  errors: number;
-  byMessage: ProcessedMessageResult[];
-}
+export type { CompetitorIntelRunSummary };
 
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
@@ -110,7 +104,7 @@ export async function processTaggedCompetitorEmails(): Promise<CompetitorIntelRu
           resumo: finding.resumo,
           dataEmail: msg.date.slice(0, 10),
           assuntoEmail: msg.subject,
-          linkGmail: msg.webLink,
+          link: msg.webLink,
         });
         summary.findingsWritten++;
       }

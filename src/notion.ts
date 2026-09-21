@@ -1495,7 +1495,7 @@ async function createCompetitorIntelFinding(finding: CompetitorIntelFinding): Pr
           ? { "Data do email": { date: { start: finding.dataEmail } } }
           : {}),
         "Assunto do email": richText(finding.assuntoEmail),
-        "Link Gmail": { url: finding.linkGmail },
+        Link: { url: finding.link },
       } as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );

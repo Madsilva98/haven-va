@@ -1,9 +1,15 @@
 /**
- * Shared "process phase" for the competitor-intel pipeline — the one place
- * that turns tagged-but-unprocessed Gmail messages into Notion findings.
- * Used both by the weekly cron (src/crons/competitor-intel.ts) and the
- * one-off backfill script (scripts/backfill-competitor-intel.mjs), so
- * there's exactly one implementation to keep correct.
+ * GMAIL-ONLY, ONE-OFF-BACKFILL-ONLY as of the Outlook migration — see
+ * docs/knowledge-base/competitor-intel.md. The live weekly cron
+ * (src/crons/competitor-intel.ts) now reads a dedicated Outlook shared
+ * mailbox via src/lib/outlook-competitor-intel-pipeline.ts instead, because
+ * Gmail's `gmail.modify` scope is a Google "restricted" scope: unverified
+ * apps in Testing publishing status get a 7-day refresh-token expiry, which
+ * breaks an unattended weekly cron, and full verification/CASA assessment
+ * wasn't worth it for a single-tenant internal tool. This module is kept
+ * exactly as it was — still a real, working implementation — purely so
+ * scripts/backfill-competitor-intel.mjs can do one last run against the
+ * already-"email marketing concorrência"-tagged Gmail backlog.
  *
  * A message only gets the "processado" label once extraction AND every
  * Notion write for it succeeded — an error leaves it unlabelled so it's
@@ -82,7 +88,7 @@ export async function processTaggedCompetitorEmails() {
                     resumo: finding.resumo,
                     dataEmail: msg.date.slice(0, 10),
                     assuntoEmail: msg.subject,
-                    linkGmail: msg.webLink,
+                    link: msg.webLink,
                 });
                 summary.findingsWritten++;
             }
