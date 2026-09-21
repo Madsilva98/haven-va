@@ -270,6 +270,25 @@ describe("leads-instagram-scan", () => {
     );
   });
 
+  it("defaults a cold-outreach contact to parceiro without calling the classifier when our own message is too short to be real content — regression for the 2026-09-21 DepilNails/Martim Saudade e Silva noise", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    hasInboundMessage.mockReturnValue(false);
+    buildTranscript.mockReturnValue("You sent an attachment.");
+
+    await run();
+
+    expect(classifyOutreachIntent).not.toHaveBeenCalled();
+    expect(createInfluencer).not.toHaveBeenCalled();
+    expect(createPartner).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Parceria",
+      "Contactado",
+      "2026-01-01T00:00:00Z",
+    );
+  });
+
   it("skips creating a partner page when the name fuzzy-matches an existing Partner Pipeline row, and flags it in the digest — regression for the 2026-09-21 Wanderlust/Wanderlust_Portugal duplicate", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
