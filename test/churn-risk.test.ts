@@ -160,6 +160,46 @@ describe("churn-risk", () => {
     expect(message).not.toContain("Filipe");
   });
 
+  it("fetches 'A vigiar' rows too when reconciling open rows — it's an open status the founder sets by hand", async () => {
+    mockOpenAndClosedRows([], []);
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set() });
+
+    await run();
+
+    expect(getChurnRowsByStatus).toHaveBeenCalledWith(["Aberto", "Contactado", "A vigiar"]);
+  });
+
+  it("archives an 'A vigiar' row too once it resolves every signal — watching doesn't exempt it from cleanup", async () => {
+    mockOpenAndClosedRows([], [{ id: "row-g", nome: "Gabriela", email: "g@x.com", status: "A vigiar" }]);
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["g@x.com"]) });
+
+    await run();
+
+    expect(archivePage).toHaveBeenCalledWith("row-g");
+  });
+
+  it("keeps syncing Sinais/Detalhes for a still-flagged 'A vigiar' row without touching its Status", async () => {
+    fetchChurnFlags.mockResolvedValue({
+      flags: [
+        {
+          email: "h@x.com",
+          name: "Helena",
+          plano: "4x Monthly",
+          telefone: null,
+          signals: [{ type: "Baixa utilização", detail: "20% de utilização média" }],
+        },
+      ],
+      activeEmails: new Set(["h@x.com"]),
+    });
+    // getChurnRowByEmail doesn't return Status — it already treats anything
+    // other than Resolvido/Arquivado as open, "A vigiar" included.
+    getChurnRowByEmail.mockResolvedValue({ id: "row-h", sinais: ["Sem reservas 14+ dias"] });
+
+    await run();
+
+    expect(updateChurnFlag).toHaveBeenCalledWith("row-h", ["Baixa utilização"], "20% de utilização média");
+  });
+
   it("auto-archives an open row once the person is no longer an active subscriber at all, silently (no digest)", async () => {
     mockOpenAndClosedRows([], [{ id: "row-e", nome: "Andrew", email: "e@x.com", status: "Aberto" }]);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set() });

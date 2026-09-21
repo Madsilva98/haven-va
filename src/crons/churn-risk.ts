@@ -30,6 +30,13 @@
  *    open and named in the digest, since that's still worth watching or
  *    contacting about.
  *
+ * "A vigiar" is a 4th open status the founder can set by hand (2026-09-21,
+ * alongside a "Notas" rich_text property the bot never touches) for a row
+ * she wants to keep an eye on without marking it Resolvido/Arquivado — it's
+ * treated as open everywhere above, so its Sinais/Detalhes keep syncing
+ * and it still gets archived once genuinely resolved or churned, same as
+ * Aberto/Contactado.
+ *
  * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
  * the birthday cron.
  */
@@ -107,13 +114,16 @@ export async function run(): Promise<void> {
 
   // Reconcile every other still-open row: not touched above because
   // Studio Supabase doesn't flag that email at all this week — zero
-  // current signals either way, so archive it. Still-active resolutions
-  // get a bare count in the digest (not each name); churned ones are
-  // logged only, same as the Resolvido/Arquivado sweep above.
+  // current signals either way, so archive it. "A vigiar" counts as open
+  // here too — the founder's call (2026-09-21): a row she's set to keep
+  // watching still needs to be archived once it's genuinely resolved or
+  // churned, same as Aberto/Contactado. Still-active resolutions get a
+  // bare count in the digest (not each name); churned ones are logged
+  // only, same as the Resolvido/Arquivado sweep above.
   let archivedResolved = 0;
   let archivedChurned = 0;
   try {
-    const open = await notion.getChurnRowsByStatus(["Aberto", "Contactado"]);
+    const open = await notion.getChurnRowsByStatus(["Aberto", "Contactado", "A vigiar"]);
     for (const row of open) {
       if (!row.email) continue;
       const email = row.email.toLowerCase().trim();

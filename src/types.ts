@@ -335,7 +335,7 @@ export type ChurnSignalType =
   | "Pagamento falhado"
   | "Baixa utilização";
 
-export type ChurnStatus = "Aberto" | "Contactado" | "Resolvido" | "Arquivado";
+export type ChurnStatus = "Aberto" | "Contactado" | "A vigiar" | "Resolvido" | "Arquivado";
 
 export interface ChurnRiskRow {
   id: string;
