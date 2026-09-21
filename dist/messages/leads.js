@@ -57,3 +57,9 @@ export function formatInfluencerCandidatesDigests(newInfluencers) {
         ? `📸 *${total} potencial(is) influencer(s) via Instagram (parte ${part}/${parts}):*`
         : `📸 *${total} potencial(is) influencer(s) via Instagram:*`);
 }
+export function formatDuplicateCandidatesDigests(duplicates) {
+    const lines = duplicates.map((d) => `• ${d.nome} — parece igual a "${d.existente}" (${d.pipeline})`);
+    return chunkDigest(lines, (total, part, parts) => parts > 1
+        ? `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente (parte ${part}/${parts}):*`
+        : `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente:*`);
+}

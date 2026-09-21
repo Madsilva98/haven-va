@@ -24,17 +24,33 @@
  *     call, 2026-09-21, after the dry-run review turned up e.g. a cleaning-
  *     supplies vendor and several "are you hiring?" messages wrongly
  *     landing as partner candidates).
- * A fifth case is handled BEFORE classification, with no Haiku call at
- * all: a contact the studio itself cold-messaged (e.g. an influencer/
- * brand outreach campaign) who never replied. Whether we contacted them
- * first is a data fact (src/lib/instagram-inbox.ts's hasInboundMessage),
- * not a judgment call — and it matters, because an out-only transcript
- * still contains OUR OWN "queríamos explorar uma parceria" language and
- * fooled the classifier into a false "parceiro" the first time this
- * shipped (2026-09-21). These are still worth tracking rather than
- * dropped (founder's call, same day): written into Partner Pipeline like
- * "parceiro", but Status="Contactado" instead of the default
- * "A contactar", since we're the ones waiting to hear back.
+ * A fifth case is handled BEFORE the CLIENTE/PARCEIRO/INFLUENCER/NENHUM
+ * classification, with a different Haiku call: a contact the studio
+ * itself cold-messaged (e.g. an influencer/brand outreach campaign) who
+ * never replied. Whether we contacted them first is a data fact
+ * (src/lib/instagram-inbox.ts's hasInboundMessage), not a judgment call —
+ * an out-only transcript still contains OUR OWN language and fooled the
+ * main classifier into a false "parceiro" the first time this shipped
+ * (2026-09-21). But WHICH kind of outreach it was still needs judging —
+ * classifyOutreachIntent (src/lib/lead-classifier.ts) reads our own
+ * message to tell a partner-style ask (e.g. Wanderlust's goodie-bag
+ * request) from the team's influencer-outreach template (e.g. Márcia
+ * Soares's "achamos que fazes match com a nossa vibe"), since routing
+ * every cold-outreach contact into Partner Pipeline unconditionally
+ * (the original behavior) silently misrouted the latter too — found in
+ * production 2026-09-21. Still worth tracking either way (founder's
+ * call): written with Status="Contactado" instead of the default
+ * "A contactar"/"A contactar", since we're the ones waiting to hear back.
+ *
+ * Before creating ANY Partner or Influencer Pipeline page (all three
+ * paths above), the name is fuzzy-matched against every existing row in
+ * that same pipeline (findDuplicateName) — this cron used to have zero
+ * cross-channel dedup, so the same real contact reached both by email
+ * (via the Outlook partnerships sync) and by Instagram DM got two rows
+ * ("Wanderlust" and "Wanderlust_Portugal", found in production
+ * 2026-09-21). A likely match skips creation and gets flagged in the
+ * weekly digest instead — never auto-merged, since deciding which record
+ * is authoritative needs a human.
  *
  * Classification is per CONTACT, not per message — one Haiku call on
  * their whole transcript, since this is a holistic judgment, not
@@ -62,12 +78,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildTranscript, extractVolunteeredEmail, extractVolunteeredPhone, fetchInstagramContactsWithMessages, hasInboundMessage, isExcludedInstagramContact, } from "../lib/instagram-inbox.js";
+import { scoreMatch } from "../lib/fuzzy-match.js";
 import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, findBestNameMatch, findVisitHistory, } from "../lib/leads.js";
-import { classifyInstagramDM, enrichInfluencerFromTranscript, enrichPartnerFromTranscript, summarizeRelationshipUpdate, } from "../lib/lead-classifier.js";
+import { classifyInstagramDM, classifyOutreachIntent, enrichInfluencerFromTranscript, enrichPartnerFromTranscript, summarizeRelationshipUpdate, } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import { formatInfluencerCandidatesDigests, formatLeadsDigests, formatPartnerCandidatesDigests, } from "../messages/leads.js";
+import { formatDuplicateCandidatesDigests, formatInfluencerCandidatesDigests, formatLeadsDigests, formatPartnerCandidatesDigests, } from "../messages/leads.js";
 import * as notion from "../notion.js";
 const DATA_DIR = process.env.DATA_DIR ?? ".";
 const STATE_PATH = path.join(DATA_DIR, "instagram-leads-sync-state.json");
@@ -118,6 +135,24 @@ function formatKenkoLine(volunteeredEmail, name, customers, activity) {
 }
 function dated(text) {
     return `[${formatDatePt(new Date().toISOString())}] ${text}`;
+}
+// Higher bar than leads.ts's findBestNameMatch (0.5) — that one only ever
+// flags a lead as "rever manualmente", never suppresses the write, so a
+// weak match is cheap to get wrong. This one skips page creation entirely,
+// so a false positive would silently drop a real, different contact.
+// scoreMatch's containment case (one name is a substring of the other,
+// e.g. "Wanderlust" / "Wanderlust_Portugal" — the real duplicate found in
+// production 2026-09-21) already scores 0.8, comfortably above this.
+const DUPLICATE_NAME_THRESHOLD = 0.75;
+function findDuplicateName(name, existing) {
+    let best = null;
+    for (const e of existing) {
+        const score = scoreMatch(e.name, name);
+        if (score >= DUPLICATE_NAME_THRESHOLD && (!best || score > best.score)) {
+            best = { ...e, score };
+        }
+    }
+    return best;
 }
 /**
  * "Current state" fields only (Sobre/Deal/Perfil e stats) — always judged
@@ -238,7 +273,7 @@ function setCheckpoint(state, contact, classification, notionPageId) {
         classifiedAt: new Date().toISOString(),
     };
 }
-async function processContact(contact, customers, activity, state) {
+async function processContact(contact, customers, activity, existingPartners, existingInfluencers, state) {
     const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
     // contact.platformUserId is Meta's internal numeric id — never surface it
     // as if it were a usable handle (it isn't searchable/linkable). Most
@@ -251,20 +286,61 @@ async function processContact(contact, customers, activity, state) {
     // A contact the studio cold-messaged (e.g. an influencer/brand outreach
     // campaign) who never replied still has a non-empty transcript — our
     // own message — so this must be checked before building/classifying it,
-    // not instead of it. No AI judgment needed here: whether we contacted
-    // them first is a data fact, not something to classify. Still worth
-    // tracking (founder's call, 2026-09-21) rather than silently dropping —
-    // written the same as an inbound "parceiro", just Status="Contactado"
-    // instead of the default "A contactar", since we're the ones waiting to
-    // hear back, not them waiting on us.
+    // not instead of it. Whether we contacted them first is a data fact,
+    // not a judgment call — but WHICH kind of outreach it was (partner-
+    // shaped vs. influencer-shaped) still needs one: until 2026-09-21 every
+    // cold-outreach contact went into Partner Pipeline unconditionally,
+    // which silently misrouted the team's own influencer-outreach template
+    // ("achamos que fazes match com a nossa vibe, vem experimentar uma
+    // aula") there too (e.g. Márcia Soares) — classifyOutreachIntent reads
+    // OUR OWN message to tell the two apart, same distinction
+    // classifyInstagramDM makes for an inbound reply, just applied to an
+    // out-only thread instead.
     if (!hasInboundMessage(contact.messages)) {
-        if (!buildTranscript(contact.messages)) {
+        const outreachText = buildTranscript(contact.messages);
+        if (!outreachText) {
             setCheckpoint(state, contact, "nenhum", null);
             return null;
+        }
+        let intent;
+        try {
+            intent = await classifyOutreachIntent(outreachText);
+        }
+        catch (err) {
+            log.error("leads_instagram_scan.outreach_classify_failed", { contactId: contact.id, message: errMsg(err) });
+            return null; // leave checkpoint untouched — retry next run
+        }
+        if (intent === "influencer") {
+            const dup = findDuplicateName(name, existingInfluencers);
+            if (dup) {
+                setCheckpoint(state, contact, "influencer", null);
+                log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
+                return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+            }
+            try {
+                const pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM", contact.lastMessageAt, "Contactado");
+                setCheckpoint(state, contact, "influencer", pageId);
+                existingInfluencers.push({ id: pageId, name });
+                return { type: "influencer", summary: { nome: name } };
+            }
+            catch (err) {
+                log.error("leads_instagram_scan.influencer_write_failed", { contactId: contact.id, message: errMsg(err) });
+                return null; // leave checkpoint untouched — retry next run
+            }
+        }
+        // intent === "parceiro" — same "we contacted them, still waiting to
+        // hear back" posture as before, Status="Contactado" not the default
+        // "A contactar".
+        const dup = findDuplicateName(name, existingPartners);
+        if (dup) {
+            setCheckpoint(state, contact, "parceiro", null);
+            log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
+            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
         }
         try {
             const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "Contactado", contact.lastMessageAt);
             setCheckpoint(state, contact, "parceiro", pageId);
+            existingPartners.push({ id: pageId, name });
             return { type: "partner", summary: { nome: name } };
         }
         catch (err) {
@@ -290,10 +366,17 @@ async function processContact(contact, customers, activity, state) {
         return null;
     }
     if (classification === "parceiro") {
+        const dup = findDuplicateName(name, existingPartners);
+        if (dup) {
+            setCheckpoint(state, contact, classification, null);
+            log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
+            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
+        }
         let pageId;
         try {
             pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "A contactar", contact.lastMessageAt);
             setCheckpoint(state, contact, classification, pageId);
+            existingPartners.push({ id: pageId, name });
         }
         catch (err) {
             log.error("leads_instagram_scan.partner_write_failed", { contactId: contact.id, message: errMsg(err) });
@@ -307,10 +390,17 @@ async function processContact(contact, customers, activity, state) {
         return { type: "partner", summary: { nome: name } };
     }
     if (classification === "influencer") {
+        const dup = findDuplicateName(name, existingInfluencers);
+        if (dup) {
+            setCheckpoint(state, contact, classification, null);
+            log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
+            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+        }
         let pageId;
         try {
             pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM", contact.lastMessageAt);
             setCheckpoint(state, contact, classification, pageId);
+            existingInfluencers.push({ id: pageId, name });
         }
         catch (err) {
             log.error("leads_instagram_scan.influencer_write_failed", { contactId: contact.id, message: errMsg(err) });
@@ -357,11 +447,15 @@ export async function run() {
     let contacts;
     let customers;
     let activity;
+    let existingPartners;
+    let existingInfluencers;
     try {
-        [contacts, customers, activity] = await Promise.all([
+        [contacts, customers, activity, existingPartners, existingInfluencers] = await Promise.all([
             fetchInstagramContactsWithMessages(),
             fetchAllCustomerNames(),
             fetchAllVisitHistory(),
+            notion.getAllPartnerContacts(),
+            notion.getAllInfluencerContacts(),
         ]);
     }
     catch (err) {
@@ -372,6 +466,7 @@ export async function run() {
     const createdLeads = [];
     const createdPartners = [];
     const createdInfluencers = [];
+    const flaggedDuplicates = [];
     let skippedExcluded = 0;
     let skippedNoNewActivity = 0;
     for (const contact of contacts) {
@@ -401,7 +496,7 @@ export async function run() {
             skippedNoNewActivity++;
             continue;
         }
-        const result = await processContact(contact, customers, activity, state);
+        const result = await processContact(contact, customers, activity, existingPartners, existingInfluencers, state);
         saveState(state);
         if (result?.type === "lead")
             createdLeads.push(result.summary);
@@ -409,6 +504,8 @@ export async function run() {
             createdPartners.push(result.summary);
         if (result?.type === "influencer")
             createdInfluencers.push(result.summary);
+        if (result?.type === "duplicate")
+            flaggedDuplicates.push(result.summary);
     }
     log.info("leads_instagram_scan.done", {
         totalContacts: contacts.length,
@@ -417,6 +514,7 @@ export async function run() {
         createdLeads: createdLeads.length,
         createdPartners: createdPartners.length,
         createdInfluencers: createdInfluencers.length,
+        flaggedDuplicates: flaggedDuplicates.length,
     });
     for (const message of formatLeadsDigests(createdLeads)) {
         try {
@@ -443,6 +541,15 @@ export async function run() {
         }
         catch (err) {
             log.error("leads_instagram_scan.influencers_send_failed", { message: errMsg(err) });
+        }
+    }
+    for (const message of formatDuplicateCandidatesDigests(flaggedDuplicates)) {
+        try {
+            const messageId = await sendGroupMessage(message);
+            log.info("leads_instagram_scan.duplicates_posted", { messageId });
+        }
+        catch (err) {
+            log.error("leads_instagram_scan.duplicates_send_failed", { message: errMsg(err) });
         }
     }
 }

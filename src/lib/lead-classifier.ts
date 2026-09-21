@@ -21,6 +21,7 @@ const PROMPT_FILES = {
   partnerEnrichment: "../prompts/partner-enrichment.md",
   influencerEnrichment: "../prompts/influencer-enrichment.md",
   relationshipLogUpdate: "../prompts/relationship-log-update.md",
+  outreachIntent: "../prompts/outreach-intent.md",
 } as const;
 type PromptKey = keyof typeof PROMPT_FILES;
 
@@ -236,4 +237,21 @@ export async function classifyInstagramDM(text: string): Promise<InstagramDMClas
   if (answer.startsWith("PARCEIRO")) return "parceiro";
   if (answer.startsWith("INFLUENCER")) return "influencer";
   return "nenhum";
+}
+
+/**
+ * For a cold-outreach contact (the studio messaged them, they never
+ * replied — see hasInboundMessage) — `text` should be just OUR OWN
+ * message, not a transcript. Until 2026-09-21 every such contact was
+ * routed into Partner Pipeline unconditionally; found in production that
+ * the team's own influencer-outreach template ("achamos que fazes match
+ * com a nossa vibe, vem experimentar uma aula") was going there too
+ * (e.g. Márcia Soares), alongside real partner outreach (e.g.
+ * Wanderlust's goodie-bag ask) — this call tells them apart. Defaults to
+ * "parceiro" on an API error or unrecognized answer, matching the
+ * pre-2026-09-21 behavior as the safe fallback.
+ */
+export async function classifyOutreachIntent(text: string): Promise<"parceiro" | "influencer"> {
+  const answer = await callClassifier(text, "outreachIntent");
+  return answer.startsWith("INFLUENCER") ? "influencer" : "parceiro";
 }

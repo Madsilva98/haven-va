@@ -100,3 +100,29 @@ export function formatInfluencerCandidatesDigests(newInfluencers: NewInfluencerS
         : `📸 *${total} potencial(is) influencer(s) via Instagram:*`,
   );
 }
+
+/**
+ * Instagram contacts whose name fuzzy-matched an existing Partner/
+ * Influencer Pipeline row closely enough that leads-instagram-scan.ts
+ * skipped creating a page rather than risk a silent duplicate (e.g.
+ * "Wanderlust" already existing from the Outlook partnerships sync, then
+ * "Wanderlust_Portugal" showing up via Instagram a week later — found in
+ * production 2026-09-21, no dedup existed at all before this). Never
+ * auto-merged — a human decides whether it's really the same contact.
+ */
+export interface DuplicateCandidateSummary {
+  nome: string;
+  existente: string;
+  pipeline: "Partner Pipeline" | "Influencer Pipeline";
+}
+
+export function formatDuplicateCandidatesDigests(duplicates: DuplicateCandidateSummary[]): string[] {
+  const lines = duplicates.map((d) => `• ${d.nome} — parece igual a "${d.existente}" (${d.pipeline})`);
+  return chunkDigest(
+    lines,
+    (total, part, parts) =>
+      parts > 1
+        ? `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente (parte ${part}/${parts}):*`
+        : `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente:*`,
+  );
+}
