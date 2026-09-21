@@ -5,24 +5,27 @@
  * "active", "attended", "paused" or "utilization"; it reads them:
  *
  * - Roster: paying cycles in v_pulse_membership_state overlapping the
- *   DATA date (max(cycle_starts_at) <= today), never the calendar — a
- *   renewal after the last import is not a churn (Tatyana Khvesko, case
- *   #6); Cancelation scheduled and pause-scheduled (NULL) are paying
- *   (Andreia taboleiros, case #5); a stale Active row in
- *   kenko_subscriptions is not (Esen Sekerkarar, case #1). Names, emails
- *   and phones come from v_pulse_member_identity on member_id.
+ *   DATA date (v_pulse_data_as_of), never the calendar — a renewal after
+ *   the last import is not a churn (Tatyana Khvesko, case #6); Cancelation
+ *   scheduled and pause-scheduled (NULL) are paying (Andreia taboleiros,
+ *   case #5); a stale Active row in kenko_subscriptions is not (Esen
+ *   Sekerkarar, case #1). Tenure (member_since) from v_pulse_member_tenure;
+ *   names, emails and phones from v_pulse_member_identity on member_id.
  * - Signal 1 "Sem reservas 14+ dias": v_pulse_member_activity's
  *   next_or_last_booked (Booked/Waitlist class days; a future booking is
- *   engagement), measured from the later of the member's continuous
- *   tenure start or the end of their most recent stretched (paused) cycle
- *   in v_pulse_pause_history — Sofia Barata, paused 27/07-27/08, must not
- *   read as "64 dias sem reservar" (2026-09-21).
+ *   engagement), measured from the later of member_since or the end of
+ *   the member's most recent stretched (paused) cycle in
+ *   v_pulse_pause_history — Sofia Barata, paused 27/07-27/08, must not
+ *   read as "64 dias sem reservar" (2026-09-21). That cycle_end is the
+ *   next charge, not the return date (case #2): the person was back by
+ *   then at the latest, so the detail says "de volta até dd/mm". A member
+ *   whose pause is_current is skipped outright.
  * - Signal 2 "Pagamento falhado": v_pulse_failed_payments.failed_45d > 0.
  * - Signal 3 "Baixa utilização": v_pulse_utilization_monthly under 50% in
- *   EACH of the last 3 full calendar months before the data date, skipping
- *   months the view marks had_pause (Raquel Saraiva, Francesca
- *   Buoncristiani, 2026-09-21), months the member had not yet joined for
- *   the whole month, and Unlimited plans (allowance NULL).
+ *   EACH of the last 3 full calendar months before the data date, reading
+ *   only is_full_month rows (case #23) without had_pause (Raquel Saraiva,
+ *   Francesca Buoncristiani, 2026-09-21), and never Unlimited (allowance
+ *   NULL).
  *
  * The thresholds themselves (14 days, 45 days, 50% × 3 months) were
  * empirically validated in session against churned-vs-active members —
@@ -30,9 +33,8 @@
  * list lives here: the views exclude staff.
  */
 import { log } from "./log.js";
-import { activeMembersAsOf, computeDataAsOf, fetchFailedPayments, fetchMemberActivity, fetchMemberIdentity, fetchMembershipState, fetchPauseHistory, fetchUtilizationMonthly, } from "./pulse-views.js";
+import { activeMembersAsOf, fetchDataAsOf, fetchFailedPayments, fetchMemberActivity, fetchMemberIdentity, fetchMembershipState, fetchMemberTenure, fetchPauseHistory, fetchUtilizationMonthly, } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonDateString } from "./tz.js";
 const NO_BOOKING_GAP_DAYS = 14;
 const UNDERUSE_PCT = 50;
 const UNDERUSE_MONTHS = 3;
@@ -76,7 +78,10 @@ export function computeChurnFlags(inputs) {
         utilByMember.set(u.member_id, byMonth);
     }
     const lastPauseEndByMember = new Map();
+    const pausedNow = new Set();
     for (const p of pauseHistory) {
+        if (p.is_current)
+            pausedNow.add(p.member_id);
         const end = p.cycle_end?.slice(0, 10);
         if (!end || end > asOf)
             continue;
@@ -87,24 +92,29 @@ export function computeChurnFlags(inputs) {
     const months = fullMonthsBefore(asOf, UNDERUSE_MONTHS);
     for (const m of members) {
         const signals = [];
-        // Signal 1 — the stretch to judge starts at the later of tenure start
-        // and the most recent pause's cycle end; the view's next_or_last_booked
-        // is the latest Booked/Waitlist class day, future included.
-        const pauseEnd = lastPauseEndByMember.get(m.memberId);
-        const stretchStart = pauseEnd && pauseEnd > m.memberSince ? pauseEnd : m.memberSince;
-        const resumedFromPause = stretchStart === pauseEnd;
-        const tenureDays = daysBetween(stretchStart, asOf);
-        if (tenureDays >= NO_BOOKING_GAP_DAYS) {
-            const booked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
-            const lastInStretch = booked && booked >= stretchStart ? booked : null;
-            const gapDays = lastInStretch ? daysBetween(lastInStretch, asOf) : tenureDays;
-            if (gapDays > NO_BOOKING_GAP_DAYS) {
-                const detail = lastInStretch
-                    ? `${Math.round(gapDays)} dias sem reservar (última aula marcada: ${formatDatePt(lastInStretch)})`
-                    : resumedFromPause
-                        ? `${Math.round(gapDays)} dias sem reservar desde que voltou da pausa (${formatDatePt(stretchStart)})`
-                        : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
-                signals.push({ type: "Sem reservas 14+ dias", detail });
+        // Signal 1 — the stretch to judge starts at the later of member_since
+        // and the most recent past pause's cycle_end (the next charge: they were
+        // back by then at the latest, the exact return date is not in the
+        // export — case #2). A pause that reads Paused right now is skipped:
+        // nothing to judge yet. The view's next_or_last_booked is the latest
+        // Booked/Waitlist class day, future included.
+        if (!pausedNow.has(m.memberId)) {
+            const pauseEnd = lastPauseEndByMember.get(m.memberId);
+            const stretchStart = pauseEnd && pauseEnd > m.memberSince ? pauseEnd : m.memberSince;
+            const resumedFromPause = stretchStart === pauseEnd;
+            const tenureDays = daysBetween(stretchStart, asOf);
+            if (tenureDays >= NO_BOOKING_GAP_DAYS) {
+                const booked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
+                const lastInStretch = booked && booked >= stretchStart ? booked : null;
+                const gapDays = lastInStretch ? daysBetween(lastInStretch, asOf) : tenureDays;
+                if (gapDays > NO_BOOKING_GAP_DAYS) {
+                    const detail = lastInStretch
+                        ? `${Math.round(gapDays)} dias sem reservar (última aula marcada: ${formatDatePt(lastInStretch)})`
+                        : resumedFromPause
+                            ? `${Math.round(gapDays)} dias sem reservar desde a pausa (de volta até ${formatDatePt(stretchStart)})`
+                            : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
+                    signals.push({ type: "Sem reservas 14+ dias", detail });
+                }
             }
         }
         // Signal 2 — a failed payment in the last 45 days (the view counts them).
@@ -113,17 +123,20 @@ export function computeChurnFlags(inputs) {
             signals.push({ type: "Pagamento falhado", detail: `pagamento falhado a ${formatDatePt(failed.last_failed_on)}` });
         }
         // Signal 3 — under 50% in each of the last 3 full months, all three
-        // present and clean (no pause overlap, joined before the month began,
-        // plan with an allowance).
+        // present and clean: is_full_month (the view's word on "member for the
+        // whole month"), no pause overlap, plan with an allowance.
         const byMonth = utilByMember.get(m.memberId);
         if (byMonth) {
             const stats = months.map((month) => {
                 const u = byMonth.get(month);
-                if (!u || u.in_progress || u.had_pause || u.allowance === null || u.utilization_pct === null)
+                if (!u || !u.is_full_month || u.had_pause || u.allowance === null || u.utilization_pct === null)
                     return null;
-                if (m.memberSince > month)
-                    return null; // not a member for the whole month
-                return { month, pct: u.utilization_pct };
+                // Number(): utilization_pct is NUMERIC, which a Postgres driver may
+                // hand over as a string. src/lib/studio-db.ts registers a parser so
+                // it arrives as a number, but the average below silently prints
+                // nonsense (0 + "25" + "0" + "0" = "02500" / 3 = 833%) if that ever
+                // stops being true — caught against real rows, 2026-09-21.
+                return { month, pct: Number(u.utilization_pct) };
             });
             if (stats.every((s) => s !== null) && stats.every((s) => s.pct < UNDERUSE_PCT)) {
                 const parts = stats
@@ -152,25 +165,26 @@ export function computeChurnFlags(inputs) {
  * Returns empty (and logs a warn) if the studio connection isn't
  * configured — same graceful no-op as src/lib/birthdays.ts.
  */
-export async function fetchChurnFlags(now = new Date()) {
+export async function fetchChurnFlags() {
     if (!isStudioDbAvailable()) {
         log.warn("churn_signals.fetch_skipped", { reason: "studio_db_not_configured" });
         return { flags: [], activeEmails: new Set(), asOf: null };
     }
-    const [stateRows, pauseHistory, activityRows, failedRows, utilization, identity] = await Promise.all([
+    const [asOf, stateRows, tenureRows, pauseHistory, activityRows, failedRows, utilization, identity] = await Promise.all([
+        fetchDataAsOf(),
         fetchMembershipState(),
+        fetchMemberTenure(),
         fetchPauseHistory(),
         fetchMemberActivity(),
         fetchFailedPayments(),
         fetchUtilizationMonthly(),
         fetchMemberIdentity(),
     ]);
-    const asOf = computeDataAsOf(stateRows, lisbonDateString(now));
     if (!asOf) {
         log.warn("churn_signals.no_data_as_of", { rows: stateRows.length });
         return { flags: [], activeEmails: new Set(), asOf: null };
     }
-    const active = activeMembersAsOf(stateRows, asOf);
+    const active = activeMembersAsOf(stateRows, asOf, new Map(tenureRows.map((t) => [t.member_id, t])));
     const identityByMember = new Map(identity.map((r) => [r.member_id, r]));
     const members = [];
     for (const a of active.values()) {

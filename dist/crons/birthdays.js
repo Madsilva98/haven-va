@@ -4,8 +4,8 @@ import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
 import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatBirthdayDigest } from "../messages/birthdays.js";
 /**
- * Daily birthday digest. Looks up kenko_customers in Studio Supabase for
- * birthdays TODAY only (no upcoming-week preview — dropped 2026-09-15,
+ * Daily birthday digest. Looks up v_pulse_member_identity (filtered to the
+ * active audience, see src/lib/birthdays.ts) for birthdays TODAY only (no upcoming-week preview — dropped 2026-09-15,
  * founder's call), sends one formatted message to the founders' group.
  * Silent (no message sent) when nobody has a birthday today.
  *
@@ -13,8 +13,9 @@ import { formatBirthdayDigest } from "../messages/birthdays.js";
  */
 export async function run() {
     let birthdays;
+    let asOf;
     try {
-        birthdays = await fetchUpcomingBirthdays(new Date(), 0);
+        ({ birthdays, asOf } = await fetchUpcomingBirthdays(new Date(), 0));
     }
     catch (err) {
         log.error("cron.birthdays.fetch_failed", {
@@ -28,11 +29,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [
-            PULSE_VIEW.membershipState,
-            PULSE_VIEW.classpackState,
-            PULSE_VIEW.introHolderState,
-        ]);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.memberIdentity, PULSE_VIEW.membershipState, PULSE_VIEW.classpackState, PULSE_VIEW.introHolderState], asOf);
         log.info("cron.birthdays.posted", { messageId, today: birthdays.length });
     }
     catch (err) {

@@ -115,7 +115,7 @@ describe("leads-reconcile", () => {
     hasRealPurchase.mockResolvedValue(true);
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map([
-        ["intro-lead@x.com", { memberId: "m-intro", email: "intro-lead@x.com", name: "Intro Lead", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
+        ["intro-lead@x.com", { memberId: "m-intro", email: "intro-lead@x.com", name: "Intro Lead", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15"), expiryConfirmed: true }],
       ]),
       convertedMemberIds: new Set(), // v_pulse_intro_conversion: neither converted nor converted_pack
     });
@@ -134,7 +134,7 @@ describe("leads-reconcile", () => {
     );
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map([
-        ["converted@x.com", { memberId: "m-converted", email: "converted@x.com", name: "Converted", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
+        ["converted@x.com", { memberId: "m-converted", email: "converted@x.com", name: "Converted", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15"), expiryConfirmed: true }],
       ]),
       convertedMemberIds: new Set(["m-converted"]), // v_pulse_intro_conversion says converted
     });

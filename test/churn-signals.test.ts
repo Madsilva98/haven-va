@@ -35,6 +35,7 @@ function util(memberId: string, month: string, pct: number | null, over: Partial
     utilization_pct: pct,
     had_pause: false,
     in_progress: false,
+    is_full_month: true,
     ...over,
   };
 }
@@ -92,10 +93,22 @@ describe("computeChurnFlags — signal 1, Sem reservas 14+ dias", () => {
       inputs({
         members: [member("sofia", "8x Monthly | Premium", "2026-03-01")],
         activityByMember: new Map([["sofia", activity("sofia", "2026-07-20")]]),
-        pauseHistory: [{ member_id: "sofia", cycle_end: "2026-08-27" }],
+        pauseHistory: [{ member_id: "sofia", cycle_end: "2026-08-27", is_current: false }],
       }),
     );
-    expect(flags[0]!.signals[0]!.detail).toBe("22 dias sem reservar desde que voltou da pausa (27/08/2026)");
+    // cycle_end is the next charge, not the return date: "de volta até", never "voltou a"
+    expect(flags[0]!.signals[0]!.detail).toBe("22 dias sem reservar desde a pausa (de volta até 27/08/2026)");
+  });
+
+  it("skips signal 1 for a member whose pause reads Paused right now (is_current)", () => {
+    const flags = computeChurnFlags(
+      inputs({
+        members: [member("a")],
+        activityByMember: new Map([["a", activity("a", "2026-06-01")]]),
+        pauseHistory: [{ member_id: "a", cycle_end: "2026-10-15", is_current: true }],
+      }),
+    );
+    expect(types(flags, "a")).toEqual([]);
   });
 
   it("does not let a pause that ended less than 14 days ago flag anyone", () => {
@@ -103,18 +116,18 @@ describe("computeChurnFlags — signal 1, Sem reservas 14+ dias", () => {
       inputs({
         members: [member("a")],
         activityByMember: new Map([["a", activity("a", "2026-06-01")]]),
-        pauseHistory: [{ member_id: "a", cycle_end: "2026-09-10" }],
+        pauseHistory: [{ member_id: "a", cycle_end: "2026-09-10", is_current: false }],
       }),
     );
     expect(types(flags, "a")).toEqual([]);
   });
 
-  it("ignores a pause cycle that ends after the data date (still paused = not on the roster anyway)", () => {
+  it("ignores a past-status pause cycle whose cycle_end is after the data date", () => {
     const flags = computeChurnFlags(
       inputs({
         members: [member("a")],
         activityByMember: new Map([["a", activity("a", "2026-08-01")]]),
-        pauseHistory: [{ member_id: "a", cycle_end: "2026-10-15" }],
+        pauseHistory: [{ member_id: "a", cycle_end: "2026-10-15", is_current: false }],
       }),
     );
     expect(types(flags, "a")).toEqual(["Sem reservas 14+ dias"]);
@@ -177,12 +190,31 @@ describe("computeChurnFlags — signal 3, Baixa utilização", () => {
     expect(types(flags, "a")).toEqual([]);
   });
 
-  it("does not flag a member who was not a member for the whole window (the found-and-fixed bug)", () => {
+  it("averages a NUMERIC utilization_pct that arrives as a string, instead of concatenating it", () => {
     const flags = computeChurnFlags(
       inputs({
-        members: [member("a", "4x Monthly | Premium", "2026-07-15")],
+        members: [member("a")],
         activityByMember: engaged("a"),
-        utilization: [util("a", "2026-07-01", 0), util("a", "2026-08-01", 25)],
+        utilization: [
+          { ...util("a", "2026-06-01", 0), utilization_pct: "0" as unknown as number },
+          { ...util("a", "2026-07-01", 0), utilization_pct: "0" as unknown as number },
+          { ...util("a", "2026-08-01", 25), utilization_pct: "25" as unknown as number },
+        ],
+      }),
+    );
+    expect(flags[0]!.signals[0]!.detail).toBe("8% de utilização média nos últimos 3 meses (jun.: 0%, jul.: 0%, ago.: 25%)");
+  });
+
+  it("does not flag a member whose join month is not a full month — is_full_month is the view's word (case #23)", () => {
+    const flags = computeChurnFlags(
+      inputs({
+        members: [member("a", "4x Monthly | Premium", "2026-06-28")],
+        activityByMember: engaged("a"),
+        utilization: [
+          util("a", "2026-06-01", 0, { is_full_month: false }), // joined on the 28th
+          util("a", "2026-07-01", 25),
+          util("a", "2026-08-01", 25),
+        ],
       }),
     );
     expect(types(flags, "a")).toEqual([]);

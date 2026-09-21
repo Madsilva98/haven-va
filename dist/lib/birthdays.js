@@ -15,9 +15,8 @@
  * Used by the daily birthdays cron — see src/crons/birthdays.ts.
  */
 import { log } from "./log.js";
-import { activeMembersAsOf, computeDataAsOf, fetchClasspackState, fetchIntroHolderState, fetchMemberIdentity, fetchMembershipState, } from "./pulse-views.js";
+import { activeMembersAsOf, fetchClasspackState, fetchDataAsOf, fetchIntroHolderState, fetchMemberIdentity, fetchMembershipState, } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonDateString } from "./tz.js";
 /**
  * Pure — no I/O. The birthday audience as of the data date: a paying
  * member, a class-pack holder with credits, or an intro-pack holder.
@@ -33,16 +32,16 @@ export function activeMemberIdsForBirthdays(members, classpacks, introHolders, a
             ids.add(w.member_id);
     return ids;
 }
-async function fetchActiveMemberIds(now) {
-    const [stateRows, classpacks, introHolders] = await Promise.all([
+async function fetchActiveMemberIds() {
+    const [asOf, stateRows, classpacks, introHolders] = await Promise.all([
+        fetchDataAsOf(),
         fetchMembershipState(),
         fetchClasspackState(),
         fetchIntroHolderState(),
     ]);
-    const asOf = computeDataAsOf(stateRows, lisbonDateString(now));
     if (!asOf)
-        return new Set();
-    return activeMemberIdsForBirthdays(activeMembersAsOf(stateRows, asOf), classpacks, introHolders, asOf);
+        return { ids: new Set(), asOf: null };
+    return { ids: activeMemberIdsForBirthdays(activeMembersAsOf(stateRows, asOf), classpacks, introHolders, asOf), asOf };
 }
 /**
  * Returns the birthdays falling between `from` (inclusive) and
@@ -57,9 +56,9 @@ async function fetchActiveMemberIds(now) {
 export async function fetchUpcomingBirthdays(from, daysAhead) {
     if (!isStudioDbAvailable()) {
         log.warn("birthdays.fetch_skipped", { reason: "studio_db_not_configured" });
-        return [];
+        return { birthdays: [], asOf: null };
     }
-    const [identity, activeIds] = await Promise.all([fetchMemberIdentity(), fetchActiveMemberIds(from)]);
+    const [identity, { ids: activeIds, asOf }] = await Promise.all([fetchMemberIdentity(), fetchActiveMemberIds()]);
     const allRows = identity
         .filter((r) => r.contact_email && r.date_of_birth)
         .map((r) => ({
@@ -69,8 +68,8 @@ export async function fetchUpcomingBirthdays(from, daysAhead) {
         date_of_birth: r.date_of_birth,
     }));
     const rows = allRows.filter((r) => r.member_id && activeIds.has(r.member_id));
-    log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length });
-    return filterUpcomingBirthdays(rows, from, daysAhead);
+    log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length, asOf });
+    return { birthdays: filterUpcomingBirthdays(rows, from, daysAhead), asOf };
 }
 /**
  * Pure filter — exported for unit tests.

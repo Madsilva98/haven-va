@@ -23,8 +23,9 @@ export async function run() {
         return;
     }
     let packs;
+    let asOf;
     try {
-        packs = await findExpiringIntroPacksToWatch();
+        ({ packs, asOf } = await findExpiringIntroPacksToWatch());
     }
     catch (err) {
         log.error("intro_pack_expiring.fetch_failed", { message: errMsg(err) });
@@ -36,7 +37,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.memberActivity]);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion], asOf);
         log.info("intro_pack_expiring.posted", { messageId, count: packs.length });
     }
     catch (err) {

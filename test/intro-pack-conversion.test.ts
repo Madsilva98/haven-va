@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { describePostExpiryVisit, selectFirstTrackedPacks } from "../src/lib/intro-pack-conversion.js";
+import {
+  describePostExpiryVisit,
+  isExpiringPackToWatch,
+  selectFirstTrackedPacks,
+} from "../src/lib/intro-pack-conversion.js";
 import { memberIdFromEmail, type IntroPurchaseRow } from "../src/lib/pulse-views.js";
 
 function purchase(
@@ -23,6 +27,7 @@ function purchase(
     is_open_day: false,
     is_valentine: false,
     is_for_members: false,
+    visits_in_pack: 0,
     ...over,
   };
 }
@@ -59,6 +64,18 @@ describe("selectFirstTrackedPacks", () => {
     expect(out.get("nobody@x.com")?.name).toBe("nobody@x.com");
   });
 
+  it("marks whether Kenko confirmed the expiry — a modeled date on a never-activated pack is not an ended pack", () => {
+    const out = selectFirstTrackedPacks(
+      [
+        purchase("k@x.com", "2-Class", "2026-08-01", "2026-08-22"),
+        purchase("m@x.com", "10-Day", "2026-07-29", "2026-08-08", { intro_end_source: "modeled", kenko_start: null }),
+      ],
+      customers,
+    );
+    expect(out.get("k@x.com")?.expiryConfirmed).toBe(true);
+    expect(out.get("m@x.com")?.expiryConfirmed).toBe(false);
+  });
+
   it("lower-cases the email key", () => {
     const out = selectFirstTrackedPacks([purchase("Mixed@X.com", "10-Day", "2026-08-01", "2026-08-11")], customers);
     expect([...out.keys()]).toEqual(["mixed@x.com"]);
@@ -84,5 +101,22 @@ describe("describePostExpiryVisit", () => {
 
   it("returns null when the last visit exactly equals the expiry instant", () => {
     expect(describePostExpiryVisit({ expiresAt, lastVisit: new Date(expiresAt) })).toBeNull();
+  });
+});
+
+describe("isExpiringPackToWatch — founder's spec 2026-09-20, on visits_in_pack", () => {
+  it("2-Class: exactly one class taken on the pack", () => {
+    expect(isExpiringPackToWatch("2-Class", 1)).toBe(true);
+    expect(isExpiringPackToWatch("2-Class", 0)).toBe(false);
+    expect(isExpiringPackToWatch("2-Class", 2)).toBe(false);
+  });
+
+  it("10-Day: more than five classes taken on the pack", () => {
+    expect(isExpiringPackToWatch("10-Day", 6)).toBe(true);
+    expect(isExpiringPackToWatch("10-Day", 5)).toBe(false);
+  });
+
+  it("no other pack label qualifies", () => {
+    expect(isExpiringPackToWatch("5-Class", 3)).toBe(false);
   });
 });

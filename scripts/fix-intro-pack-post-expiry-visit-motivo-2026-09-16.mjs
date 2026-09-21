@@ -41,7 +41,7 @@ async function main() {
   // cutoffDays=0 — these leads are already written; we just need the
   // recomputed lastVisit/expiresAt/daysSinceExpiry per email, not a fresh
   // day-21 gate.
-  const candidates = await findUnconvertedIntroPacks(0);
+  const { candidates } = await findUnconvertedIntroPacks(0);
   const byEmail = new Map(candidates.map((c) => [c.email, c]));
 
   let fixed = 0;

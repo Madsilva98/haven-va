@@ -29,9 +29,10 @@ export async function run(): Promise<void> {
     return;
   }
 
-  let candidates: Awaited<ReturnType<typeof findUnconvertedIntroPacks>>;
+  let candidates: Awaited<ReturnType<typeof findUnconvertedIntroPacks>>["candidates"];
+  let asOf: string | null;
   try {
-    candidates = await findUnconvertedIntroPacks();
+    ({ candidates, asOf } = await findUnconvertedIntroPacks());
   } catch (err) {
     log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
     return;
@@ -82,11 +83,11 @@ export async function run(): Promise<void> {
     return;
   }
   try {
-    const messageId = await sendGroupMessageWithSource(message, [
-      PULSE_VIEW.introPurchase,
-      PULSE_VIEW.introConversion,
-      PULSE_VIEW.memberActivity,
-    ]);
+    const messageId = await sendGroupMessageWithSource(
+      message,
+      [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion, PULSE_VIEW.memberActivity],
+      asOf,
+    );
     log.info("leads_intro_pack.posted", { messageId, count: created.length, skippedExisting });
   } catch (err) {
     log.error("leads_intro_pack.send_failed", { message: errMsg(err) });

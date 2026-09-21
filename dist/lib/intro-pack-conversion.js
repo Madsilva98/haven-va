@@ -9,8 +9,11 @@
  *   converted_pack (a real 5x/10x pack; a drop-in is not a conversion, case
  *   #9). Either one means "never chase as a lead".
  * - v_pulse_member_activity: last_visit / visit_count (checkin_status Yes
- *   alone, Roberta Dias, case #10).
+ *   alone, Roberta Dias, case #10) — lifetime, for the "voltou depois"
+ *   note. Pack use is v_pulse_intro_purchase.visits_in_pack.
  * - v_pulse_member_identity: name and phone, on member_id.
+ * - v_pulse_data_as_of: the one "today" every comparison and every
+ *   "dados até" line uses.
  * Only 2-Class and 10-Day packs are tracked here — the ones with real
  * volume, founder's scope; the view also labels 5-Class / Open Day /
  * Intro other, which are left alone.
@@ -23,9 +26,9 @@
  */
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { fetchIntroConversion, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, } from "./pulse-views.js";
+import { fetchDataAsOf, fetchIntroConversion, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonDateString, lisbonNaiveToUtcIso } from "./tz.js";
+import { lisbonNaiveToUtcIso } from "./tz.js";
 /** The view's `pack` labels this bot tracks. */
 export const TRACKED_PACKS = ["2-Class", "10-Day"];
 export const DEFAULT_CUTOFF_DAYS = 21;
@@ -69,6 +72,7 @@ export function selectFirstTrackedPacks(rows, customers) {
             packName: r.item_name,
             purchasedAt,
             expiresAt: lisbonEndOfDay(r.intro_end),
+            expiryConfirmed: r.intro_end_source === "kenko",
         });
     }
     return out;
@@ -98,18 +102,24 @@ export function describePostExpiryVisit(c) {
 // Exported for src/crons/leads-reconcile.ts, which asks the same "did this
 // Intro Pack lead convert" question for rows already in Notion.
 export async function loadConversionCheckData() {
-    const [purchases, conversions, activity, customers] = await Promise.all([
+    const [asOf, purchases, conversions, activity, customers] = await Promise.all([
+        fetchDataAsOf(),
         fetchIntroPurchases(),
         fetchIntroConversion(),
         fetchMemberActivity(),
         fetchAllCustomerNames(),
     ]);
     return {
+        asOf,
         firstPackByEmail: selectFirstTrackedPacks(purchases, customers),
         convertedMemberIds: new Set(conversions.filter((c) => c.converted || c.converted_pack).map((c) => c.member_id)),
         visitsByMember: visitStats(activity),
         customers,
     };
+}
+/** "Now" for every intro-pack comparison: the end of the data-as-of day. */
+function asOfInstant(asOf) {
+    return lisbonEndOfDay(asOf);
 }
 function toUnconverted(row, now, visitsByMember, customers) {
     const visits = visitsByMember.get(row.memberId);
@@ -127,71 +137,97 @@ function toUnconverted(row, now, visitsByMember, customers) {
 }
 /**
  * Standing weekly signal: intro pack finished at least `cutoffDays` ago
- * (default 21) and the person never converted since.
+ * (default 21) as of the data date, and the person never converted since.
+ *
+ * Only packs whose expiry Kenko confirmed (intro_end_source = 'kenko'). A
+ * modeled intro_end on a pack that was bought and never activated (ledger
+ * Active, no expiry, full credits, 0 visits — 42 people, 26 of them still
+ * open, on 2026-09-21) would otherwise read as "terminou há N dias, sem
+ * converter" for a pack that never started. Those are a different
+ * situation ("bought, never came") — pulse_cases #25 asks the view to say
+ * so explicitly; until then they are not leads here.
  */
-export async function findUnconvertedIntroPacks(cutoffDays = DEFAULT_CUTOFF_DAYS, now = new Date()) {
+export async function findUnconvertedIntroPacks(cutoffDays = DEFAULT_CUTOFF_DAYS) {
     if (!isStudioDbAvailable()) {
         log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
-        return [];
+        return { candidates: [], asOf: null };
     }
-    const { firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
-    const out = [];
+    const { asOf, firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
+    if (!asOf)
+        return { candidates: [], asOf: null };
+    const now = asOfInstant(asOf);
+    const candidates = [];
     for (const row of firstPackByEmail.values()) {
-        if (convertedMemberIds.has(row.memberId))
+        if (!row.expiryConfirmed || convertedMemberIds.has(row.memberId))
             continue;
         const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
         if (daysSinceExpiry >= cutoffDays)
-            out.push(toUnconverted(row, now, visitsByMember, customers));
+            candidates.push(toUnconverted(row, now, visitsByMember, customers));
     }
-    return out;
+    return { candidates, asOf };
+}
+/** Pure — no I/O. The two usage patterns worth a same-day nudge. */
+export function isExpiringPackToWatch(pack, visitsInPack) {
+    if (pack === "2-Class")
+        return visitsInPack === 1;
+    if (pack === "10-Day")
+        return visitsInPack > 5;
+    return false;
 }
 /**
- * Intro packs whose intro_end falls within `daysAhead` days (default 3),
- * filtered to the two usage patterns worth a proactive nudge before the
- * pack lapses — founder's spec, 2026-09-20, not empirically derived like
- * DEFAULT_CUTOFF_DAYS above:
- * - 2-Class: exactly 1 of the 2 classes attended so far.
- * - 10-Day: more than 5 classes attended already.
+ * Intro packs whose intro_end falls within `daysAhead` days (default 3) of
+ * the data date, not already converted (a member who bought a plan
+ * mid-pack needs no nudge), filtered to the two usage patterns worth a
+ * proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
+ * empirically derived like DEFAULT_CUTOFF_DAYS above:
+ * - 2-Class: exactly 1 of the 2 classes taken ON the pack (visits_in_pack).
+ * - 10-Day: more than 5 classes taken on the pack.
  * Used by src/crons/intro-pack-expiring.ts.
  */
-export async function findExpiringIntroPacksToWatch(daysAhead = 3, now = new Date()) {
+export async function findExpiringIntroPacksToWatch(daysAhead = 3) {
     if (!isStudioDbAvailable()) {
         log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_db_not_configured" });
-        return [];
+        return { packs: [], asOf: null };
     }
-    const today = lisbonDateString(now);
-    const until = lisbonDateString(new Date(now.getTime() + daysAhead * 86_400_000));
-    const [purchases, activity, customers] = await Promise.all([
+    const [asOf, purchases, conversions, customers] = await Promise.all([
+        fetchDataAsOf(),
         fetchIntroPurchases(),
-        fetchMemberActivity(),
+        fetchIntroConversion(),
         fetchAllCustomerNames(),
     ]);
-    const visitsByMember = visitStats(activity);
+    if (!asOf)
+        return { packs: [], asOf: null };
+    const until = addDays(asOf, daysAhead);
+    const converted = new Set(conversions.filter((c) => c.converted || c.converted_pack).map((c) => c.member_id));
     const names = nameByMemberId(customers);
-    const out = [];
+    const packs = [];
     for (const r of purchases) {
         if (!isTracked(r.pack) || r.is_open_day || r.is_valentine || r.is_for_members)
             continue;
-        if (r.intro_end < today || r.intro_end > until)
+        if (r.intro_end < asOf || r.intro_end > until)
             continue;
-        const visitCount = visitsByMember.get(r.member_id)?.count ?? 0;
-        if (r.pack === "2-Class" && visitCount !== 1)
+        if (converted.has(r.member_id))
             continue;
-        if (r.pack === "10-Day" && visitCount <= 5)
+        if (!isExpiringPackToWatch(r.pack, r.visits_in_pack))
             continue;
         const email = r.email.toLowerCase();
-        out.push({
+        packs.push({
             email,
             name: names.get(r.member_id) ?? email,
             phone: findPhoneByEmail(email, customers),
             pack: r.pack,
             packName: r.item_name,
             expiresAt: lisbonEndOfDay(r.intro_end),
-            visitCount,
+            visitCount: r.visits_in_pack,
         });
     }
-    out.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
-    return out;
+    packs.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
+    return { packs, asOf };
+}
+function addDays(iso, days) {
+    const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
 }
 /**
  * One-off backfill helper (scripts/backfill-intro-pack-summer-2026.mjs):
@@ -199,16 +235,21 @@ export async function findExpiringIntroPacksToWatch(daysAhead = 3, now = new Dat
  * converted, with NO day-count gate — the founder asked for this specific
  * window caught immediately, a one-time exception for the summer effect.
  */
-export async function findUnconvertedIntroPacksInRange(fromISO, toISO, now = new Date()) {
+export async function findUnconvertedIntroPacksInRange(fromISO, toISO) {
     if (!isStudioDbAvailable()) {
         log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
         return [];
     }
     const from = new Date(fromISO);
     const to = new Date(toISO);
-    const { firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
+    const { asOf, firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
+    if (!asOf)
+        return [];
+    const now = asOfInstant(asOf);
     const out = [];
     for (const row of firstPackByEmail.values()) {
+        if (!row.expiryConfirmed)
+            continue; // same reason as findUnconvertedIntroPacks
         if (row.expiresAt < from || row.expiresAt >= to)
             continue;
         if (convertedMemberIds.has(row.memberId))

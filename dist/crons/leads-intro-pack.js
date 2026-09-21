@@ -26,8 +26,9 @@ export async function run() {
         return;
     }
     let candidates;
+    let asOf;
     try {
-        candidates = await findUnconvertedIntroPacks();
+        ({ candidates, asOf } = await findUnconvertedIntroPacks());
     }
     catch (err) {
         log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
@@ -73,11 +74,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [
-            PULSE_VIEW.introPurchase,
-            PULSE_VIEW.introConversion,
-            PULSE_VIEW.memberActivity,
-        ]);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion, PULSE_VIEW.memberActivity], asOf);
         log.info("leads_intro_pack.posted", { messageId, count: created.length, skippedExisting });
     }
     catch (err) {

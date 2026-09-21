@@ -22,7 +22,7 @@ export function formatExpiringIntroPacksDigest(packs) {
     if (tenDay.length > 0) {
         lines.push("", "10-Day Unlimited — já fizeram mais de 5 aulas:");
         for (const p of tenDay) {
-            lines.push(`• ${p.name} — termina ${formatDate(p.expiresAt)}, ${p.visitCount} aulas${p.phone ? ` (${p.phone})` : ""}`);
+            lines.push(`• ${p.name} — termina ${formatDate(p.expiresAt)}, ${p.visitCount} aulas do pack${p.phone ? ` (${p.phone})` : ""}`);
         }
     }
     return lines.join("\n");

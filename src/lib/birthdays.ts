@@ -18,8 +18,8 @@
 import { log } from "./log.js";
 import {
   activeMembersAsOf,
-  computeDataAsOf,
   fetchClasspackState,
+  fetchDataAsOf,
   fetchIntroHolderState,
   fetchMemberIdentity,
   fetchMembershipState,
@@ -27,7 +27,6 @@ import {
   type PackWindowRow,
 } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonDateString } from "./tz.js";
 
 /**
  * Pure — no I/O. The birthday audience as of the data date: a paying
@@ -46,15 +45,15 @@ export function activeMemberIdsForBirthdays(
   return ids;
 }
 
-async function fetchActiveMemberIds(now: Date): Promise<Set<string>> {
-  const [stateRows, classpacks, introHolders] = await Promise.all([
+async function fetchActiveMemberIds(): Promise<{ ids: Set<string>; asOf: string | null }> {
+  const [asOf, stateRows, classpacks, introHolders] = await Promise.all([
+    fetchDataAsOf(),
     fetchMembershipState(),
     fetchClasspackState(),
     fetchIntroHolderState(),
   ]);
-  const asOf = computeDataAsOf(stateRows, lisbonDateString(now));
-  if (!asOf) return new Set();
-  return activeMemberIdsForBirthdays(activeMembersAsOf(stateRows, asOf), classpacks, introHolders, asOf);
+  if (!asOf) return { ids: new Set(), asOf: null };
+  return { ids: activeMemberIdsForBirthdays(activeMembersAsOf(stateRows, asOf), classpacks, introHolders, asOf), asOf };
 }
 
 export interface Birthday {
@@ -64,7 +63,7 @@ export interface Birthday {
   daysUntil: number; // 0 = today, 1 = tomorrow, ... 7 = a week away
 }
 
-interface KenkoCustomerRow {
+interface IdentityRow {
   member_id?: string;
   contact_name: string | null;
   contact_email: string;
@@ -84,14 +83,14 @@ interface KenkoCustomerRow {
 export async function fetchUpcomingBirthdays(
   from: Date,
   daysAhead: number,
-): Promise<Birthday[]> {
+): Promise<{ birthdays: Birthday[]; asOf: string | null }> {
   if (!isStudioDbAvailable()) {
     log.warn("birthdays.fetch_skipped", { reason: "studio_db_not_configured" });
-    return [];
+    return { birthdays: [], asOf: null };
   }
 
-  const [identity, activeIds] = await Promise.all([fetchMemberIdentity(), fetchActiveMemberIds(from)]);
-  const allRows: KenkoCustomerRow[] = identity
+  const [identity, { ids: activeIds, asOf }] = await Promise.all([fetchMemberIdentity(), fetchActiveMemberIds()]);
+  const allRows: IdentityRow[] = identity
     .filter((r) => r.contact_email && r.date_of_birth)
     .map((r) => ({
       member_id: r.member_id,
@@ -100,9 +99,9 @@ export async function fetchUpcomingBirthdays(
       date_of_birth: r.date_of_birth,
     }));
   const rows = allRows.filter((r) => r.member_id && activeIds.has(r.member_id));
-  log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length });
+  log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length, asOf });
 
-  return filterUpcomingBirthdays(rows, from, daysAhead);
+  return { birthdays: filterUpcomingBirthdays(rows, from, daysAhead), asOf };
 }
 
 /**
@@ -113,7 +112,7 @@ export async function fetchUpcomingBirthdays(
  * set. Annotates each match with `daysUntil`.
  */
 export function filterUpcomingBirthdays(
-  rows: KenkoCustomerRow[],
+  rows: IdentityRow[],
   from: Date,
   daysAhead: number,
 ): Birthday[] {

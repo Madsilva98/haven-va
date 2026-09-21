@@ -26,9 +26,10 @@ export async function run(): Promise<void> {
     return;
   }
 
-  let packs: Awaited<ReturnType<typeof findExpiringIntroPacksToWatch>>;
+  let packs: Awaited<ReturnType<typeof findExpiringIntroPacksToWatch>>["packs"];
+  let asOf: string | null;
   try {
-    packs = await findExpiringIntroPacksToWatch();
+    ({ packs, asOf } = await findExpiringIntroPacksToWatch());
   } catch (err) {
     log.error("intro_pack_expiring.fetch_failed", { message: errMsg(err) });
     return;
@@ -41,7 +42,11 @@ export async function run(): Promise<void> {
   }
 
   try {
-    const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.memberActivity]);
+    const messageId = await sendGroupMessageWithSource(
+      message,
+      [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion],
+      asOf,
+    );
     log.info("intro_pack_expiring.posted", { messageId, count: packs.length });
   } catch (err) {
     log.error("intro_pack_expiring.send_failed", { message: errMsg(err) });

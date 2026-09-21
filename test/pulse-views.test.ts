@@ -3,11 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeMembersAsOf,
-  computeDataAsOf,
-  continuousSince,
   isPulseView,
   memberIdFromEmail,
   type MembershipStateRow,
+  type MemberTenureRow,
 } from "../src/lib/pulse-views.js";
 
 // Real v_pulse_membership_state rows as of the 2026-09-18 Kenko import
@@ -27,23 +26,6 @@ describe("memberIdFromEmail", () => {
     expect(memberIdFromEmail("Sofia@Example.com")).toBe(memberIdFromEmail("sofia@example.com"));
     expect(memberIdFromEmail(" a@b.c")).not.toBe(memberIdFromEmail("a@b.c"));
     expect(memberIdFromEmail("a@b.c")).toMatch(/^[0-9a-f]{32}$/);
-  });
-});
-
-describe("computeDataAsOf", () => {
-  it("is the latest cycle start on or before today — 2026-09-18 on the pinned snapshot", () => {
-    expect(computeDataAsOf(fixture, "2026-09-21")).toBe("2026-09-18");
-  });
-
-  it("ignores cycle starts after today (a pre-scheduled renewal is not data)", () => {
-    expect(
-      computeDataAsOf([{ cycle_starts_at: "2026-10-01" }, { cycle_starts_at: "2026-09-10" }], "2026-09-21"),
-    ).toBe("2026-09-10");
-  });
-
-  it("returns null with no usable rows", () => {
-    expect(computeDataAsOf([], "2026-09-21")).toBeNull();
-    expect(computeDataAsOf([{ cycle_starts_at: null }], "2026-09-21")).toBeNull();
   });
 });
 
@@ -97,36 +79,6 @@ function cycle(
   };
 }
 
-describe("continuousSince", () => {
-  it("walks back over back-to-back cycles to the first one", () => {
-    const cycles = [
-      cycle("m", "2026-06-01", "2026-07-01"),
-      cycle("m", "2026-07-01", "2026-08-01"),
-      cycle("m", "2026-08-01", "2026-09-01"),
-    ];
-    expect(continuousSince(cycles, cycles[2])).toBe("2026-06-01");
-  });
-
-  it("stops at a gap wider than 3 days (a win-back restarts tenure)", () => {
-    const cycles = [cycle("m", "2026-01-01", "2026-02-01"), cycle("m", "2026-08-15", "2026-09-15")];
-    expect(continuousSince(cycles, cycles[1])).toBe("2026-08-15");
-  });
-
-  it("tolerates a 1-2 day billing gap", () => {
-    const cycles = [cycle("m", "2026-07-01", "2026-07-31"), cycle("m", "2026-08-02", "2026-09-02")];
-    expect(continuousSince(cycles, cycles[1])).toBe("2026-07-01");
-  });
-
-  it("breaks the chain at a non-paying (paused) cycle", () => {
-    const cycles = [
-      cycle("m", "2026-06-01", "2026-07-01"),
-      cycle("m", "2026-07-01", "2026-08-01", { is_paying_cycle: false, is_paused: true, status: "Paused" }),
-      cycle("m", "2026-08-01", "2026-09-01"),
-    ];
-    expect(continuousSince(cycles, cycles[2])).toBe("2026-08-01");
-  });
-});
-
 describe("activeMembersAsOf edge cases", () => {
   it("is empty when no cycle overlaps asOf", () => {
     expect(activeMembersAsOf([cycle("m", "2026-01-01", "2026-02-01")], "2026-09-18").size).toBe(0);
@@ -151,6 +103,22 @@ describe("activeMembersAsOf edge cases", () => {
       cycle("m", "2026-09-10", "2026-10-10", { tier: "8x" }),
     ];
     expect(activeMembersAsOf(rows, "2026-09-18").get("m")?.tier).toBe("8x");
+  });
+
+  it("takes memberSince from v_pulse_member_tenure, falling back to the live cycle start", () => {
+    const tenure: MemberTenureRow = {
+      member_id: "m",
+      first_start: "2025-11-01",
+      member_since: "2026-03-01",
+      run_ends: "2026-10-01",
+      continuous_days: 200,
+      cycles_in_run: 7,
+      runs_total: 2,
+    };
+    const rows = [cycle("m", "2026-09-01", "2026-10-01"), cycle("n", "2026-09-05", "2026-10-05")];
+    const active = activeMembersAsOf(rows, "2026-09-18", new Map([["m", tenure]]));
+    expect(active.get("m")?.memberSince).toBe("2026-03-01");
+    expect(active.get("n")?.memberSince).toBe("2026-09-05");
   });
 });
 

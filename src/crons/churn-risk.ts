@@ -23,7 +23,7 @@
  *    at their first-ever computed values). A details-only refresh isn't
  *    posted to the digest, since it's not new information for the founder.
  * 3. Reconciles every OTHER still-open row (i.e. not touched by #2 because
- *    Studio Supabase no longer flags that email at all this week) — the
+ *    the views no longer flag that email at all this week) — the
  *    founder's call (2026-09-21): once a row shows zero current signals
  *    there's nothing left to watch, archive it like any other closed-out
  *    row, whether that's because the person cancelled/deactivated
@@ -66,7 +66,7 @@ export async function run(): Promise<void> {
     return;
   }
   if (!isStudioDbAvailable()) {
-    log.debug("churn_risk.skipped", { reason: "studio_supabase_not_configured" });
+    log.debug("churn_risk.skipped", { reason: "studio_db_not_configured" });
     return;
   }
 

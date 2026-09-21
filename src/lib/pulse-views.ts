@@ -6,11 +6,16 @@
  * here — test/kenko-guard.test.ts keeps it that way.
  *
  * Two rules from the spec that every reader here follows:
- * - "Today" is the DATA date, never the calendar: data-as-of =
- *   max(cycle_starts_at) <= today over v_pulse_membership_state. A renewal
+ * - "Today" is the DATA date, never the calendar: v_pulse_data_as_of, one
+ *   row, the same anchor Studio Pulse uses (fetchDataAsOf). A renewal
  *   after the last Kenko import is not a churn (Tatyana Khvesko, case #6).
  * - member_id = md5(lower(contact_email)) — no trim — is the join key
  *   every view exposes instead of the email itself.
+ *
+ * Nothing is derived here that a view can state: tenure comes from
+ * v_pulse_member_tenure, full months from v_pulse_utilization_monthly,
+ * pack use from v_pulse_intro_purchase. A question no view answers is a
+ * pulse_cases row, not a helper in this file.
  *
  * Every date column comes back as "YYYY-MM-DD"; compare as strings.
  */
@@ -30,6 +35,8 @@ export const PULSE_VIEW = {
   introConversion: "v_pulse_intro_conversion",
   classpackState: "v_pulse_classpack_state",
   introHolderState: "v_pulse_intro_holder_state",
+  dataAsOf: "v_pulse_data_as_of",
+  memberTenure: "v_pulse_member_tenure",
   memberIdentity: "v_pulse_member_identity",
   memberActivity: "v_pulse_member_activity",
   attendanceMonthly: "v_pulse_attendance_monthly",
@@ -89,6 +96,7 @@ export interface IntroPurchaseRow {
   is_open_day: boolean;
   is_valentine: boolean;
   is_for_members: boolean;
+  visits_in_pack: number; // check-ins booked ON this pack between purchase and intro_end — not lifetime visits
 }
 
 /** One row per first-time intro buyer. */
@@ -147,6 +155,20 @@ export interface UtilizationMonthRow {
   utilization_pct: number | null;
   had_pause: boolean;
   in_progress: boolean;
+  is_full_month: boolean; // a paying cycle covered the 1st and the last day, and the month is over — the only rows a utilization signal reads
+}
+
+/** One row per person who ever had a paying cycle. member_since = start of
+ * the LATEST continuous run (a gap of up to 3 days is the same run);
+ * run_ends NULL = still open. */
+export interface MemberTenureRow {
+  member_id: string;
+  first_start: string;
+  member_since: string;
+  run_ends: string | null;
+  continuous_days: number;
+  cycles_in_run: number;
+  runs_total: number;
 }
 
 /** One row per member with at least one Failed payment; failed_45d counts
@@ -167,66 +189,26 @@ export interface FirstPaidRow {
   paid_total: number;
 }
 
-/**
- * Latest cycle start on or before `today` ("YYYY-MM-DD"): the day the data
- * is good through. Null only on an empty view.
- */
-export function computeDataAsOf(
-  rows: Array<Pick<MembershipStateRow, "cycle_starts_at">>,
-  today: string,
-): string | null {
-  let max: string | null = null;
-  for (const r of rows) {
-    const d = r.cycle_starts_at;
-    if (!d || d > today) continue;
-    if (!max || d > max) max = d;
-  }
-  return max;
-}
-
 export interface ActiveMember {
   memberId: string;
   tier: string;
   plan: string;
   membershipName: string; // "4x Monthly | Premium" — the label existing Notion rows carry
-  memberSince: string; // start of the unbroken run of paying cycles ending in the live one
-}
-
-const CYCLE_GAP_TOLERANCE_DAYS = 3;
-
-function daysBetween(a: string, b: string): number {
-  return (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
-}
-
-/**
- * Start of the unbroken chain of PAYING cycles that ends in `current`:
- * walk back while the previous paying cycle ends within
- * CYCLE_GAP_TOLERANCE_DAYS of the next one's start. A win-back on the same
- * plan restarts here, where the view's `started` (first start ever for
- * that plan) would not — churn signals must not evaluate months from the
- * gap as "member but never came".
- */
-export function continuousSince(cycles: MembershipStateRow[], current: MembershipStateRow): string {
-  const paying = cycles
-    .filter((c) => c.is_paying_cycle && c.cycle_starts_at)
-    .sort((a, b) => (a.cycle_starts_at! < b.cycle_starts_at! ? -1 : 1));
-  let since = current.cycle_starts_at!;
-  for (let i = paying.length - 1; i >= 0; i--) {
-    const prev = paying[i]!;
-    if (prev.cycle_starts_at! >= since) continue;
-    const prevEnd = prev.cycle_expires_at ?? prev.cycle_billing_ends_at;
-    if (!prevEnd || daysBetween(prevEnd, since) > CYCLE_GAP_TOLERANCE_DAYS) break;
-    since = prev.cycle_starts_at!;
-  }
-  return since;
+  memberSince: string; // v_pulse_member_tenure.member_since — start of the latest continuous run
 }
 
 /**
  * The spec's verification query, in code: paying cycles overlapping asOf,
  * one entry per member_id (the latest-starting live cycle wins when a plan
  * change overlaps). 75 on the 2026-09-18 snapshot (test/pulse-views.test.ts).
+ * `tenure` supplies memberSince; a member missing from it (should not
+ * happen — every paying cycle is a run) falls back to the live cycle start.
  */
-export function activeMembersAsOf(rows: MembershipStateRow[], asOf: string): Map<string, ActiveMember> {
+export function activeMembersAsOf(
+  rows: MembershipStateRow[],
+  asOf: string,
+  tenure: Map<string, MemberTenureRow> = new Map(),
+): Map<string, ActiveMember> {
   const byMember = new Map<string, MembershipStateRow[]>();
   for (const r of rows) {
     if (!r.cycle_starts_at) continue;
@@ -251,7 +233,7 @@ export function activeMembersAsOf(rows: MembershipStateRow[], asOf: string): Map
       tier: current.tier ?? "",
       plan: current.plan ?? "",
       membershipName: `${current.tier ?? "?"} Monthly | ${current.plan ?? "?"}`,
-      memberSince: continuousSince(cycles, current),
+      memberSince: tenure.get(memberId)?.member_since ?? current.cycle_starts_at!,
     });
   }
   return out;
@@ -278,6 +260,8 @@ export const fetchClasspackState = (): Promise<PackWindowRow[]> =>
   fetchView<PackWindowRow>(PULSE_VIEW.classpackState);
 export const fetchIntroHolderState = (): Promise<PackWindowRow[]> =>
   fetchView<PackWindowRow>(PULSE_VIEW.introHolderState);
+export const fetchMemberTenure = (): Promise<MemberTenureRow[]> =>
+  fetchView<MemberTenureRow>(PULSE_VIEW.memberTenure);
 export const fetchMemberIdentity = (): Promise<MemberIdentityRow[]> =>
   fetchView<MemberIdentityRow>(PULSE_VIEW.memberIdentity);
 export const fetchMemberActivity = (): Promise<MemberActivityRow[]> =>
@@ -286,6 +270,20 @@ export const fetchUtilizationMonthly = (): Promise<UtilizationMonthRow[]> =>
   fetchView<UtilizationMonthRow>(PULSE_VIEW.utilizationMonthly);
 export const fetchFailedPayments = (): Promise<FailedPaymentsRow[]> =>
   fetchView<FailedPaymentsRow>(PULSE_VIEW.failedPayments);
+
+/**
+ * The last date the studio data covers — the one "today" for every roster,
+ * every signal and every "dados até" line. Null only when the view is
+ * empty or the connection is missing.
+ */
+export async function fetchDataAsOf(): Promise<string | null> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.dataAsOf, reason: "studio_db_not_configured" });
+    return null;
+  }
+  const rows = await query<{ data_as_of: string | null }>(`select data_as_of from ${PULSE_VIEW.dataAsOf}`);
+  return rows[0]?.data_as_of ?? null;
+}
 
 /** Has this person ever paid? (v_pulse_first_paid; absent = a lead.) */
 export async function hasEverPaid(memberId: string): Promise<boolean> {
