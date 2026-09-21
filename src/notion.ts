@@ -1445,6 +1445,35 @@ async function getAllPartnerContacts(): Promise<PartnerContact[]> {
   return rows;
 }
 
+// Every influencer's id/name, no filter — used by leads-instagram-scan.ts
+// to fuzzy-match a new Instagram contact's name against already-created
+// Influencer Pipeline rows before creating a page, mirroring
+// getAllPartnerContacts's role for the cross-channel Wanderlust/Wanderlust_
+// Portugal duplicate found in production (2026-09-21) — same fix, both DBs.
+async function getAllInfluencerContacts(): Promise<{ id: string; name: string }[]> {
+  if (!NOTION_INFLUENCER_DB_ID) {
+    throw new Error("NOTION_INFLUENCER_DB_ID not set");
+  }
+  const rows: { id: string; name: string }[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getAllInfluencerContacts", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_INFLUENCER_DB_ID),
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({ id: row.id, name: readPlainText(props["Name"]) });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  log.debug("notion.all_influencer_contacts_fetched", { count: rows.length });
+  return rows;
+}
+
 // Fontes list for the competitor-intel Gmail pipeline — founder-maintained
 // in Notion so senders can be added/paused without a redeploy.
 async function getActiveCompetitorSources(): Promise<CompetitorSourceRow[]> {
@@ -2038,13 +2067,18 @@ async function createPartner(
 // src/crons/leads-instagram-scan.ts always passes "Instagram DM", since
 // that's known at creation time (there's no other source for this cron).
 // `ultimoContacto` (ISO date) is optional too — leads-instagram-scan.ts
-// passes the DM thread's last message timestamp, when known.
+// passes the DM thread's last message timestamp, when known. `status`
+// defaults to "A contactar" (the normal case: someone reached out to us)
+// — leads-instagram-scan.ts passes "Contactado" for the opposite
+// direction, a cold-outreach contact the studio itself messaged with no
+// reply yet, mirroring createPartner's own status param.
 async function createInfluencer(
   nome: string,
   owner: OwnerValue,
   originalMsg: string,
   canalContacto?: "Instagram DM" | "Email" | "Outro",
   ultimoContacto?: string | null,
+  status: InfluencerStatus = "A contactar",
 ): Promise<string> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
@@ -2055,7 +2089,7 @@ async function createInfluencer(
       properties: {
         "Name": { title: [{ text: { content: nome } }] },
         Owner: { select: { name: owner } },
-        Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
+        Status: { select: { name: status } },
         Origem: richText(originalMsg),
         ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
         ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
@@ -2961,6 +2995,7 @@ export {
   editFounderFocusBodyItem,
   // Phase 3
   getAllPartnerContacts,
+  getAllInfluencerContacts,
   getContentCalendarNeedsScheduling,
   createReminder,
   getDueReminders,
@@ -3038,6 +3073,7 @@ export const notion = {
   editFounderFocusBodyItem,
   // Phase 3
   getAllPartnerContacts,
+  getAllInfluencerContacts,
   getContentCalendarNeedsScheduling,
   createReminder,
   getDueReminders,

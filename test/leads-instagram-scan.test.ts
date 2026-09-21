@@ -49,11 +49,13 @@ vi.mock("../src/lib/leads.js", () => ({
 }));
 
 const classifyInstagramDM = vi.fn();
+const classifyOutreachIntent = vi.fn().mockResolvedValue("parceiro");
 const enrichPartnerFromTranscript = vi.fn().mockResolvedValue(null);
 const enrichInfluencerFromTranscript = vi.fn().mockResolvedValue(null);
 const summarizeRelationshipUpdate = vi.fn().mockResolvedValue("");
 vi.mock("../src/lib/lead-classifier.js", () => ({
   classifyInstagramDM: (...args: unknown[]) => classifyInstagramDM(...args),
+  classifyOutreachIntent: (...args: unknown[]) => classifyOutreachIntent(...args),
   enrichPartnerFromTranscript: (...args: unknown[]) => enrichPartnerFromTranscript(...args),
   enrichInfluencerFromTranscript: (...args: unknown[]) => enrichInfluencerFromTranscript(...args),
   summarizeRelationshipUpdate: (...args: unknown[]) => summarizeRelationshipUpdate(...args),
@@ -75,6 +77,8 @@ const createInfluencer = vi.fn().mockResolvedValue("new-influencer-page-id");
 const appendToPageSection = vi.fn().mockResolvedValue(undefined);
 const replacePageSection = vi.fn().mockResolvedValue(undefined);
 const updateInfluencerFields = vi.fn().mockResolvedValue(undefined);
+const getAllPartnerContacts = vi.fn().mockResolvedValue([]);
+const getAllInfluencerContacts = vi.fn().mockResolvedValue([]);
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
   createPartner: (...args: unknown[]) => createPartner(...args),
@@ -82,6 +86,8 @@ vi.mock("../src/notion.js", () => ({
   appendToPageSection: (...args: unknown[]) => appendToPageSection(...args),
   replacePageSection: (...args: unknown[]) => replacePageSection(...args),
   updateInfluencerFields: (...args: unknown[]) => updateInfluencerFields(...args),
+  getAllPartnerContacts: (...args: unknown[]) => getAllPartnerContacts(...args),
+  getAllInfluencerContacts: (...args: unknown[]) => getAllInfluencerContacts(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -116,6 +122,7 @@ describe("leads-instagram-scan", () => {
     findVisitHistory.mockReset().mockReturnValue(null);
     findBestNameMatch.mockReset().mockReturnValue(null);
     classifyInstagramDM.mockReset();
+    classifyOutreachIntent.mockReset().mockResolvedValue("parceiro");
     enrichPartnerFromTranscript.mockReset().mockResolvedValue(null);
     enrichInfluencerFromTranscript.mockReset().mockResolvedValue(null);
     summarizeRelationshipUpdate.mockReset().mockResolvedValue("");
@@ -127,6 +134,8 @@ describe("leads-instagram-scan", () => {
     appendToPageSection.mockClear().mockResolvedValue(undefined);
     replacePageSection.mockClear().mockResolvedValue(undefined);
     updateInfluencerFields.mockClear().mockResolvedValue(undefined);
+    getAllPartnerContacts.mockReset().mockResolvedValue([]);
+    getAllInfluencerContacts.mockReset().mockResolvedValue([]);
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
@@ -237,6 +246,56 @@ describe("leads-instagram-scan", () => {
       "Contactado",
       "2026-01-01T00:00:00Z",
     );
+  });
+
+  it("routes a studio-only outreach contact to Influencer Pipeline when our own message is the team's influencer-outreach template — regression for the 2026-09-21 Márcia Soares misroute", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    hasInboundMessage.mockReturnValue(false);
+    buildTranscript.mockReturnValue(
+      "Haven: Estamos a contactar várias pessoas que achamos que fazem match com a nossa vibe para virem experimentar uma aula connosco.",
+    );
+    classifyOutreachIntent.mockResolvedValue("influencer");
+
+    await run();
+
+    expect(classifyInstagramDM).not.toHaveBeenCalled();
+    expect(createPartner).not.toHaveBeenCalled();
+    expect(createInfluencer).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Instagram DM",
+      "2026-01-01T00:00:00Z",
+      "Contactado",
+    );
+  });
+
+  it("skips creating a partner page when the name fuzzy-matches an existing Partner Pipeline row, and flags it in the digest — regression for the 2026-09-21 Wanderlust/Wanderlust_Portugal duplicate", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
+    classifyInstagramDM.mockResolvedValue("parceiro");
+    getAllPartnerContacts.mockResolvedValue([{ id: "existing-id", name: "Joana Ferreira Lda" }]);
+
+    await run();
+
+    expect(createPartner).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledWith(
+      expect.stringContaining('parece igual a "Joana Ferreira Lda"'),
+    );
+    // checkpointed with no page id, so it isn't retried every run
+    expect((fsState as Record<string, { notionPageId: string | null }>)["contact-1"]?.notionPageId).toBeNull();
+  });
+
+  it("skips creating an influencer page when the name fuzzy-matches an existing Influencer Pipeline row", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava experimentar uma aula e partilhar nos meus stories!");
+    classifyInstagramDM.mockResolvedValue("influencer");
+    getAllInfluencerContacts.mockResolvedValue([{ id: "existing-id", name: "Joana Ferreira" }]);
+
+    await run();
+
+    expect(createInfluencer).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledWith(expect.stringContaining("Influencer Pipeline"));
   });
 
   it("skips a studio-only outreach contact with no text at all (edge case)", async () => {
