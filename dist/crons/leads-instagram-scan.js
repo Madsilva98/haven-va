@@ -145,9 +145,13 @@ function dated(text) {
 // production 2026-09-21) already scores 0.8, comfortably above this.
 const DUPLICATE_NAME_THRESHOLD = 0.75;
 // Below this, a cold-outreach message is almost certainly not real
-// content to classify from — "You sent an attachment." is 25 chars,
-// every genuine outreach template seen in production is 100+.
-const MIN_OUTREACH_TEXT_LENGTH = 30;
+// content to classify from. buildTranscript prepends "Haven: " (7 chars)
+// to every line, so "You sent an attachment." (23 chars) becomes exactly
+// 30 — a 30-char threshold let it through in production 2026-09-21
+// (Martim Saudade e Silva wrongly moved to Influencer Pipeline off that
+// alone). Every genuine outreach template seen in production is 300+
+// chars with the prefix, so this has real margin, not a razor's edge.
+const MIN_OUTREACH_TEXT_LENGTH = 60;
 function findDuplicateName(name, existing) {
     let best = null;
     for (const e of existing) {

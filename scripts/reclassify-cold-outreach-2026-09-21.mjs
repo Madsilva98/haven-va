@@ -69,12 +69,17 @@ async function main() {
       skippedNoContact++;
       continue;
     }
-    // "You sent an attachment." (25 chars) or a bare reaction like
-    // "Heheheh" isn't real content to classify from — found two of these
-    // in the initial dry-run (DepilNails, Martim Saudade e Silva), both
-    // would have been guessed at off noise. Same bar as the live cron's
-    // MIN_OUTREACH_TEXT_LENGTH.
-    if (outreachText.length < 30) {
+    // "You sent an attachment." (23 chars) or a bare reaction like
+    // "Heheheh" isn't real content to classify from. With buildTranscript's
+    // "Haven: " prefix (7 chars), "You sent an attachment." becomes
+    // exactly 30 — a 30-char bar let it through and the classifier's
+    // inherent non-determinism on that near-empty input gave a different
+    // answer each run (Martim Saudade e Silva: "parceiro" in a dry-run,
+    // "influencer" moments later in --apply, on the SAME input — caught
+    // in production 2026-09-21, corrected by hand). 60 gives real margin;
+    // every genuine outreach template seen in production is 300+ chars.
+    // Same bar as the live cron's MIN_OUTREACH_TEXT_LENGTH.
+    if (outreachText.length < 60) {
       skippedNoContact++;
       continue;
     }
