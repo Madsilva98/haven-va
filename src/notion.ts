@@ -1450,11 +1450,11 @@ async function getAllPartnerContacts(): Promise<PartnerContact[]> {
 // Influencer Pipeline rows before creating a page, mirroring
 // getAllPartnerContacts's role for the cross-channel Wanderlust/Wanderlust_
 // Portugal duplicate found in production (2026-09-21) — same fix, both DBs.
-async function getAllInfluencerContacts(): Promise<{ id: string; name: string }[]> {
+async function getAllInfluencerContacts(): Promise<PartnerContact[]> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
   }
-  const rows: { id: string; name: string }[] = [];
+  const rows: PartnerContact[] = [];
   let cursor: string | undefined;
   do {
     const res = await withRetry("getAllInfluencerContacts", () =>
@@ -1466,7 +1466,11 @@ async function getAllInfluencerContacts(): Promise<{ id: string; name: string }[
     for (const row of res.results) {
       if (!("properties" in row)) continue;
       const props = row.properties as Record<string, unknown>;
-      rows.push({ id: row.id, name: readPlainText(props["Name"]) });
+      rows.push({
+        id: row.id,
+        name: readPlainText(props["Name"]),
+        email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
+      });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
   } while (cursor);
@@ -2079,6 +2083,7 @@ async function createInfluencer(
   canalContacto?: "Instagram DM" | "Email" | "Outro",
   ultimoContacto?: string | null,
   status: InfluencerStatus = "A contactar",
+  email?: string | null,
 ): Promise<string> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
@@ -2093,6 +2098,7 @@ async function createInfluencer(
         Origem: richText(originalMsg),
         ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
         ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
+        ...(email ? { Email: { email } } : {}),
       },
     }),
   );
@@ -2128,6 +2134,7 @@ async function updateInfluencerFields(
     nicho?: string | null;
     proximoPasso?: string | null;
     ultimoContacto?: string | null;
+    email?: string | null;
   },
 ): Promise<void> {
   const properties: Record<string, unknown> = {};
@@ -2138,6 +2145,7 @@ async function updateInfluencerFields(
   if (fields.nicho) properties["Nicho"] = richText(fields.nicho);
   if (fields.proximoPasso) properties["Próximo passo"] = richText(fields.proximoPasso);
   if (fields.ultimoContacto) properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+  if (fields.email) properties["Email"] = { email: fields.email };
 
   if (Object.keys(properties).length === 0) return;
 
@@ -2148,6 +2156,39 @@ async function updateInfluencerFields(
     }),
   );
   log.info("notion.influencer_fields_updated", { pageId, fields: Object.keys(properties) });
+}
+
+// Same "current state" property update as updateInfluencerFields, for
+// Partner Pipeline — needed because createPartner has no email param (unlike
+// createInfluencer) and partner-enrichment.md only produces free-text
+// Sobre/Deal/Log, never structured fields (see src/lib/entity-enrichment.ts),
+// so src/crons/sync-partnerships.ts needs a direct way to set Status/Email/
+// Próximo passo/Último contacto on a partner page. Every field optional and
+// only included when given, same "don't clobber what we don't know" rule.
+async function updatePartnerFields(
+  pageId: string,
+  fields: {
+    status?: PartnerStatus | null;
+    proximoPasso?: string | null;
+    ultimoContacto?: string | null;
+    email?: string | null;
+  },
+): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (fields.status) properties["Status"] = { select: { name: fields.status } };
+  if (fields.proximoPasso) properties["Próximo passo"] = richText(fields.proximoPasso);
+  if (fields.ultimoContacto) properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+  if (fields.email) properties["Email"] = { email: fields.email };
+
+  if (Object.keys(properties).length === 0) return;
+
+  await withRetry("updatePartnerFields", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.partner_fields_updated", { pageId, fields: Object.keys(properties) });
 }
 
 // ----- Leads a contactar -----
@@ -3013,6 +3054,7 @@ export {
   createPartner,
   createInfluencer,
   updateInfluencerFields,
+  updatePartnerFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists
@@ -3091,6 +3133,7 @@ export const notion = {
   createPartner,
   createInfluencer,
   updateInfluencerFields,
+  updatePartnerFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists

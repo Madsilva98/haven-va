@@ -180,9 +180,8 @@ describe("leads-instagram-scan", () => {
     );
     expect(createLead).not.toHaveBeenCalled();
     expect(checkExistingCustomer).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
-    const [message] = sendGroupMessage.mock.calls[0]!;
-    expect(message).toContain("parceiro");
+    // no Telegram digest for partner creation — founder's call, 2026-09-21
+    expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("routes a content-for-exposure pitch to Influencer Pipeline, not Partner Pipeline", async () => {
@@ -201,9 +200,8 @@ describe("leads-instagram-scan", () => {
     );
     expect(createPartner).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
-    const [message] = sendGroupMessage.mock.calls[0]!;
-    expect(message).toContain("influencer");
+    // no Telegram digest for influencer creation — founder's call, 2026-09-21
+    expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("does not create a lead or partner when the transcript is neither", async () => {
@@ -289,7 +287,7 @@ describe("leads-instagram-scan", () => {
     );
   });
 
-  it("skips creating a partner page when the name fuzzy-matches an existing Partner Pipeline row, and flags it in the digest — regression for the 2026-09-21 Wanderlust/Wanderlust_Portugal duplicate", async () => {
+  it("skips creating a partner page when the name fuzzy-matches an existing Partner Pipeline row, no digest — regression for the 2026-09-21 Wanderlust/Wanderlust_Portugal duplicate", async () => {
     fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
     buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
     classifyInstagramDM.mockResolvedValue("parceiro");
@@ -298,9 +296,8 @@ describe("leads-instagram-scan", () => {
     await run();
 
     expect(createPartner).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledWith(
-      expect.stringContaining('parece igual a "Joana Ferreira Lda"'),
-    );
+    // no Telegram digest for a skipped duplicate — founder's call, 2026-09-21
+    expect(sendGroupMessage).not.toHaveBeenCalled();
     // checkpointed with no page id, so it isn't retried every run
     expect((fsState as Record<string, { notionPageId: string | null }>)["contact-1"]?.notionPageId).toBeNull();
   });
@@ -314,7 +311,8 @@ describe("leads-instagram-scan", () => {
     await run();
 
     expect(createInfluencer).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledWith(expect.stringContaining("Influencer Pipeline"));
+    // no Telegram digest for a skipped duplicate — founder's call, 2026-09-21
+    expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("skips a studio-only outreach contact with no text at all (edge case)", async () => {
@@ -496,6 +494,7 @@ describe("leads-instagram-scan", () => {
       nicho: "lifestyle",
       proximoPasso: "confirmar data da aula",
       ultimoContacto: "2026-01-01T00:00:00Z",
+      email: null,
     });
   });
 
@@ -597,6 +596,7 @@ describe("leads-instagram-scan", () => {
       nicho: "fitness",
       proximoPasso: "aguardar confirmação",
       ultimoContacto: "2026-02-05T10:00:00Z",
+      email: null,
     });
     expect(createInfluencer).not.toHaveBeenCalled();
   });

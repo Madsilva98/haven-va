@@ -1229,7 +1229,11 @@ async function getAllInfluencerContacts() {
             if (!("properties" in row))
                 continue;
             const props = row.properties;
-            rows.push({ id: row.id, name: readPlainText(props["Name"]) });
+            rows.push({
+                id: row.id,
+                name: readPlainText(props["Name"]),
+                email: props["Email"]?.email ?? null,
+            });
         }
         cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
@@ -1746,7 +1750,7 @@ async function createPartner(nome, owner, originalMsg, categoria, status = "A co
 // — leads-instagram-scan.ts passes "Contactado" for the opposite
 // direction, a cold-outreach contact the studio itself messaged with no
 // reply yet, mirroring createPartner's own status param.
-async function createInfluencer(nome, owner, originalMsg, canalContacto, ultimoContacto, status = "A contactar") {
+async function createInfluencer(nome, owner, originalMsg, canalContacto, ultimoContacto, status = "A contactar", email) {
     if (!NOTION_INFLUENCER_DB_ID) {
         throw new Error("NOTION_INFLUENCER_DB_ID not set");
     }
@@ -1759,6 +1763,7 @@ async function createInfluencer(nome, owner, originalMsg, canalContacto, ultimoC
             Origem: richText(originalMsg),
             ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
             ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
+            ...(email ? { Email: { email } } : {}),
         },
     }));
     await withRetry("createInfluencer.sections", () => client.blocks.children.append({
@@ -1795,6 +1800,8 @@ async function updateInfluencerFields(pageId, fields) {
         properties["Próximo passo"] = richText(fields.proximoPasso);
     if (fields.ultimoContacto)
         properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+    if (fields.email)
+        properties["Email"] = { email: fields.email };
     if (Object.keys(properties).length === 0)
         return;
     await withRetry("updateInfluencerFields", () => client.pages.update({
@@ -1802,6 +1809,31 @@ async function updateInfluencerFields(pageId, fields) {
         properties: properties,
     }));
     log.info("notion.influencer_fields_updated", { pageId, fields: Object.keys(properties) });
+}
+// Same "current state" property update as updateInfluencerFields, for
+// Partner Pipeline — needed because createPartner has no email param (unlike
+// createInfluencer) and partner-enrichment.md only produces free-text
+// Sobre/Deal/Log, never structured fields (see src/lib/entity-enrichment.ts),
+// so src/crons/sync-partnerships.ts needs a direct way to set Status/Email/
+// Próximo passo/Último contacto on a partner page. Every field optional and
+// only included when given, same "don't clobber what we don't know" rule.
+async function updatePartnerFields(pageId, fields) {
+    const properties = {};
+    if (fields.status)
+        properties["Status"] = { select: { name: fields.status } };
+    if (fields.proximoPasso)
+        properties["Próximo passo"] = richText(fields.proximoPasso);
+    if (fields.ultimoContacto)
+        properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+    if (fields.email)
+        properties["Email"] = { email: fields.email };
+    if (Object.keys(properties).length === 0)
+        return;
+    await withRetry("updatePartnerFields", () => client.pages.update({
+        page_id: pageId,
+        properties: properties,
+    }));
+    log.info("notion.partner_fields_updated", { pageId, fields: Object.keys(properties) });
 }
 async function createLead(nome, email, canal, motivo, verificacao, origem, opts = {}) {
     if (!NOTION_LEADS_DB_ID) {
@@ -2500,7 +2532,7 @@ getAllPartnerContacts, getAllInfluencerContacts, getContentCalendarNeedsScheduli
 // Phase 5
 createToDiscuss, getToDiscussPending, setToDiscussResolved, createDecision, getRecentDecisions, 
 // Feature D — entities
-createProject, createEvent, createPartner, createInfluencer, updateInfluencerFields, 
+createProject, createEvent, createPartner, createInfluencer, updateInfluencerFields, updatePartnerFields, 
 // Feature E — entity lookup
 findEntityByName, 
 // Lists
@@ -2558,6 +2590,7 @@ export const notion = {
     createPartner,
     createInfluencer,
     updateInfluencerFields,
+    updatePartnerFields,
     // Feature E — entity lookup
     findEntityByName,
     // Lists

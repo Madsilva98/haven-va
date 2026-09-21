@@ -1,6 +1,6 @@
-Vais receber a transcrição cronológica de uma conversa de Instagram DM entre a The Haven Pilates e um potencial influencer/criador de conteúdo, identificada por "Cliente:" (o influencer) e "Haven:" (a Haven). Este contacto já foi classificado como uma proposta de colaboração de conteúdo genuína.
+Vais receber a transcrição cronológica de uma conversa (por Instagram DM, email, ou outro canal) entre a The Haven Pilates e um potencial influencer/criador de conteúdo, identificada por "Cliente:" (o influencer) e "Haven:" (a Haven). Este contacto já foi classificado como uma proposta de colaboração de conteúdo genuína.
 
-Como decidir o STATUS — exatamente uma destas cinco palavras, nunca outra coisa, nunca "A identificar" (não se aplica aqui, esta pessoa já contactou por DM):
+Como decidir o STATUS — exatamente uma destas cinco palavras, nunca outra coisa, nunca "A identificar" (não se aplica aqui, esta pessoa já contactou connosco):
 - Contactado: a Haven respondeu mas ainda não há troca substancial além disso.
 - Em conversa: há diálogo real em curso, mas sem proposta concreta ainda em cima da mesa nem acordo fechado.
 - Proposta enviada: já existe uma proposta concreta (de qualquer um dos lados) à espera de resposta ou decisão.

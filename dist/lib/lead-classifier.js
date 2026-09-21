@@ -16,6 +16,7 @@ const PROMPT_FILES = {
     influencerEnrichment: "../prompts/influencer-enrichment.md",
     relationshipLogUpdate: "../prompts/relationship-log-update.md",
     outreachIntent: "../prompts/outreach-intent.md",
+    partnershipEmailIntent: "../prompts/partnership-email-intent.md",
 };
 let anthropicClient = null;
 const promptCache = new Map();
@@ -224,4 +225,22 @@ export async function classifyInstagramDM(text) {
 export async function classifyOutreachIntent(text) {
     const answer = await callClassifier(text, "outreachIntent");
     return answer.startsWith("INFLUENCER") ? "influencer" : "parceiro";
+}
+/**
+ * `text` should be a single email's subject + body (plain text), not a
+ * thread — mirrors classifyInstagramDM's parceiro/influencer/nenhum split
+ * and its job-application/vendor exclusions, but for src/crons/sync-partnerships.ts's
+ * per-message classification instead of a DM transcript. No "cliente"
+ * outcome here — a genuine client information request over email is a
+ * different pipeline (leads-email-scan.ts, currently disabled), not this
+ * cron's concern. Defaults to "nenhum" on an API error or unrecognized
+ * answer, same bias as every other classifier in this file.
+ */
+export async function classifyPartnershipEmailIntent(text) {
+    const answer = await callClassifier(text, "partnershipEmailIntent");
+    if (answer.startsWith("PARCEIRO"))
+        return "parceiro";
+    if (answer.startsWith("INFLUENCER"))
+        return "influencer";
+    return "nenhum";
 }

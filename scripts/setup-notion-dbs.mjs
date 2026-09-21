@@ -134,6 +134,7 @@ const influencerProperties = {
     { name: "Visita ao estúdio" }, { name: "Post patrocinado" },
     { name: "Parceria de longo prazo" }, { name: "Evento" }, { name: "Outro" },
   ] } },
+  Email: { email: {} },
   Origem: { rich_text: {} },
   "Criado em": { created_time: {} },
 };

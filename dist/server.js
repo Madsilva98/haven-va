@@ -11,6 +11,7 @@ import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
+import { run as runSyncPartnerships } from "./crons/sync-partnerships.js";
 import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
@@ -32,6 +33,7 @@ const tasks = [
     cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
     cron.schedule("12 8 * * 1", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
     cron.schedule("15 8 * * *", () => runIntroPackExpiring().catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("14 8 * * 1", () => runSyncPartnerships().catch((e) => log.error("cron.sync_partnerships", { e: String(e) })), { timezone: TZ }),
     cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
     cron.schedule("45 8 * * 1", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
     cron.schedule("30 8 * * 1", () => runCompetitorIntel().catch((e) => log.error("cron.competitor_intel", { e: String(e) })), { timezone: TZ }),

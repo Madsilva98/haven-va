@@ -48,9 +48,11 @@
  * cross-channel dedup, so the same real contact reached both by email
  * (via the Outlook partnerships sync) and by Instagram DM got two rows
  * ("Wanderlust" and "Wanderlust_Portugal", found in production
- * 2026-09-21). A likely match skips creation and gets flagged in the
- * weekly digest instead — never auto-merged, since deciding which record
- * is authoritative needs a human.
+ * 2026-09-21). A likely match skips creation — logged
+ * (leads_instagram_scan.duplicate_skipped), never a Telegram digest
+ * (founder's call, 2026-09-21: only the Leads a contactar pipeline below
+ * gets one) — and never auto-merged, since deciding which record is
+ * authoritative needs a human.
  *
  * Classification is per CONTACT, not per message — one Haiku call on
  * their whole transcript, since this is a holistic judgment, not
@@ -90,35 +92,29 @@ import {
 } from "../lib/instagram-inbox.js";
 import { scoreMatch } from "../lib/fuzzy-match.js";
 import {
+  applyInfluencerCurrentState,
+  applyPartnerCurrentState,
+  dated,
+  enrichInfluencerPageFromText,
+  enrichPartnerPageFromText,
+} from "../lib/entity-enrichment.js";
+import {
   checkExistingCustomer,
   fetchAllCustomerNames,
   fetchAllVisitHistory,
-  findBestNameMatch,
-  findVisitHistory,
   type CustomerNameRecord,
   type VisitHistory,
 } from "../lib/leads.js";
 import {
   classifyInstagramDM,
   classifyOutreachIntent,
-  enrichInfluencerFromTranscript,
-  enrichPartnerFromTranscript,
   summarizeRelationshipUpdate,
   type InstagramDMClassification,
 } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import {
-  formatDuplicateCandidatesDigests,
-  formatInfluencerCandidatesDigests,
-  formatLeadsDigests,
-  formatPartnerCandidatesDigests,
-  type DuplicateCandidateSummary,
-  type NewInfluencerSummary,
-  type NewLeadSummary,
-  type NewPartnerSummary,
-} from "../messages/leads.js";
+import { formatLeadsDigests, type NewInfluencerSummary, type NewLeadSummary, type NewPartnerSummary } from "../messages/leads.js";
 import * as notion from "../notion.js";
 import type { LeadVerification } from "../types.js";
 
@@ -157,42 +153,6 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function formatDatePt(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
-}
-
-/**
- * Only trusts a VOLUNTEERED email for asserting real Kenko visit history —
- * a fuzzy name match is flagged as uncertain instead of fed into the visit
- * lookup, since stating "already visited N times" off a guessed identity
- * would overclaim. Mirrors this file's existing "Match incerto — rever
- * manualmente" posture for the lead-matching path below.
- */
-function formatKenkoLine(
-  volunteeredEmail: string | null,
-  name: string,
-  customers: CustomerNameRecord[],
-  activity: Map<string, VisitHistory>,
-): string {
-  if (volunteeredEmail) {
-    const history = findVisitHistory(volunteeredEmail, activity);
-    if (history && history.visitCount > 0 && history.firstVisit && history.lastVisit) {
-      return `Kenko: já visitou o estúdio — ${history.visitCount} visitas, primeira em ${formatDatePt(history.firstVisit)}, última em ${formatDatePt(history.lastVisit)}.`;
-    }
-    return "Kenko: sem histórico de visitas para este email.";
-  }
-  const fuzzy = findBestNameMatch(name, customers);
-  if (fuzzy) {
-    return `Kenko: possível correspondência (nome semelhante a ${fuzzy.name}) — por confirmar manualmente.`;
-  }
-  return "Kenko: sem correspondência.";
-}
-
-function dated(text: string): string {
-  return `[${formatDatePt(new Date().toISOString())}] ${text}`;
-}
-
 interface NamedContact {
   id: string;
   name: string;
@@ -228,92 +188,6 @@ function findDuplicateName(name: string, existing: NamedContact[]): NamedContact
 }
 
 /**
- * "Current state" fields only (Sobre/Deal/Perfil e stats) — always judged
- * from the FULL transcript, since e.g. a deal's terms can only be read
- * correctly in light of the whole conversation, and always REPLACES the
- * section so re-running as a conversation evolves never piles up stale
- * versions. Returns the raw enrichment (including .log) so callers decide
- * separately how to handle the Log/Relação e histórico entry — first-time
- * creation logs the whole-transcript summary as the opening entry;
- * reEnrichContact logs a delta-only summary instead (see below), so this
- * never appends anything itself.
- */
-async function applyPartnerCurrentState(pageId: string, transcript: string) {
-  const enrichment = await enrichPartnerFromTranscript(transcript);
-  if (!enrichment) return null;
-  if (enrichment.sobre) await notion.replacePageSection(pageId, enrichment.sobre, "Sobre o parceiro");
-  if (enrichment.deal) await notion.replacePageSection(pageId, enrichment.deal, "Deal e proposta");
-  return enrichment;
-}
-
-async function applyInfluencerCurrentState(
-  pageId: string,
-  transcript: string,
-  name: string,
-  volunteeredEmail: string | null,
-  customers: CustomerNameRecord[],
-  activity: Map<string, VisitHistory>,
-  ultimoContacto: string | null,
-) {
-  const enrichment = await enrichInfluencerFromTranscript(transcript);
-  const kenkoLine = formatKenkoLine(volunteeredEmail, name, customers, activity);
-  const perfilStats = [enrichment?.sobre, kenkoLine].filter((s): s is string => Boolean(s)).join("\n");
-  if (perfilStats) await notion.replacePageSection(pageId, perfilStats, "Perfil e stats");
-  await notion.updateInfluencerFields(pageId, {
-    status: enrichment?.status,
-    tipoColaboracao: enrichment?.tipoColaboracao,
-    nicho: enrichment?.nicho,
-    proximoPasso: enrichment?.proximoPasso,
-    ultimoContacto,
-  });
-  return enrichment ?? null;
-}
-
-/**
- * First-time enrichment, called right after a partner/influencer page is
- * created. Best-effort: every step logs and swallows its own failure
- * rather than throwing, so a Haiku/Notion hiccup here never affects the
- * page that's already been created, or the checkpoint that already
- * recorded it — enrichment is a bonus on top of a real page, not a
- * condition for one. Logs the whole-transcript summary as the Log
- * section's opening entry (there's no prior entry to build a delta from
- * yet).
- */
-async function enrichPartnerPage(pageId: string, transcript: string): Promise<void> {
-  try {
-    const enrichment = await applyPartnerCurrentState(pageId, transcript);
-    if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
-  } catch (err) {
-    log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "partner", message: errMsg(err) });
-  }
-}
-
-async function enrichInfluencerPage(
-  pageId: string,
-  transcript: string,
-  name: string,
-  volunteeredEmail: string | null,
-  customers: CustomerNameRecord[],
-  activity: Map<string, VisitHistory>,
-  ultimoContacto: string | null,
-): Promise<void> {
-  try {
-    const enrichment = await applyInfluencerCurrentState(
-      pageId,
-      transcript,
-      name,
-      volunteeredEmail,
-      customers,
-      activity,
-      ultimoContacto,
-    );
-    if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Relação e histórico");
-  } catch (err) {
-    log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "influencer", message: errMsg(err) });
-  }
-}
-
-/**
  * Re-enrichment for a contact that already has a page and got new
  * messages since the last checkpoint. Never creates or touches a second
  * page — only refreshes Sobre/Deal/Perfil e stats (current-state, full
@@ -345,15 +219,12 @@ async function reEnrichContact(
       await applyPartnerCurrentState(pageId, fullTranscript);
     } else {
       const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-      await applyInfluencerCurrentState(
-        pageId,
-        fullTranscript,
-        name,
+      await applyInfluencerCurrentState(pageId, fullTranscript, name, {
         volunteeredEmail,
         customers,
         activity,
-        contact.lastMessageAt,
-      );
+        ultimoContacto: contact.lastMessageAt,
+      });
     }
     if (deltaTranscript) {
       const update = await summarizeRelationshipUpdate(deltaTranscript);
@@ -387,7 +258,6 @@ type ProcessResult =
   | { type: "lead"; summary: NewLeadSummary }
   | { type: "partner"; summary: NewPartnerSummary }
   | { type: "influencer"; summary: NewInfluencerSummary }
-  | { type: "duplicate"; summary: DuplicateCandidateSummary }
   | null;
 
 async function processContact(
@@ -450,7 +320,7 @@ async function processContact(
       if (dup) {
         setCheckpoint(state, contact, "influencer", null);
         log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-        return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+        return null;
       }
       try {
         const pageId = await notion.createInfluencer(
@@ -477,7 +347,7 @@ async function processContact(
     if (dup) {
       setCheckpoint(state, contact, "parceiro", null);
       log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-      return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
+      return null;
     }
     try {
       const pageId = await notion.createPartner(
@@ -521,7 +391,7 @@ async function processContact(
     if (dup) {
       setCheckpoint(state, contact, classification, null);
       log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-      return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
+      return null;
     }
     let pageId: string;
     try {
@@ -540,10 +410,10 @@ async function processContact(
       return null; // leave checkpoint untouched — retry next run
     }
     // Outside the try/catch above: the page is created and checkpointed at
-    // this point no matter what happens next — enrichPartnerPage already
-    // swallows its own failures, so it can never turn a successful create
-    // into a misleading "write_failed" log.
-    await enrichPartnerPage(pageId, transcript);
+    // this point no matter what happens next — enrichPartnerPageFromText
+    // already swallows its own failures, so it can never turn a
+    // successful create into a misleading "write_failed" log.
+    await enrichPartnerPageFromText(pageId, transcript);
     return { type: "partner", summary: { nome: name } };
   }
 
@@ -552,7 +422,7 @@ async function processContact(
     if (dup) {
       setCheckpoint(state, contact, classification, null);
       log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-      return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+      return null;
     }
     let pageId: string;
     try {
@@ -570,7 +440,12 @@ async function processContact(
       return null; // leave checkpoint untouched — retry next run
     }
     const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-    await enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity, contact.lastMessageAt);
+    await enrichInfluencerPageFromText(pageId, transcript, name, {
+      volunteeredEmail,
+      customers,
+      activity,
+      ultimoContacto: contact.lastMessageAt,
+    });
     return { type: "influencer", summary: { nome: name } };
   }
 
@@ -633,9 +508,8 @@ export async function run(): Promise<void> {
 
   const state = loadState();
   const createdLeads: NewLeadSummary[] = [];
-  const createdPartners: NewPartnerSummary[] = [];
-  const createdInfluencers: NewInfluencerSummary[] = [];
-  const flaggedDuplicates: DuplicateCandidateSummary[] = [];
+  let createdPartners = 0;
+  let createdInfluencers = 0;
   let skippedExcluded = 0;
   let skippedNoNewActivity = 0;
 
@@ -678,19 +552,24 @@ export async function run(): Promise<void> {
     );
     saveState(state);
     if (result?.type === "lead") createdLeads.push(result.summary);
-    if (result?.type === "partner") createdPartners.push(result.summary);
-    if (result?.type === "influencer") createdInfluencers.push(result.summary);
-    if (result?.type === "duplicate") flaggedDuplicates.push(result.summary);
+    if (result?.type === "partner") createdPartners++;
+    if (result?.type === "influencer") createdInfluencers++;
   }
 
+  // Only the Leads a contactar (cliente) pipeline gets a Telegram digest —
+  // founder's call, 2026-09-21: partner/influencer creation, updates, and
+  // skipped duplicates are all real signal she reads directly in Notion,
+  // not something to push into the group chat. createdPartners/
+  // createdInfluencers/duplicate skips (logged as
+  // leads_instagram_scan.duplicate_skipped) still show up in structured
+  // logs for anyone auditing a run.
   log.info("leads_instagram_scan.done", {
     totalContacts: contacts.length,
     skippedExcluded,
     skippedNoNewActivity,
     createdLeads: createdLeads.length,
-    createdPartners: createdPartners.length,
-    createdInfluencers: createdInfluencers.length,
-    flaggedDuplicates: flaggedDuplicates.length,
+    createdPartners,
+    createdInfluencers,
   });
 
   for (const message of formatLeadsDigests(createdLeads)) {
@@ -699,33 +578,6 @@ export async function run(): Promise<void> {
       log.info("leads_instagram_scan.leads_posted", { messageId });
     } catch (err) {
       log.error("leads_instagram_scan.leads_send_failed", { message: errMsg(err) });
-    }
-  }
-
-  for (const message of formatPartnerCandidatesDigests(createdPartners)) {
-    try {
-      const messageId = await sendGroupMessage(message);
-      log.info("leads_instagram_scan.partners_posted", { messageId });
-    } catch (err) {
-      log.error("leads_instagram_scan.partners_send_failed", { message: errMsg(err) });
-    }
-  }
-
-  for (const message of formatInfluencerCandidatesDigests(createdInfluencers)) {
-    try {
-      const messageId = await sendGroupMessage(message);
-      log.info("leads_instagram_scan.influencers_posted", { messageId });
-    } catch (err) {
-      log.error("leads_instagram_scan.influencers_send_failed", { message: errMsg(err) });
-    }
-  }
-
-  for (const message of formatDuplicateCandidatesDigests(flaggedDuplicates)) {
-    try {
-      const messageId = await sendGroupMessage(message);
-      log.info("leads_instagram_scan.duplicates_posted", { messageId });
-    } catch (err) {
-      log.error("leads_instagram_scan.duplicates_send_failed", { message: errMsg(err) });
     }
   }
 }
