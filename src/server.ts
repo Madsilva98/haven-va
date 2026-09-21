@@ -5,6 +5,7 @@ import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
+import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
@@ -81,6 +82,14 @@ const tasks = [
     () =>
       runLeadsReconcile().catch((e) =>
         log.error("cron.leads_reconcile", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "12 8 * * 1",
+    () =>
+      runLeadsInstagramScan().catch((e) =>
+        log.error("cron.leads_instagram_scan", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

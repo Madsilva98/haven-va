@@ -1,7 +1,9 @@
 /**
- * Single Claude Haiku call classifying whether an inbound email is a
- * genuine "I want to know more" lead, for src/crons/leads-email-scan.ts.
- * Same singleton-init pattern as src/bot/assistant.ts's initRuntime().
+ * Single Claude Haiku call classifying whether an inbound message is a
+ * genuine "I want to know more" lead. Two prompt variants share the same
+ * client/error-handling: "email" for src/crons/leads-email-scan.ts,
+ * "dm" for src/crons/leads-instagram-scan.ts's DM transcripts. Same
+ * singleton-init pattern as src/bot/assistant.ts's initRuntime().
  */
 
 import { readFileSync } from "node:fs";
@@ -12,29 +14,39 @@ import { log } from "./log.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-let anthropicClient: Anthropic | null = null;
-let promptText: string | null = null;
+const PROMPT_FILES = {
+  email: "../prompts/lead-classifier.md",
+  dm: "../prompts/lead-classifier-dm.md",
+} as const;
+type PromptKey = keyof typeof PROMPT_FILES;
 
-function initRuntime(): { client: Anthropic; prompt: string; model: string } {
+let anthropicClient: Anthropic | null = null;
+const promptCache = new Map<PromptKey, string>();
+
+function initRuntime(promptKey: PromptKey): { client: Anthropic; prompt: string; model: string } {
   if (!anthropicClient) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
     anthropicClient = new Anthropic({ apiKey });
   }
-  if (!promptText) {
-    promptText = readFileSync(new URL("../prompts/lead-classifier.md", import.meta.url), "utf8");
+  let prompt = promptCache.get(promptKey);
+  if (!prompt) {
+    prompt = readFileSync(new URL(PROMPT_FILES[promptKey], import.meta.url), "utf8");
+    promptCache.set(promptKey, prompt);
   }
   const model = process.env.LEAD_CLASSIFIER_MODEL ?? DEFAULT_MODEL;
-  return { client: anthropicClient, prompt: promptText, model };
+  return { client: anthropicClient, prompt, model };
 }
 
 /**
- * `text` should be the email's subject + body (plain text). Defaults to
- * false (don't classify as a lead) on any API error — a missed lead is
- * far cheaper than a crashed weekly cron.
+ * Returns the model's raw trimmed/uppercased one-word answer, or "" on any
+ * API error — callers decide their own safe default from that, but every
+ * prompt variant here is written to bias toward the cheapest-to-miss
+ * outcome (NÃO/NENHUM) when uncertain, so "" behaves the same way a
+ * genuine NÃO/NENHUM answer would in every caller below.
  */
-export async function isGenuineInformationRequest(text: string): Promise<boolean> {
-  const { client, prompt, model } = initRuntime();
+async function callClassifier(text: string, promptKey: PromptKey): Promise<string> {
+  const { client, prompt, model } = initRuntime(promptKey);
   try {
     const response = await client.messages.create({
       model,
@@ -43,12 +55,41 @@ export async function isGenuineInformationRequest(text: string): Promise<boolean
       messages: [{ role: "user", content: text.slice(0, 8000) }],
     });
     const block = response.content.find((b) => b.type === "text");
-    const answer = block && block.type === "text" ? block.text.trim().toUpperCase() : "";
-    return answer.startsWith("SIM");
+    return block && block.type === "text" ? block.text.trim().toUpperCase() : "";
   } catch (err) {
     log.warn("lead_classifier.request_failed", {
+      promptKey,
       message: err instanceof Error ? err.message : String(err),
     });
-    return false;
+    return "";
   }
+}
+
+/** `text` should be the email's subject + body (plain text). */
+export async function isGenuineInformationRequest(text: string): Promise<boolean> {
+  const answer = await callClassifier(text, "email");
+  return answer.startsWith("SIM");
+}
+
+export type InstagramDMClassification = "cliente" | "parceiro" | "influencer" | "nenhum";
+
+/**
+ * `text` should be a chronological Cliente/Haven Instagram DM transcript.
+ * "cliente" = genuine information request from a prospective client;
+ * "parceiro" = another business/professional proposing a genuine business
+ * collaboration (workshop, event, corporate, cross-promotion — not about
+ * content/social media); "influencer" = a content creator offering to try
+ * a class in exchange for posting about it; "nenhum" = none of the above —
+ * including job applications and vendor/supplier sales pitches, which are
+ * deliberately excluded from "parceiro" (founder's call, 2026-09-21: those
+ * aren't partnerships, they're the opposite — someone selling to us, or
+ * applying to us). Also the fallback for an API error or unrecognized
+ * answer.
+ */
+export async function classifyInstagramDM(text: string): Promise<InstagramDMClassification> {
+  const answer = await callClassifier(text, "dm");
+  if (answer.startsWith("CLIENTE")) return "cliente";
+  if (answer.startsWith("PARCEIRO")) return "parceiro";
+  if (answer.startsWith("INFLUENCER")) return "influencer";
+  return "nenhum";
 }
