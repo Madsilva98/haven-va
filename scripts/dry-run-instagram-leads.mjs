@@ -27,13 +27,32 @@ import {
   hasInboundMessage,
   isExcludedInstagramContact,
 } from "../dist/lib/instagram-inbox.js";
-import { checkExistingCustomer, fetchAllCustomerNames } from "../dist/lib/leads.js";
-import { classifyInstagramDM } from "../dist/lib/lead-classifier.js";
+import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, findBestNameMatch, findVisitHistory } from "../dist/lib/leads.js";
+import { classifyInstagramDM, enrichInfluencerFromTranscript, enrichPartnerFromTranscript } from "../dist/lib/lead-classifier.js";
+
+function formatDatePt(iso) {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function formatKenkoLine(volunteeredEmail, name, customers, activity) {
+  if (volunteeredEmail) {
+    const history = findVisitHistory(volunteeredEmail, activity);
+    if (history && history.visitCount > 0 && history.firstVisit && history.lastVisit) {
+      return `Kenko: já visitou o estúdio — ${history.visitCount} visitas, primeira em ${formatDatePt(history.firstVisit)}, última em ${formatDatePt(history.lastVisit)}.`;
+    }
+    return "Kenko: sem histórico de visitas para este email.";
+  }
+  const fuzzy = findBestNameMatch(name, customers);
+  if (fuzzy) return `Kenko: possível correspondência (nome semelhante a ${fuzzy.name}) — por confirmar manualmente.`;
+  return "Kenko: sem correspondência.";
+}
 
 async function main() {
-  const [contacts, customers] = await Promise.all([
+  const [contacts, customers, activity] = await Promise.all([
     fetchInstagramContactsWithMessages(),
     fetchAllCustomerNames(),
+    fetchAllVisitHistory(),
   ]);
   console.log(`Fetched ${contacts.length} Instagram contacts, ${customers.length} CRM customers.\n`);
 
@@ -87,14 +106,23 @@ async function main() {
     if (classification === "parceiro") {
       parceiroCandidates++;
       console.log(`[parceiro] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
-      console.log('  -> seria criado em Partner Pipeline (Categoria = "Parceria", Status = "A contactar")\n');
+      console.log('  -> seria criado em Partner Pipeline (Categoria = "Parceria", Status = "A contactar")');
+      const enrichment = await enrichPartnerFromTranscript(transcript);
+      console.log(`  Sobre o parceiro: ${enrichment?.sobre ?? "(NADA)"}`);
+      console.log(`  Deal e proposta: ${enrichment?.deal ?? "(NADA)"}`);
+      console.log(`  Log: ${enrichment?.log ?? "(falhou)"}\n`);
       continue;
     }
 
     if (classification === "influencer") {
       influencerCandidates++;
       console.log(`[influencer] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
-      console.log('  -> seria criado em Influencer Pipeline (Canal de contacto = "Instagram DM")\n');
+      console.log('  -> seria criado em Influencer Pipeline (Canal de contacto = "Instagram DM")');
+      const enrichment = await enrichInfluencerFromTranscript(transcript);
+      const volunteeredEmail = extractVolunteeredEmail(contact.messages);
+      console.log(`  Perfil e stats — Sobre: ${enrichment?.sobre ?? "(NADA)"}`);
+      console.log(`  Perfil e stats — ${formatKenkoLine(volunteeredEmail, name, customers, activity)}`);
+      console.log(`  Relação e histórico: ${enrichment?.log ?? "(falhou)"}\n`);
       continue;
     }
 

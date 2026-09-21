@@ -18,7 +18,7 @@
 
 import { scoreMatch } from "./fuzzy-match.js";
 import { log } from "./log.js";
-import { fetchMemberIdentity, hasEverPaid, memberIdFromEmail } from "./pulse-views.js";
+import { fetchMemberActivity, fetchMemberIdentity, hasEverPaid, memberIdFromEmail } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
 
 export interface CustomerNameRecord {
@@ -114,6 +114,40 @@ export function findBestNameMatch(
  * fetches it once per run and reuses it across every email/name checked,
  * rather than refetching per candidate.
  */
+export interface VisitHistory {
+  firstVisit: string | null;
+  lastVisit: string | null;
+  visitCount: number;
+}
+
+/**
+ * Every member's visit history (v_pulse_member_activity), fetched once per
+ * caller and reused across every candidate checked — same fetch-once
+ * pattern as fetchAllCustomerNames. Keyed by member_id (md5(lower(email)))
+ * so a caller with a candidate email can look themselves up via
+ * memberIdFromEmail without a second query.
+ */
+export async function fetchAllVisitHistory(): Promise<Map<string, VisitHistory>> {
+  if (!isStudioDbAvailable()) {
+    log.warn("leads.fetch_visit_history_skipped", { reason: "studio_db_not_configured" });
+    return new Map();
+  }
+  const rows = await fetchMemberActivity();
+  return new Map(
+    rows.map((r) => [
+      r.member_id,
+      { firstVisit: r.first_visit, lastVisit: r.last_visit, visitCount: r.visit_count },
+    ]),
+  );
+}
+
+/** Pure — no I/O. `email` may be null (no email on file for this contact),
+ * in which case there's nothing to look up. */
+export function findVisitHistory(email: string | null, activity: Map<string, VisitHistory>): VisitHistory | null {
+  if (!email) return null;
+  return activity.get(memberIdFromEmail(email.trim())) ?? null;
+}
+
 export async function checkExistingCustomer(
   email: string | null,
   name: string,
