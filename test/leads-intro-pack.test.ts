@@ -7,9 +7,9 @@ vi.mock("../src/lib/intro-pack-conversion.js", () => ({
   describePostExpiryVisit: (...args: unknown[]) => describePostExpiryVisit(...args),
 }));
 
-const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
-vi.mock("../src/lib/studio-supabase.js", () => ({
-  isStudioSupabaseAvailable: () => isStudioSupabaseAvailable(),
+const isStudioDbAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../src/lib/studio-db.js", () => ({
+  isStudioDbAvailable: () => isStudioDbAvailable(),
 }));
 
 const sendGroupMessage = vi.fn().mockResolvedValue("msg-id");
@@ -48,7 +48,7 @@ describe("leads-intro-pack", () => {
     delete process.env.NOTION_LEADS_DB_ID;
     findUnconvertedIntroPacks.mockReset();
     describePostExpiryVisit.mockReset().mockReturnValue(null);
-    isStudioSupabaseAvailable.mockReturnValue(true);
+    isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
     findLeadByEmail.mockReset();
     findLeadByEmailAny.mockReset();

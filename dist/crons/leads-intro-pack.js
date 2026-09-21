@@ -34,11 +34,24 @@ export async function run() {
         return;
     }
     const created = [];
+    let skippedExisting = 0;
     for (const c of candidates) {
         try {
-            const existing = await notion.findLeadByEmail(c.email);
-            if (existing)
-                continue; // already an open lead for this person
+            // findLeadByEmailAny, not findLeadByEmail: an Intro Pack candidate
+            // re-derives every Monday for as long as the pack stays unconverted,
+            // so a row the founder marked Perdido (deliberately left un-archived
+            // by leads-reconcile.ts for exactly this reason) must still block
+            // recreation — findLeadByEmail's open-only filter would ignore it and
+            // silently undo her Perdido call (broke in production 2026-09-21).
+            // Scoped to canal: "Intro Pack" so a closed lead on a different
+            // channel (Email/WhatsApp/Instagram) that hasn't been archived yet
+            // can't false-positive block a legitimate new Intro Pack lead.
+            const existing = await notion.findLeadByEmailAny(c.email, "Intro Pack");
+            if (existing) {
+                skippedExisting++;
+                log.debug("leads_intro_pack.skipped_existing", { email: c.email, estado: existing.estado });
+                continue; // already a lead (open, Perdido, or Convertido) for this person
+            }
             const postExpiryNote = describePostExpiryVisit(c);
             const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade${postExpiryNote ? ` — ${postExpiryNote}` : ""}`;
             const origem = `Intro pack "${c.packName}" terminado a ${c.expiresAt.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" })}`;
@@ -56,7 +69,7 @@ export async function run() {
     }
     const message = formatLeadsDigest(created);
     if (!message) {
-        log.info("leads_intro_pack.no_new", { totalCandidates: candidates.length });
+        log.info("leads_intro_pack.no_new", { totalCandidates: candidates.length, skippedExisting });
         return;
     }
     try {
@@ -65,7 +78,7 @@ export async function run() {
             PULSE_VIEW.introConversion,
             PULSE_VIEW.memberActivity,
         ]);
-        log.info("leads_intro_pack.posted", { messageId, count: created.length });
+        log.info("leads_intro_pack.posted", { messageId, count: created.length, skippedExisting });
     }
     catch (err) {
         log.error("leads_intro_pack.send_failed", { message: errMsg(err) });

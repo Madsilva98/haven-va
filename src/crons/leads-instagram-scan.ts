@@ -75,7 +75,7 @@ import {
 import { checkExistingCustomer, fetchAllCustomerNames, type CustomerNameRecord } from "../lib/leads.js";
 import { classifyInstagramDM, type InstagramDMClassification } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
-import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
+import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessage } from "../lib/telegram.js";
 import {
   formatInfluencerCandidatesDigests,
@@ -251,8 +251,8 @@ export async function run(): Promise<void> {
     log.debug("leads_instagram_scan.skipped", { reason: "NOTION_LEADS_DB_ID not set" });
     return;
   }
-  if (!isStudioSupabaseAvailable()) {
-    log.debug("leads_instagram_scan.skipped", { reason: "studio_supabase_not_configured" });
+  if (!isStudioDbAvailable()) {
+    log.debug("leads_instagram_scan.skipped", { reason: "studio_db_not_configured" });
     return;
   }
 
