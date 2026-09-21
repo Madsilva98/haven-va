@@ -1,5 +1,5 @@
 /**
- * Weekly churn-risk scan. Two parts:
+ * Weekly churn-risk scan. Three parts:
  *
  * 1. Sweeps away any row the founder has closed out (Status="Resolvido"
  *    or "Arquivado") — she sets that by hand in Notion, this is the "next
@@ -7,10 +7,24 @@
  *    alive" behaviour the founder asked for on Leads a contactar
  *    (src/crons/leads-reconcile.ts).
  * 2. Computes the 3 validated signals (src/lib/churn-signals.ts) against
- *    Studio Supabase, writes/updates "Clientes em risco" in Notion, and
- *    posts one digest to the Telegram group listing only who's newly
- *    flagged or gained a new signal this week. Rows already open from a
- *    prior week are the founder's manual follow-up, not re-nagged here.
+ *    Studio Supabase for every still-Active subscriber, creates/updates
+ *    "Clientes em risco" rows to match exactly (not an additive union —
+ *    a signal that's no longer true gets dropped from the row, not just
+ *    new ones added), and posts one digest listing who's newly flagged,
+ *    gained a signal, or lost one this week — found in production
+ *    2026-09-21: without this, a row like "sem reservas 14+ dias" stayed
+ *    stuck showing that even after the person booked again.
+ * 3. Reconciles every OTHER still-open row (i.e. not touched by #2 because
+ *    Studio Supabase no longer flags that email at all this week):
+ *    - still an Active subscriber, just no current signal → update the row
+ *      to show no signals and post it in the digest too, so the founder
+ *      can decide herself whether to keep watching or close it out.
+ *    - not an Active subscriber anymore (cancelled/deactivated) → archive
+ *      automatically. Nothing left to watch once someone's actually gone;
+ *      also found in production 2026-09-21 — a churned customer's row (no
+ *      longer queried at all once their subscription drops out of the
+ *      "Active" filter in churn-signals.ts) was sitting open indefinitely
+ *      with no auto-archive path, unlike Leads a contactar.
  *
  * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
  * the birthday cron.
@@ -50,14 +64,16 @@ export async function run() {
         log.error("churn_risk.fetch_closed_failed", { message: errMsg(err) });
     }
     let flags;
+    let activeEmails;
     try {
-        flags = await fetchChurnFlags();
+        ({ flags, activeEmails } = await fetchChurnFlags());
     }
     catch (err) {
         log.error("churn_risk.fetch_failed", { message: errMsg(err) });
         return;
     }
     const changed = [];
+    const flaggedEmails = new Set(flags.map((f) => f.email.toLowerCase().trim()));
     for (const flag of flags) {
         const signalTypes = flag.signals.map((s) => s.type);
         const detalhes = flag.signals.map((s) => s.detail).join("; ");
@@ -68,25 +84,62 @@ export async function run() {
                 changed.push({ nome: flag.name, sinais: signalTypes });
                 continue;
             }
-            const newSignals = signalTypes.filter((t) => !existing.sinais.includes(t));
-            if (newSignals.length === 0)
-                continue; // nothing new since last week
-            const union = Array.from(new Set([...existing.sinais, ...signalTypes]));
-            await notion.updateChurnFlag(existing.id, union, detalhes);
-            changed.push({ nome: flag.name, sinais: newSignals });
+            const added = signalTypes.filter((t) => !existing.sinais.includes(t));
+            const resolved = existing.sinais.filter((t) => !signalTypes.includes(t));
+            if (added.length === 0 && resolved.length === 0)
+                continue; // nothing changed since last week
+            // Sync to exactly this week's signals — not a union — so a signal
+            // the person has since resolved (e.g. booked again) actually drops
+            // off the row instead of sticking around forever.
+            await notion.updateChurnFlag(existing.id, signalTypes, detalhes);
+            changed.push({ nome: flag.name, sinais: [...added, ...resolved.map((t) => `${t} (resolvido)`)] });
         }
         catch (err) {
             log.error("churn_risk.write_failed", { email: flag.email, message: errMsg(err) });
         }
     }
+    // Reconcile every other still-open row: not touched above because
+    // Studio Supabase doesn't flag that email at all this week.
+    let archivedChurned = 0;
+    try {
+        const open = await notion.getChurnRowsByStatus(["Aberto", "Contactado"]);
+        for (const row of open) {
+            if (!row.email)
+                continue;
+            const email = row.email.toLowerCase().trim();
+            if (flaggedEmails.has(email))
+                continue; // already handled above
+            try {
+                if (activeEmails.has(email)) {
+                    // Still an active subscriber, just no current signal — the
+                    // founder decides whether to keep watching or close it out, so
+                    // just surface it rather than archiving automatically.
+                    await notion.updateChurnFlag(row.id, [], "Sem sinais de risco na última verificação.");
+                    changed.push({ nome: row.nome || row.email, sinais: ["sem sinais atuais (resolvido)"] });
+                }
+                else {
+                    // No longer an active subscriber at all (cancelled/deactivated)
+                    // — nothing left to watch.
+                    await notion.archivePage(row.id);
+                    archivedChurned++;
+                }
+            }
+            catch (err) {
+                log.error("churn_risk.reconcile_open_failed", { pageId: row.id, message: errMsg(err) });
+            }
+        }
+    }
+    catch (err) {
+        log.error("churn_risk.fetch_open_failed", { message: errMsg(err) });
+    }
     const message = formatChurnDigest(changed);
     if (!message) {
-        log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed });
+        log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedChurned });
         return;
     }
     try {
         const messageId = await sendGroupMessage(message);
-        log.info("churn_risk.posted", { messageId, count: changed.length, archivedClosed });
+        log.info("churn_risk.posted", { messageId, count: changed.length, archivedClosed, archivedChurned });
     }
     catch (err) {
         log.error("churn_risk.send_failed", { message: errMsg(err) });

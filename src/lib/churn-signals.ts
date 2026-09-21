@@ -97,7 +97,7 @@ function monthLabelPt(d: Date): string {
   return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon", month: "short" });
 }
 
-function dedupeLatestPerEmail(subscribers: ActiveSubscriber[]): Map<string, ActiveSubscriber> {
+export function dedupeLatestPerEmail(subscribers: ActiveSubscriber[]): Map<string, ActiveSubscriber> {
   const byEmail = new Map<string, ActiveSubscriber>();
   for (const s of subscribers) {
     const email = s.email.toLowerCase().trim();
@@ -229,14 +229,22 @@ export function computeChurnFlags(
 }
 
 /**
- * Fetches the raw Supabase rows and computes flags. Returns [] (and logs
- * a warn) if Studio Supabase isn't configured — same graceful no-op as
- * src/lib/birthdays.ts.
+ * Fetches the raw Supabase rows and computes flags. Also returns every
+ * email currently on an Active subscription (regardless of whether they're
+ * flagged) — src/crons/churn-risk.ts uses this to tell "still active, just
+ * no current signal" (update the row, founder decides what to do) apart
+ * from "no longer an active subscriber at all" (cancelled/deactivated —
+ * safe to auto-archive, nothing left to watch).
+ *
+ * Returns empty (and logs a warn) if Studio Supabase isn't configured —
+ * same graceful no-op as src/lib/birthdays.ts.
  */
-export async function fetchChurnFlags(now: Date = new Date()): Promise<ChurnFlag[]> {
+export async function fetchChurnFlags(
+  now: Date = new Date(),
+): Promise<{ flags: ChurnFlag[]; activeEmails: Set<string> }> {
   if (!studioSupabase) {
     log.warn("churn_signals.fetch_skipped", { reason: "studio_supabase_not_configured" });
-    return [];
+    return { flags: [], activeEmails: new Set() };
   }
 
   const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
@@ -303,6 +311,7 @@ export async function fetchChurnFlags(now: Date = new Date()): Promise<ChurnFlag
     }));
 
   const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);
+  const activeEmails = new Set(dedupeLatestPerEmail(subscribers).keys());
 
   // Phone isn't in kenko_subscriptions — look it up from kenko_customers
   // (which includes Leads alongside real customers, so this can hit even
@@ -316,5 +325,5 @@ export async function fetchChurnFlags(now: Date = new Date()): Promise<ChurnFlag
     subscribers: subscribers.length,
     flagged: flags.length,
   });
-  return flags;
+  return { flags, activeEmails };
 }

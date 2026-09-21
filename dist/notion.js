@@ -1849,6 +1849,7 @@ async function getChurnRowsByStatus(statuses) {
             const props = row.properties;
             rows.push({
                 id: row.id,
+                nome: readPlainText(props["Nome"]),
                 email: props["Email"]?.email ?? null,
                 status: (readSelectName(props["Status"]) ?? "Aberto"),
             });

@@ -2179,9 +2179,9 @@ async function getChurnRowByEmail(
 // whatever she's closed out.
 async function getChurnRowsByStatus(
   statuses: ChurnStatus[],
-): Promise<{ id: string; email: string | null; status: ChurnStatus }[]> {
+): Promise<{ id: string; nome: string; email: string | null; status: ChurnStatus }[]> {
   if (!NOTION_CHURN_RISK_DB_ID) return [];
-  const rows: { id: string; email: string | null; status: ChurnStatus }[] = [];
+  const rows: { id: string; nome: string; email: string | null; status: ChurnStatus }[] = [];
   let cursor: string | undefined;
   do {
     const res = await withRetry("getChurnRowsByStatus", () =>
@@ -2196,6 +2196,7 @@ async function getChurnRowsByStatus(
       const props = row.properties as Record<string, unknown>;
       rows.push({
         id: row.id,
+        nome: readPlainText(props["Nome"]),
         email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
         status: (readSelectName(props["Status"]) ?? "Aberto") as ChurnStatus,
       });

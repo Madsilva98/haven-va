@@ -62,7 +62,7 @@ function formatDatePt(d) {
 function monthLabelPt(d) {
     return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon", month: "short" });
 }
-function dedupeLatestPerEmail(subscribers) {
+export function dedupeLatestPerEmail(subscribers) {
     const byEmail = new Map();
     for (const s of subscribers) {
         const email = s.email.toLowerCase().trim();
@@ -174,14 +174,20 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
     return flags;
 }
 /**
- * Fetches the raw Supabase rows and computes flags. Returns [] (and logs
- * a warn) if Studio Supabase isn't configured — same graceful no-op as
- * src/lib/birthdays.ts.
+ * Fetches the raw Supabase rows and computes flags. Also returns every
+ * email currently on an Active subscription (regardless of whether they're
+ * flagged) — src/crons/churn-risk.ts uses this to tell "still active, just
+ * no current signal" (update the row, founder decides what to do) apart
+ * from "no longer an active subscriber at all" (cancelled/deactivated —
+ * safe to auto-archive, nothing left to watch).
+ *
+ * Returns empty (and logs a warn) if Studio Supabase isn't configured —
+ * same graceful no-op as src/lib/birthdays.ts.
  */
 export async function fetchChurnFlags(now = new Date()) {
     if (!studioSupabase) {
         log.warn("churn_signals.fetch_skipped", { reason: "studio_supabase_not_configured" });
-        return [];
+        return { flags: [], activeEmails: new Set() };
     }
     const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
     const fortyFiveDaysAgoIso = new Date(now.getTime() - FAILED_PAYMENT_WINDOW_DAYS * 86_400_000).toISOString();
@@ -226,6 +232,7 @@ export async function fetchChurnFlags(now = new Date()) {
         paymentDate: new Date(r.payment_date),
     }));
     const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);
+    const activeEmails = new Set(dedupeLatestPerEmail(subscribers).keys());
     // Phone isn't in kenko_subscriptions — look it up from kenko_customers
     // (which includes Leads alongside real customers, so this can hit even
     // for edge cases where a phone was entered without a formal purchase).
@@ -237,5 +244,5 @@ export async function fetchChurnFlags(now = new Date()) {
         subscribers: subscribers.length,
         flagged: flags.length,
     });
-    return flags;
+    return { flags, activeEmails };
 }
