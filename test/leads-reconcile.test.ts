@@ -44,7 +44,7 @@ describe("leads-reconcile", () => {
     loadConversionCheckData.mockReset();
   });
 
-  it("archives Perdido and Convertido rows unconditionally — the list must stay 'viva'", async () => {
+  it("archives Perdido, Convertido, and Inconclusivo rows unconditionally — the list must stay 'viva'", async () => {
     getLeadsByEstado.mockImplementation(async (estados: string[]) =>
       estados.includes("Perdido")
         ? [
@@ -52,6 +52,9 @@ describe("leads-reconcile", () => {
             // Manually marked Convertido by the founder in Notion — must be
             // archived outright, not left visible in the list.
             { id: "c1", email: "b@x.com", estado: "Convertido", canal: "Intro Pack" },
+            // Founder couldn't tell from the DM thread whether this converted
+            // or was lost — same terminal weight as the other two.
+            { id: "i1", email: "c@x.com", estado: "Inconclusivo", canal: "Instagram" },
           ]
         : [],
     );
@@ -63,9 +66,31 @@ describe("leads-reconcile", () => {
 
     await run();
 
-    expect(getLeadsByEstado).toHaveBeenCalledWith(["Perdido", "Convertido"]);
+    expect(getLeadsByEstado).toHaveBeenCalledWith(["Perdido", "Convertido", "Inconclusivo"]);
     expect(archivePage).toHaveBeenCalledWith("p1");
     expect(archivePage).toHaveBeenCalledWith("c1");
+    expect(archivePage).toHaveBeenCalledWith("i1");
+  });
+
+  it("does NOT archive a Perdido or Inconclusivo Intro Pack row — regression for the 2026-09-21 resurrection incident (Marta Somborn)", async () => {
+    getLeadsByEstado.mockImplementation(async (estados: string[]) =>
+      estados.includes("Perdido")
+        ? [
+            { id: "p2", email: "marta@x.com", estado: "Perdido", canal: "Intro Pack" },
+            { id: "i2", email: "outro@x.com", estado: "Inconclusivo", canal: "Intro Pack" },
+          ]
+        : [],
+    );
+    loadConversionCheckData.mockResolvedValue({
+      firstPackByEmail: new Map(),
+      subsByEmail: new Map(),
+      membershipsByEmail: new Map(),
+    });
+
+    await run();
+
+    expect(archivePage).not.toHaveBeenCalledWith("p2");
+    expect(archivePage).not.toHaveBeenCalledWith("i2");
   });
 
   it("archives an Email-channel lead that now has a real purchase on file", async () => {
