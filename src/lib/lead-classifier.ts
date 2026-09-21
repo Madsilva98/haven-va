@@ -71,18 +71,25 @@ export async function isGenuineInformationRequest(text: string): Promise<boolean
   return answer.startsWith("SIM");
 }
 
-export type InstagramDMClassification = "cliente" | "parceiro" | "nenhum";
+export type InstagramDMClassification = "cliente" | "parceiro" | "influencer" | "nenhum";
 
 /**
  * `text` should be a chronological Cliente/Haven Instagram DM transcript.
  * "cliente" = genuine information request from a prospective client;
- * "parceiro" = another business/professional reaching out for networking,
- * not asking to become a client; "nenhum" = neither (also the fallback for
- * an API error or an unrecognized answer).
+ * "parceiro" = another business/professional proposing a genuine business
+ * collaboration (workshop, event, corporate, cross-promotion — not about
+ * content/social media); "influencer" = a content creator offering to try
+ * a class in exchange for posting about it; "nenhum" = none of the above —
+ * including job applications and vendor/supplier sales pitches, which are
+ * deliberately excluded from "parceiro" (founder's call, 2026-09-21: those
+ * aren't partnerships, they're the opposite — someone selling to us, or
+ * applying to us). Also the fallback for an API error or unrecognized
+ * answer.
  */
 export async function classifyInstagramDM(text: string): Promise<InstagramDMClassification> {
   const answer = await callClassifier(text, "dm");
   if (answer.startsWith("CLIENTE")) return "cliente";
   if (answer.startsWith("PARCEIRO")) return "parceiro";
+  if (answer.startsWith("INFLUENCER")) return "influencer";
   return "nenhum";
 }

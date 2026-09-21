@@ -1965,7 +1965,16 @@ async function createPartner(
   return page.id;
 }
 
-async function createInfluencer(nome: string, owner: OwnerValue, originalMsg: string): Promise<string> {
+// `canalContacto` is optional — existing callers (e.g. the assistant's
+// create_entity tool) leave it for the founder to fill in by hand;
+// src/crons/leads-instagram-scan.ts always passes "Instagram DM", since
+// that's known at creation time (there's no other source for this cron).
+async function createInfluencer(
+  nome: string,
+  owner: OwnerValue,
+  originalMsg: string,
+  canalContacto?: "Instagram DM" | "Email" | "Outro",
+): Promise<string> {
   if (!NOTION_INFLUENCER_DB_ID) {
     throw new Error("NOTION_INFLUENCER_DB_ID not set");
   }
@@ -1977,6 +1986,7 @@ async function createInfluencer(nome: string, owner: OwnerValue, originalMsg: st
         Owner: { select: { name: owner } },
         Status: { select: { name: "A contactar" satisfies InfluencerStatus } },
         Origem: richText(originalMsg),
+        ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
       },
     }),
   );

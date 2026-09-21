@@ -11,7 +11,7 @@
  *     here but is, hand their exact display name/username back to be
  *     added to EXCLUDED_INSTAGRAM_NAMES in src/lib/instagram-inbox.ts
  *   - spot-check a few borderline classifications, including
- *     cliente-vs-parceiro calls
+ *     cliente-vs-parceiro-vs-influencer calls
  *   - confirm extracted emails/phones look right
  *
  * Usage:
@@ -43,6 +43,7 @@ async function main() {
   let nenhum = 0;
   let clienteCandidates = 0;
   let parceiroCandidates = 0;
+  let influencerCandidates = 0;
 
   for (const contact of contacts) {
     if (isExcludedInstagramContact(contact)) {
@@ -90,6 +91,13 @@ async function main() {
       continue;
     }
 
+    if (classification === "influencer") {
+      influencerCandidates++;
+      console.log(`[influencer] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
+      console.log('  -> seria criado em Influencer Pipeline (Canal de contacto = "Instagram DM")\n');
+      continue;
+    }
+
     // classification === "cliente"
     const email = extractVolunteeredEmail(contact.messages);
     const phone = extractVolunteeredPhone(contact.messages);
@@ -111,7 +119,7 @@ async function main() {
   }
 
   console.log(
-    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${alreadyContacted} já contactados por nós (Partner Pipeline, Status="Contactado") · ${noText} sem texto · ${nenhum} nem cliente nem parceiro · ${clienteCandidates} candidatos a lead · ${parceiroCandidates} candidatos a parceiro.`,
+    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${alreadyContacted} já contactados por nós (Partner Pipeline, Status="Contactado") · ${noText} sem texto · ${nenhum} nenhuma das categorias · ${clienteCandidates} candidatos a lead · ${parceiroCandidates} candidatos a parceiro · ${influencerCandidates} candidatos a influencer.`,
   );
   console.log(
     "\nEste script é só de leitura — não escreveu no Notion nem no checkpoint. Revê os candidatos acima antes de confiar no próximo run real do cron.",

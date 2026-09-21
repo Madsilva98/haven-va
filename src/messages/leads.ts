@@ -80,3 +80,23 @@ export function formatPartnerCandidatesDigests(newPartners: NewPartnerSummary[])
         : `🤝 *${total} potencial(is) parceiro(s) via Instagram:*`,
   );
 }
+
+/**
+ * Separate from formatPartnerCandidatesDigests on purpose — content
+ * creators offering a class-for-post trade land in "Influencer Pipeline",
+ * not "Partner Pipeline" (founder's call, 2026-09-21).
+ */
+export interface NewInfluencerSummary {
+  nome: string;
+}
+
+export function formatInfluencerCandidatesDigests(newInfluencers: NewInfluencerSummary[]): string[] {
+  const lines = newInfluencers.map((p) => `• ${p.nome}`);
+  return chunkDigest(
+    lines,
+    (total, part, parts) =>
+      parts > 1
+        ? `📸 *${total} potencial(is) influencer(s) via Instagram (parte ${part}/${parts}):*`
+        : `📸 *${total} potencial(is) influencer(s) via Instagram:*`,
+  );
+}

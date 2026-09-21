@@ -59,9 +59,11 @@ vi.mock("../src/lib/telegram.js", () => ({
 
 const createLead = vi.fn().mockResolvedValue("new-lead-page-id");
 const createPartner = vi.fn().mockResolvedValue("new-partner-page-id");
+const createInfluencer = vi.fn().mockResolvedValue("new-influencer-page-id");
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
   createPartner: (...args: unknown[]) => createPartner(...args),
+  createInfluencer: (...args: unknown[]) => createInfluencer(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -96,6 +98,7 @@ describe("leads-instagram-scan", () => {
     sendGroupMessage.mockClear();
     createLead.mockClear().mockResolvedValue("new-lead-page-id");
     createPartner.mockClear().mockResolvedValue("new-partner-page-id");
+    createInfluencer.mockClear().mockResolvedValue("new-influencer-page-id");
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
@@ -136,6 +139,21 @@ describe("leads-instagram-scan", () => {
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
     const [message] = sendGroupMessage.mock.calls[0]!;
     expect(message).toContain("parceiro");
+  });
+
+  it("routes a content-for-exposure pitch to Influencer Pipeline, not Partner Pipeline", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava experimentar uma aula e partilhar nos meus stories!");
+    classifyInstagramDM.mockResolvedValue("influencer");
+
+    await run();
+
+    expect(createInfluencer).toHaveBeenCalledWith("Joana Ferreira", "Unassigned", expect.any(String), "Instagram DM");
+    expect(createPartner).not.toHaveBeenCalled();
+    expect(createLead).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("influencer");
   });
 
   it("does not create a lead or partner when the transcript is neither", async () => {

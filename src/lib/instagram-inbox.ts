@@ -30,6 +30,20 @@ export interface InstagramContactWithMessages extends InstagramContact {
   messages: InstagramTranscriptMessage[]; // ascending sentAt
 }
 
+// normalizeText handles case/diacritics but leaves punctuation alone —
+// that's not enough here, since Instagram display names can have extra
+// junk glued on (e.g. an email address someone pasted into their own
+// name field: "susana.vie info@susanavie.com" for the founder's excluded
+// "Susana Vie" — an exact-match check on that field missed her entirely,
+// found in production 2026-09-21). Collapsing all punctuation to spaces
+// and matching by substring instead catches this without needing every
+// exact real-world variant hardcoded.
+function normalizeForExclusionMatch(s: string): string {
+  return normalizeText(s)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 /**
  * Known non-leads: not just staff/founder personal accounts, but also
  * peer/business contacts (fellow instructors, wellness businesses) who DM
@@ -39,34 +53,31 @@ export interface InstagramContactWithMessages extends InstagramContact {
  * mixes what look like display names and @handles, so we normalize and
  * check both fields rather than trying to guess which is which.
  */
-const EXCLUDED_INSTAGRAM_NAMES = new Set(
-  [
-    "Madalena Marques da Silva",
-    "Mafalda Saudade",
-    "Natacha McGlinchey",
-    "Mari Jegundo",
-    "Susana Vie",
-    "Maria Trigueiro",
-    "Helena Estrela",
-    "Catia Pilates Core",
-    "Rafaela Moutinho",
-    "Move with Ana",
-    "Beatriz Rogerio",
-    "Sabine",
-    "maryintheskyy",
-    "mariana.fisiotintima",
-    "Ana Vieira",
-  ].map(normalizeText),
-);
+const EXCLUDED_INSTAGRAM_NAMES = [
+  "Madalena Marques da Silva",
+  "Mafalda Saudade",
+  "Natacha McGlinchey",
+  "Mari Jegundo",
+  "Susana Vie",
+  "Maria Trigueiro",
+  "Helena Estrela",
+  "Catia Pilates Core",
+  "Rafaela Moutinho",
+  "Move with Ana",
+  "Beatriz Rogerio",
+  "Sabine",
+  "maryintheskyy",
+  "mariana.fisiotintima",
+  "Ana Vieira",
+].map(normalizeForExclusionMatch);
 
 export function isExcludedInstagramContact(
   c: Pick<InstagramContact, "displayName" | "username">,
 ): boolean {
-  const displayName = c.displayName ? normalizeText(c.displayName) : null;
-  const username = c.username ? normalizeText(c.username) : null;
-  return (
-    (displayName !== null && EXCLUDED_INSTAGRAM_NAMES.has(displayName)) ||
-    (username !== null && EXCLUDED_INSTAGRAM_NAMES.has(username))
+  const displayName = c.displayName ? normalizeForExclusionMatch(c.displayName) : null;
+  const username = c.username ? normalizeForExclusionMatch(c.username) : null;
+  return EXCLUDED_INSTAGRAM_NAMES.some(
+    (excluded) => (displayName !== null && displayName.includes(excluded)) || (username !== null && username.includes(excluded)),
   );
 }
 

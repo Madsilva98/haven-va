@@ -119,6 +119,21 @@ describe("isExcludedInstagramContact", () => {
   it("does not exclude an unrelated contact", () => {
     expect(isExcludedInstagramContact({ displayName: "Joana Ferreira", username: "joanaf" })).toBe(false);
   });
+
+  it("excludes when the excluded name is a substring of a noisier display name — regression for the 2026-09-21 Susana Vie miss", () => {
+    // Real production display_name had an email glued onto it, which
+    // broke an exact-match check against the founder's excluded "Susana Vie".
+    expect(
+      isExcludedInstagramContact({ displayName: "susana.vie info@susanavie.com", username: null }),
+    ).toBe(true);
+  });
+
+  it("does not over-exclude a short excluded name against an unrelated longer one", () => {
+    // "Sabine" is in the exclusion list — make sure substring matching
+    // doesn't accidentally exclude someone whose name merely contains it.
+    expect(isExcludedInstagramContact({ displayName: "Sabine Costa Ferreira", username: null })).toBe(true);
+    expect(isExcludedInstagramContact({ displayName: "Fabiane Rocha", username: null })).toBe(false);
+  });
 });
 
 describe("groupMessagesByContact", () => {

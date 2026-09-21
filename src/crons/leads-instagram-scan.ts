@@ -2,19 +2,29 @@
  * Weekly scan of the studio's Instagram DM inbox (public.inbox_contacts /
  * public.inbox_messages in Studio Supabase — Mafalda's own tooling, see
  * src/lib/instagram-inbox.ts). Classifies each contact's whole
- * conversation into one of three buckets and routes accordingly:
+ * conversation into one of four buckets and routes accordingly:
  *   - "cliente": genuine information request from a prospective client —
  *     written into "Leads a contactar" (Canal = "Instagram"), same as the
  *     email/intro-pack pipelines.
  *   - "parceiro": another Pilates/wellness business or professional
- *     reaching out for networking, not asking to become a client —
- *     written into "Partner Pipeline" (Categoria = "Parceria") instead.
- *     Founder's call, 2026-09-21: these shouldn't dilute the client-leads
- *     list, but they're a real signal worth tracking, in the same DB/
- *     workflow as every other partner contact (she moves it to "On hold"
- *     or "Arquivado" by hand depending on how the conversation goes).
- *   - "nenhum": neither — dropped, debug-level only.
- * A fourth case is handled BEFORE classification, with no Haiku call at
+ *     proposing a genuine business collaboration (workshop, event,
+ *     corporate, cross-promotion) — written into "Partner Pipeline"
+ *     (Categoria = "Parceria") instead. Founder's call, 2026-09-21: these
+ *     shouldn't dilute the client-leads list, but they're a real signal
+ *     worth tracking, in the same DB/workflow as every other partner
+ *     contact (she moves it to "On hold"/"Arquivado" by hand).
+ *   - "influencer": a content creator offering to try a class in exchange
+ *     for posting about it — written into "Influencer Pipeline" instead
+ *     (Canal de contacto = "Instagram DM"). Founder's call, 2026-09-21:
+ *     distinct from "parceiro" because that DB already has the right
+ *     fields (follower count, collaboration type) for this specific case.
+ *   - "nenhum": none of the above — dropped, debug-level only. Explicitly
+ *     includes job applications and vendor/supplier sales pitches, which
+ *     the classifier is instructed NOT to call "parceiro" (founder's
+ *     call, 2026-09-21, after the dry-run review turned up e.g. a cleaning-
+ *     supplies vendor and several "are you hiring?" messages wrongly
+ *     landing as partner candidates).
+ * A fifth case is handled BEFORE classification, with no Haiku call at
  * all: a contact the studio itself cold-messaged (e.g. an influencer/
  * brand outreach campaign) who never replied. Whether we contacted them
  * first is a data fact (src/lib/instagram-inbox.ts's hasInboundMessage),
@@ -68,8 +78,10 @@ import { log } from "../lib/log.js";
 import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
 import { sendGroupMessage } from "../lib/telegram.js";
 import {
+  formatInfluencerCandidatesDigests,
   formatLeadsDigests,
   formatPartnerCandidatesDigests,
+  type NewInfluencerSummary,
   type NewLeadSummary,
   type NewPartnerSummary,
 } from "../messages/leads.js";
@@ -128,6 +140,7 @@ function setCheckpoint(
 type ProcessResult =
   | { type: "lead"; summary: NewLeadSummary }
   | { type: "partner"; summary: NewPartnerSummary }
+  | { type: "influencer"; summary: NewInfluencerSummary }
   | null;
 
 async function processContact(
@@ -193,6 +206,17 @@ async function processContact(
     }
   }
 
+  if (classification === "influencer") {
+    try {
+      const pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM");
+      setCheckpoint(state, contact, classification, pageId);
+      return { type: "influencer", summary: { nome: name } };
+    } catch (err) {
+      log.error("leads_instagram_scan.influencer_write_failed", { contactId: contact.id, message: errMsg(err) });
+      return null; // leave checkpoint untouched — retry next run
+    }
+  }
+
   // classification === "cliente"
   const email = extractVolunteeredEmail(contact.messages);
   const phone = extractVolunteeredPhone(contact.messages);
@@ -244,6 +268,7 @@ export async function run(): Promise<void> {
   const state = loadState();
   const createdLeads: NewLeadSummary[] = [];
   const createdPartners: NewPartnerSummary[] = [];
+  const createdInfluencers: NewInfluencerSummary[] = [];
   let skippedExcluded = 0;
   let skippedNoNewActivity = 0;
 
@@ -272,6 +297,7 @@ export async function run(): Promise<void> {
     saveState(state);
     if (result?.type === "lead") createdLeads.push(result.summary);
     if (result?.type === "partner") createdPartners.push(result.summary);
+    if (result?.type === "influencer") createdInfluencers.push(result.summary);
   }
 
   log.info("leads_instagram_scan.done", {
@@ -280,6 +306,7 @@ export async function run(): Promise<void> {
     skippedNoNewActivity,
     createdLeads: createdLeads.length,
     createdPartners: createdPartners.length,
+    createdInfluencers: createdInfluencers.length,
   });
 
   for (const message of formatLeadsDigests(createdLeads)) {
@@ -297,6 +324,15 @@ export async function run(): Promise<void> {
       log.info("leads_instagram_scan.partners_posted", { messageId });
     } catch (err) {
       log.error("leads_instagram_scan.partners_send_failed", { message: errMsg(err) });
+    }
+  }
+
+  for (const message of formatInfluencerCandidatesDigests(createdInfluencers)) {
+    try {
+      const messageId = await sendGroupMessage(message);
+      log.info("leads_instagram_scan.influencers_posted", { messageId });
+    } catch (err) {
+      log.error("leads_instagram_scan.influencers_send_failed", { message: errMsg(err) });
     }
   }
 }
