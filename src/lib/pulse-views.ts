@@ -97,6 +97,8 @@ export interface IntroPurchaseRow {
   is_valentine: boolean;
   is_for_members: boolean;
   visits_in_pack: number; // check-ins booked ON this pack between purchase and intro_end — not lifetime visits
+  is_activated: boolean | null; // true = the pack ran (Kenko set an expiry); false = bought, never activated — intro_end is modeled and NOT an expiry (case #25); NULL = no ledger row matched
+  kenko_status: string | null; // membership_status of the matched ledger row
 }
 
 /** One row per first-time intro buyer. */

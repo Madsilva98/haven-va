@@ -28,6 +28,8 @@ function purchase(
     is_valentine: false,
     is_for_members: false,
     visits_in_pack: 0,
+    is_activated: true,
+    kenko_status: "Expired",
     ...over,
   };
 }
@@ -64,16 +66,18 @@ describe("selectFirstTrackedPacks", () => {
     expect(out.get("nobody@x.com")?.name).toBe("nobody@x.com");
   });
 
-  it("marks whether Kenko confirmed the expiry — a modeled date on a never-activated pack is not an ended pack", () => {
+  it("carries is_activated — a never-activated pack (false) or an unmatched sale (NULL) is not an ended pack (case #25)", () => {
     const out = selectFirstTrackedPacks(
       [
         purchase("k@x.com", "2-Class", "2026-08-01", "2026-08-22"),
-        purchase("m@x.com", "10-Day", "2026-07-29", "2026-08-08", { intro_end_source: "modeled", kenko_start: null }),
+        purchase("m@x.com", "10-Day", "2026-07-29", "2026-08-08", { is_activated: false, kenko_status: "Active", intro_end_source: "modeled", kenko_start: null }),
+        purchase("n@x.com", "10-Day", "2026-07-29", "2026-08-08", { is_activated: null, kenko_status: null, intro_end_source: "modeled", kenko_start: null }),
       ],
       customers,
     );
-    expect(out.get("k@x.com")?.expiryConfirmed).toBe(true);
-    expect(out.get("m@x.com")?.expiryConfirmed).toBe(false);
+    expect(out.get("k@x.com")?.activated).toBe(true);
+    expect(out.get("m@x.com")?.activated).toBe(false);
+    expect(out.get("n@x.com")?.activated).toBe(false);
   });
 
   it("lower-cases the email key", () => {

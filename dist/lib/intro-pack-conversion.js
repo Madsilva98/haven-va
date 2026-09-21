@@ -3,7 +3,9 @@
  * - v_pulse_intro_purchase: one row per pack sold; intro_end is Kenko's own
  *   expiry from the ledger when the sale matched a pack (a hand-edited date
  *   shows up here: Carla Costa, 10-Day valid to 8 Sep not 1 Sep, case #7),
- *   else modeled — never compute purchase + 10/21 here.
+ *   else modeled — never compute purchase + 10/21 here. Only is_activated
+ *   = true rows have a real intro_end: false = bought and never came (a
+ *   segment of its own, not an ended pack — case #25), NULL = unmatched.
  * - v_pulse_intro_conversion: converted (a 4x/8x/12x/Unlimited subscription
  *   on or after the purchase — mid-pack counts, Sofia Orellana, case #8) or
  *   converted_pack (a real 5x/10x pack; a drop-in is not a conversion, case
@@ -72,7 +74,7 @@ export function selectFirstTrackedPacks(rows, customers) {
             packName: r.item_name,
             purchasedAt,
             expiresAt: lisbonEndOfDay(r.intro_end),
-            expiryConfirmed: r.intro_end_source === "kenko",
+            activated: r.is_activated === true,
         });
     }
     return out;
@@ -139,13 +141,11 @@ function toUnconverted(row, now, visitsByMember, customers) {
  * Standing weekly signal: intro pack finished at least `cutoffDays` ago
  * (default 21) as of the data date, and the person never converted since.
  *
- * Only packs whose expiry Kenko confirmed (intro_end_source = 'kenko'). A
- * modeled intro_end on a pack that was bought and never activated (ledger
- * Active, no expiry, full credits, 0 visits — 42 people, 26 of them still
- * open, on 2026-09-21) would otherwise read as "terminou há N dias, sem
- * converter" for a pack that never started. Those are a different
- * situation ("bought, never came") — pulse_cases #25 asks the view to say
- * so explicitly; until then they are not leads here.
+ * Only packs the view marks is_activated = true. A pack bought and never
+ * activated (ledger alive, no expiry, full credits, 0 visits — 32 people on
+ * 2026-09-21) has a modeled intro_end that must not read as "terminou há
+ * N dias, sem converter" (case #25). Those are "comprou e nunca veio", a
+ * segment of its own if Madalena wants one — not leads here.
  */
 export async function findUnconvertedIntroPacks(cutoffDays = DEFAULT_CUTOFF_DAYS) {
     if (!isStudioDbAvailable()) {
@@ -158,7 +158,7 @@ export async function findUnconvertedIntroPacks(cutoffDays = DEFAULT_CUTOFF_DAYS
     const now = asOfInstant(asOf);
     const candidates = [];
     for (const row of firstPackByEmail.values()) {
-        if (!row.expiryConfirmed || convertedMemberIds.has(row.memberId))
+        if (!row.activated || convertedMemberIds.has(row.memberId))
             continue;
         const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
         if (daysSinceExpiry >= cutoffDays)
@@ -175,10 +175,10 @@ export function isExpiringPackToWatch(pack, visitsInPack) {
     return false;
 }
 /**
- * Intro packs whose intro_end falls within `daysAhead` days (default 3) of
- * the data date, not already converted (a member who bought a plan
- * mid-pack needs no nudge), filtered to the two usage patterns worth a
- * proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
+ * Activated intro packs (is_activated = true) whose intro_end falls within
+ * `daysAhead` days (default 3) of the data date, not already converted (a
+ * member who bought a plan mid-pack needs no nudge), filtered to the two
+ * usage patterns worth a proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
  * empirically derived like DEFAULT_CUTOFF_DAYS above:
  * - 2-Class: exactly 1 of the 2 classes taken ON the pack (visits_in_pack).
  * - 10-Day: more than 5 classes taken on the pack.
@@ -203,6 +203,8 @@ export async function findExpiringIntroPacksToWatch(daysAhead = 3) {
     const packs = [];
     for (const r of purchases) {
         if (!isTracked(r.pack) || r.is_open_day || r.is_valentine || r.is_for_members)
+            continue;
+        if (r.is_activated !== true)
             continue;
         if (r.intro_end < asOf || r.intro_end > until)
             continue;
@@ -248,7 +250,7 @@ export async function findUnconvertedIntroPacksInRange(fromISO, toISO) {
     const now = asOfInstant(asOf);
     const out = [];
     for (const row of firstPackByEmail.values()) {
-        if (!row.expiryConfirmed)
+        if (!row.activated)
             continue; // same reason as findUnconvertedIntroPacks
         if (row.expiresAt < from || row.expiresAt >= to)
             continue;

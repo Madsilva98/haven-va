@@ -11,8 +11,8 @@
  * Returns `null` when the URL is missing so every studio-backed cron can
  * log and no-op instead of crashing the bot at startup.
  *
- * Statement timeout is set on the role (30s). Every date column comes back
- * as "YYYY-MM-DD" text (the DATE type parser below), never a JS Date — the
+ * Statement timeout is set on the role (30s). Every date and timestamp column
+ * comes back as text (the type parsers below), never a JS Date — the
  * v_pulse_* views compare as plain strings.
  */
 import pg from "pg";
@@ -21,6 +21,10 @@ const STUDIO_DATABASE_URL = process.env.STUDIO_DATABASE_URL;
 // 1082 = DATE. Keep it as the "YYYY-MM-DD" string Postgres sends; pg's
 // default would build a local-midnight Date and shift it across timezones.
 pg.types.setTypeParser(1082, (v) => v);
+// 1114 / 1184 = TIMESTAMP / TIMESTAMPTZ. Strings as well (inbox_messages.
+// sent_at is typed ISO string downstream, as supabase-js used to give it).
+pg.types.setTypeParser(1114, (v) => v);
+pg.types.setTypeParser(1184, (v) => v);
 // 1700 = NUMERIC — a number is fine for the amounts and percentages here.
 pg.types.setTypeParser(1700, (v) => Number(v));
 let pool = null;

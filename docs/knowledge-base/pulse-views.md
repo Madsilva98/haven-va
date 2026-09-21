@@ -39,7 +39,7 @@ Gotchas:
 | Utilization vs plan | `v_pulse_utilization_monthly` | Read only `is_full_month` rows without `had_pause`; `allowance` NULL = Unlimited. ±1 class of noise; never one month as a verdict. |
 | Failed payments | `v_pulse_failed_payments` | `failed_45d` counts from calendar today. A failed payment is a signal, not a suspension. |
 | Ever paid? | `v_pulse_first_paid` | Absent = a lead. Replaced `hasRealPurchase`'s two-table count. |
-| Intro packs sold, real expiry, pack use | `v_pulse_intro_purchase` | `intro_end` = Kenko's ledger expiry when the sale matched a pack (`intro_end_source = 'kenko'`), else modeled. Never compute purchase + 10/21. `visits_in_pack` = check-ins booked ON that pack — the "2-Class, exactly 1 visit" rule reads this, never lifetime `visit_count`. |
+| Intro packs sold, real expiry, pack use | `v_pulse_intro_purchase` | `intro_end` = Kenko's ledger expiry when the sale matched a pack, else modeled. Never compute purchase + 10/21. **Only `is_activated = true` rows have a real expiry**: `false` = bought and never came (a segment of its own, not an ended pack — case #25), `NULL` = no ledger row matched. `visits_in_pack` = check-ins booked ON that pack — the "2-Class, exactly 1 visit" rule reads this, never lifetime `visit_count`. |
 | Converted after an intro | `v_pulse_intro_conversion` | `converted` (membership on/after the purchase, mid-pack counts) or `converted_pack` (a real 5x/10x pack). Either = never chase as a lead. A drop-in is not a conversion. |
 | Class packs / intro holders (birthday audience) | `v_pulse_classpack_state`, `v_pulse_intro_holder_state` | Windows keyed by `member_id`. |
 | The ledger of wrong numbers | `v_pulse_known_cases` | Open first. Read it before changing any studio definition. |

@@ -6,11 +6,9 @@
  * docs/knowledge-base for the full schema notes.
  *
  * Read over the bot's own Postgres connection (src/lib/studio-db.ts, role
- * haven_va, search_path va). Since 2026-09-21 that role sees only the
- * curated va.* views, so the two names below must exist there as mirrors
- * of public.inbox_contacts / public.inbox_messages — pulse_cases #24 asks
- * for them; until they land this cron errors out cleanly ("relation does
- * not exist") and posts nothing.
+ * haven_va, search_path va): va.inbox_contacts and va.inbox_messages are
+ * read-only mirrors of Mafalda's tables (pulse_cases #24, live since
+ * 2026-09-21). 471 Instagram contacts / 5,944 messages on that day.
  *
  * Used by src/crons/leads-instagram-scan.ts.
  */
