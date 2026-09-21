@@ -241,4 +241,30 @@ describe("computeChurnFlags", () => {
     const flags = computeChurnFlags(subs, [], [], [], NOW);
     expect(flags).toHaveLength(0);
   });
+
+  it("measures the no-booking gap from when a pause ended, not from a stale pre-pause booking (Sofia Barata case)", () => {
+    // Paused 27/07-27/08 — kenko_subscriptions keeps her original signup
+    // date throughout (like Raquel/Francesca), but kenko_memberships shows
+    // the stretched cycle. Her last real Booked reservation was made
+    // 19/07, before the pause — the honest gap is "hasn't booked since
+    // resuming" (~18 days from the cycle's end), not 64 days measured from
+    // that stale pre-pause booking. Uses its own `now` (real-world date
+    // this was found on) rather than the shared NOW used elsewhere in this
+    // file, since the cycle end here needs to be recent enough to matter.
+    const laterNow = new Date("2026-09-21T12:00:00Z");
+    const subs = [subscriber("o@x.com", "4x Monthly | Premium", "2026-05-01T00:00:00Z")];
+    const bookings: BookingRecord[] = [
+      { email: "o@x.com", bookingDate: new Date("2026-07-19T00:00:00Z"), eventDate: new Date("2026-07-24T00:00:00Z"), status: "Booked" },
+      // Tried twice since returning, but both got cancelled.
+      { email: "o@x.com", bookingDate: new Date("2026-09-07T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Canceled" },
+      { email: "o@x.com", bookingDate: new Date("2026-09-13T00:00:00Z"), eventDate: new Date("2026-09-17T00:00:00Z"), status: "Canceled" },
+    ];
+    const pausedCycles: PausedCycleWindow[] = [
+      { email: "o@x.com", start: new Date("2026-07-02T00:00:00Z"), end: new Date("2026-09-04T00:00:00Z") }, // 64-day stretched cycle
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], pausedCycles, laterNow);
+    expect(flags).toHaveLength(1);
+    const detail = flags[0]!.signals.find((s) => s.type === "Sem reservas 14+ dias")!.detail;
+    expect(detail).toBe("18 dias sem reservar desde que voltou da pausa (04/09/2026)");
+  });
 });

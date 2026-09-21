@@ -203,24 +203,36 @@ export function computeChurnFlags(
     const subBookings = bookingsByEmail.get(email) ?? [];
 
     // Signal 1 — no booking in >21 days, subscription itself old enough to judge.
-    // Bookings are bounded to >= subscriptionStartsAt (the start of THIS active
-    // stretch) so a pause/resume can't leak in: pausing and resuming creates a
-    // new subscription row with its own start date, so a booking made before
-    // pausing must never count as "last booking" once someone's back — that
-    // would cite a stale pre-pause date and overstate the gap. Only "Booked"
+    // The reference point for "how long has this stretch run" is the LATER
+    // of subscriptionStartsAt or the end of the most recent paused/stretched
+    // cycle (same pausedCyclesByEmail data signal 3 uses) — kenko_subscriptions
+    // keeps the ORIGINAL signup date regardless of pauses, so without this a
+    // pause gets silently absorbed into the gap: found 2026-09-21 (Sofia
+    // Barata, paused 27/07-27/08) showing "64 dias sem reservar" measured
+    // from her last real booking before the pause, when the honest answer is
+    // "hasn't booked since resuming, ~17 dias" — she can't be faulted for the
+    // ~31 days she was paused and physically couldn't book. Only "Booked"
     // counts — a since-cancelled reservation (status "Canceled"/"Waitlist
     // canceled"/"Waitlist") must not reset the gap, or someone who booked
     // then backed out would look fine despite never actually coming back
     // (found 2026-09-21, founder's question). "última reserva" is measured
     // by when the booking was MADE, not the class date — booking a future
     // class still counts as current engagement, on purpose.
-    const tenureDays = (nowMs - sub.subscriptionStartsAt.getTime()) / 86_400_000;
+    const pausedWindows = pausedCyclesByEmail.get(email) ?? [];
+    const mostRecentPauseEnd = pausedWindows
+      .map((w) => w.end)
+      .filter((end) => end.getTime() <= nowMs)
+      .reduce<Date | null>((latest, end) => (!latest || end > latest ? end : latest), null);
+    const stretchStart =
+      mostRecentPauseEnd && mostRecentPauseEnd > sub.subscriptionStartsAt
+        ? mostRecentPauseEnd
+        : sub.subscriptionStartsAt;
+    const resumedFromPause = stretchStart === mostRecentPauseEnd;
+
+    const tenureDays = (nowMs - stretchStart.getTime()) / 86_400_000;
     if (tenureDays >= NO_BOOKING_GAP_DAYS) {
       const bookingsThisStretch = subBookings.filter(
-        (b) =>
-          b.status === "Booked" &&
-          b.bookingDate.getTime() <= nowMs &&
-          b.bookingDate >= sub.subscriptionStartsAt,
+        (b) => b.status === "Booked" && b.bookingDate.getTime() <= nowMs && b.bookingDate >= stretchStart,
       );
       const lastBooking = bookingsThisStretch.reduce<Date | null>(
         (latest, b) => (!latest || b.bookingDate > latest ? b.bookingDate : latest),
@@ -232,7 +244,9 @@ export function computeChurnFlags(
       if (gapDays > NO_BOOKING_GAP_DAYS) {
         const detail = lastBooking
           ? `${Math.round(gapDays)} dias sem reservar (última reserva: ${formatDatePt(lastBooking)})`
-          : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
+          : resumedFromPause
+            ? `${Math.round(gapDays)} dias sem reservar desde que voltou da pausa (${formatDatePt(stretchStart)})`
+            : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
         signals.push({ type: "Sem reservas 14+ dias", detail });
       }
     }
@@ -251,7 +265,6 @@ export function computeChurnFlags(
     // Signal 3 — <50% plan utilization in each of the last 3 full calendar months.
     const allowance = parseMonthlyAllowance(sub.membershipName);
     if (allowance !== null) {
-      const pausedWindows = pausedCyclesByEmail.get(email) ?? [];
       const months = fullCalendarMonthsBefore(now, UNDERUSE_MONTHS);
       const monthStats = months.map(({ start, end }) => {
         if (sub.subscriptionStartsAt > start) return null; // not a member for the whole month
