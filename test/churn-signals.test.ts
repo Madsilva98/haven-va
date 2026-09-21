@@ -7,6 +7,7 @@ import {
   type ActiveSubscriber,
   type BookingRecord,
   type FailedPaymentRecord,
+  type PausedCycleWindow,
 } from "../src/lib/churn-signals.js";
 
 describe("isExcludedEmail", () => {
@@ -52,14 +53,14 @@ describe("computeChurnFlags", () => {
     const bookings: BookingRecord[] = [
       { email: "a@x.com", bookingDate: new Date("2026-07-01T00:00:00Z"), eventDate: new Date("2026-07-01T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(1);
     expect(flags[0]!.signals.map((s) => s.type)).toContain("Sem reservas 14+ dias");
   });
 
   it("does not flag a brand-new subscriber (tenure < 14 days) with no booking yet", () => {
     const subs = [subscriber("new@x.com", "4x Monthly | Premium", "2026-09-10T00:00:00Z")];
-    const flags = computeChurnFlags(subs, [], [], NOW);
+    const flags = computeChurnFlags(subs, [], [], [], NOW);
     expect(flags).toHaveLength(0);
   });
 
@@ -76,7 +77,7 @@ describe("computeChurnFlags", () => {
       { email: "b@x.com", bookingDate: new Date("2026-08-15T00:00:00Z"), eventDate: new Date("2026-08-15T00:00:00Z"), status: "Booked" },
       { email: "b@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(0);
   });
 
@@ -88,7 +89,7 @@ describe("computeChurnFlags", () => {
     const failedPayments: FailedPaymentRecord[] = [
       { email: "c@x.com", paymentDate: new Date("2026-09-05T00:00:00Z") },
     ];
-    const flags = computeChurnFlags(subs, bookings, failedPayments, NOW);
+    const flags = computeChurnFlags(subs, bookings, failedPayments, [], NOW);
     expect(flags).toHaveLength(1);
     expect(flags[0]!.signals.map((s) => s.type)).toContain("Pagamento falhado");
   });
@@ -107,7 +108,7 @@ describe("computeChurnFlags", () => {
     const failedPayments: FailedPaymentRecord[] = [
       { email: "d@x.com", paymentDate: new Date("2026-06-01T00:00:00Z") },
     ];
-    const flags = computeChurnFlags(subs, bookings, failedPayments, NOW);
+    const flags = computeChurnFlags(subs, bookings, failedPayments, [], NOW);
     expect(flags).toHaveLength(0);
   });
 
@@ -121,7 +122,7 @@ describe("computeChurnFlags", () => {
       { email: "e@x.com", bookingDate: new Date("2026-08-10T00:00:00Z"), eventDate: new Date("2026-08-10T00:00:00Z"), status: "Booked" },
       { email: "e@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(1);
     expect(flags[0]!.signals.map((s) => s.type)).toEqual(["Baixa utilização"]);
   });
@@ -129,8 +130,59 @@ describe("computeChurnFlags", () => {
   it("does not flag utilization for a subscriber who wasn't a member for the whole window (the found-and-fixed bug)", () => {
     // Joined 10 days ago — must not count June/July/August as "0 bookings = underuse".
     const subs = [subscriber("f@x.com", "4x Monthly | Premium", "2026-09-06T00:00:00Z")];
-    const flags = computeChurnFlags(subs, [], [], NOW);
+    const flags = computeChurnFlags(subs, [], [], [], NOW);
     expect(flags).toHaveLength(0);
+  });
+
+  it("excludes months that overlap a paused/stretched billing cycle from the utilization check (Raquel Saraiva case)", () => {
+    // Real case: paused 27/05-15/07, and kenko_memberships records this as
+    // one 80-day cycle (26/04-15/07) since kenko_subscriptions itself keeps
+    // her original signup date throughout, unaffected by the pause. That
+    // cycle overlaps both June AND the first half of July, so both get
+    // excluded — leaving only August, which alone can't satisfy "all 3
+    // months <50%", so the signal correctly can't fire either way (not
+    // enough clean months yet, rather than wrongly reading 0%/0%/13%).
+    // A recent booking keeps signal 1 from firing too, isolating signal 3.
+    const subs = [subscriber("k@x.com", "8x Monthly | Premium", "2025-12-18T00:00:00Z")];
+    const bookings: BookingRecord[] = [
+      { email: "k@x.com", bookingDate: new Date("2026-08-20T00:00:00Z"), eventDate: new Date("2026-08-20T00:00:00Z"), status: "Booked" },
+      { email: "k@x.com", bookingDate: new Date("2026-09-10T00:00:00Z"), eventDate: new Date("2026-09-10T00:00:00Z"), status: "Booked" },
+    ];
+    const pausedCycles: PausedCycleWindow[] = [
+      { email: "k@x.com", start: new Date("2026-04-26T00:00:00Z"), end: new Date("2026-07-15T00:00:00Z") }, // 80-day stretched cycle
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], pausedCycles, NOW);
+    expect(flags).toHaveLength(0);
+  });
+
+  it("still flags genuine low utilization when a paused cycle doesn't overlap the evaluated months", () => {
+    const subs = [subscriber("l@x.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
+    const pausedCycles: PausedCycleWindow[] = [
+      // Stretched, but back in Feb-Mar — doesn't touch June/July/August.
+      { email: "l@x.com", start: new Date("2026-02-01T00:00:00Z"), end: new Date("2026-03-25T00:00:00Z") },
+    ];
+    const bookings: BookingRecord[] = [
+      { email: "l@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], pausedCycles, NOW);
+    expect(flags).toHaveLength(1);
+    expect(flags[0]!.signals.map((s) => s.type)).toEqual(["Baixa utilização"]);
+  });
+
+  it("does not treat a normal ~30-day cycle as a pause", () => {
+    const subs = [subscriber("m@x.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
+    const pausedCycles: PausedCycleWindow[] = [
+      { email: "m@x.com", start: new Date("2026-08-01T00:00:00Z"), end: new Date("2026-08-31T00:00:00Z") }, // 30 days, normal
+    ];
+    // A recent booking isolates signal 3 (matches this file's other signal-3
+    // tests) — it falls in September, outside the 3 evaluated months, so it
+    // doesn't affect the June/July/August ratios themselves.
+    const bookings: BookingRecord[] = [
+      { email: "m@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], pausedCycles, NOW);
+    expect(flags).toHaveLength(1); // still flags — 0 bookings in June/July/August, all genuinely unused
+    expect(flags[0]!.signals.map((s) => s.type)).toEqual(["Baixa utilização"]);
   });
 
   it("does not evaluate signal 3 for Unlimited plans", () => {
@@ -138,7 +190,7 @@ describe("computeChurnFlags", () => {
     const bookings: BookingRecord[] = [
       { email: "g@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(0);
   });
 
@@ -150,7 +202,7 @@ describe("computeChurnFlags", () => {
     const bookings: BookingRecord[] = [
       { email: "h@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-14T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(0);
   });
 
@@ -163,7 +215,7 @@ describe("computeChurnFlags", () => {
     const bookings: BookingRecord[] = [
       { email: "i@x.com", bookingDate: new Date("2026-06-01T00:00:00Z"), eventDate: new Date("2026-06-01T00:00:00Z"), status: "Booked" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(1);
     const detail = flags[0]!.signals.find((s) => s.type === "Sem reservas 14+ dias")!.detail;
     expect(detail).toContain("nenhuma reserva desde a inscrição");
@@ -178,7 +230,7 @@ describe("computeChurnFlags", () => {
       { email: "j@x.com", bookingDate: new Date("2026-07-01T00:00:00Z"), eventDate: new Date("2026-07-01T00:00:00Z"), status: "Booked" },
       { email: "j@x.com", bookingDate: new Date("2026-09-14T00:00:00Z"), eventDate: new Date("2026-09-20T00:00:00Z"), status: "Canceled" },
     ];
-    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    const flags = computeChurnFlags(subs, bookings, [], [], NOW);
     expect(flags).toHaveLength(1);
     const detail = flags[0]!.signals.find((s) => s.type === "Sem reservas 14+ dias")!.detail;
     expect(detail).toContain("01/07/2026"); // cites the real last Booked reservation, not the cancelled one
@@ -186,7 +238,7 @@ describe("computeChurnFlags", () => {
 
   it("excludes staff/test accounts even if they'd otherwise be flagged", () => {
     const subs = [subscriber("madsilva3+test1@gmail.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
-    const flags = computeChurnFlags(subs, [], [], NOW);
+    const flags = computeChurnFlags(subs, [], [], [], NOW);
     expect(flags).toHaveLength(0);
   });
 });

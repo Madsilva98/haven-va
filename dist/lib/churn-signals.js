@@ -25,7 +25,21 @@
  *    of the last 3 full calendar months — a month only counts if the
  *    subscription already existed for the whole month (otherwise a brand
  *    new member's pre-signup months get counted as "0 bookings = underuse",
- *    a real bug found and fixed while validating this).
+ *    a real bug found and fixed while validating this), AND if it doesn't
+ *    overlap a paused/stretched billing cycle (see PAUSE_STRETCH_THRESHOLD_DAYS
+ *    below) — found 2026-09-21 via two real customers (Raquel Saraiva,
+ *    Francesca Buoncristiani) both showing "0% utilização" for a month they
+ *    were fully paused, because kenko_subscriptions only ever holds ONE row
+ *    per person with their ORIGINAL signup date — a pause/resume does NOT
+ *    reliably create a new row there (unlike what one early test case,
+ *    esens33@hotmail.com, suggested), so the existing "not a member yet"
+ *    exclusion above never caught it. kenko_memberships DOES capture pauses
+ *    faithfully, as an abnormally long cycle (Raquel's: 80 days instead of
+ *    the usual ~28-31; Francesca's: ~122) — confirmed empirically across
+ *    ~640 real Subscription-type cycles: the bulk cluster at 28-31 days,
+ *    then thin out fast, so PAUSE_STRETCH_THRESHOLD_DAYS=45 safely separates
+ *    "normal cycle, maybe a few days of billing-date jitter" from "this
+ *    cycle got stretched by a pause" without needing an explicit pause flag.
  *
  * Explicitly tested and rejected (do not resurrect without re-validating):
  * raw unused-credits snapshot, no-show rate, "never booked at all" — none
@@ -56,6 +70,7 @@ const NO_BOOKING_GAP_DAYS = 14;
 const FAILED_PAYMENT_WINDOW_DAYS = 45;
 const UNDERUSE_RATIO = 0.5;
 const UNDERUSE_MONTHS = 3;
+const PAUSE_STRETCH_THRESHOLD_DAYS = 45;
 function formatDatePt(d) {
     return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
 }
@@ -94,7 +109,7 @@ function fullCalendarMonthsBefore(now, monthsBack) {
  * Pure — no I/O. Applies the three validated signals to already-fetched
  * Supabase rows. `now` is injectable for tests.
  */
-export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
+export function computeChurnFlags(subscribers, bookings, failedPayments, pausedCycles, now) {
     const activeByEmail = dedupeLatestPerEmail(subscribers);
     const bookingsByEmail = new Map();
     for (const b of bookings) {
@@ -113,6 +128,20 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
         const list = failedByEmail.get(email) ?? [];
         list.push(p);
         failedByEmail.set(email, list);
+    }
+    const pausedCyclesByEmail = new Map();
+    for (const c of pausedCycles) {
+        const email = c.email.toLowerCase().trim();
+        if (!activeByEmail.has(email))
+            continue;
+        // Only a cycle genuinely stretched past the norm counts as a pause —
+        // this check lives here (not just in fetchChurnFlags) so the business
+        // rule is testable directly against computeChurnFlags.
+        if ((c.end.getTime() - c.start.getTime()) / 86_400_000 <= PAUSE_STRETCH_THRESHOLD_DAYS)
+            continue;
+        const list = pausedCyclesByEmail.get(email) ?? [];
+        list.push(c);
+        pausedCyclesByEmail.set(email, list);
     }
     const nowMs = now.getTime();
     const flags = [];
@@ -160,10 +189,13 @@ export function computeChurnFlags(subscribers, bookings, failedPayments, now) {
         // Signal 3 — <50% plan utilization in each of the last 3 full calendar months.
         const allowance = parseMonthlyAllowance(sub.membershipName);
         if (allowance !== null) {
+            const pausedWindows = pausedCyclesByEmail.get(email) ?? [];
             const months = fullCalendarMonthsBefore(now, UNDERUSE_MONTHS);
             const monthStats = months.map(({ start, end }) => {
                 if (sub.subscriptionStartsAt > start)
                     return null; // not a member for the whole month
+                if (pausedWindows.some((w) => w.start < end && w.end > start))
+                    return null; // paused for some/all of this month
                 const count = subBookings.filter((b) => b.status === "Booked" && b.eventDate >= start && b.eventDate < end).length;
                 return { start, count, ratio: count / allowance };
             });
@@ -204,7 +236,7 @@ export async function fetchChurnFlags(now = new Date()) {
     }
     const fourMonthsAgoIso = new Date(now.getTime() - 4 * 30 * 86_400_000).toISOString();
     const fortyFiveDaysAgoIso = new Date(now.getTime() - FAILED_PAYMENT_WINDOW_DAYS * 86_400_000).toISOString();
-    const [subsRows, bookingRows, failedRows] = await Promise.all([
+    const [subsRows, bookingRows, failedRows, membershipRows] = await Promise.all([
         fetchAllPages((from, to) => studioSupabase
             .from("kenko_subscriptions")
             .select("contact_email, contact_name, membership_name, subscription_starts_at")
@@ -220,6 +252,15 @@ export async function fetchChurnFlags(now = new Date()) {
             .select("contact_email, payment_date")
             .eq("payment_status", "Failed")
             .gte("payment_date", fortyFiveDaysAgoIso)
+            .range(from, to)),
+        // Not date-bounded: a paused cycle can start well over 4 months back
+        // (Raquel's did) and still overlap a month we're evaluating today.
+        // Subscription-type only — kenko_memberships also holds one-off credit
+        // packs, which are never "paused" in this sense.
+        fetchAllPages((from, to) => studioSupabase
+            .from("kenko_memberships")
+            .select("contact_email, membership_starts_at, membership_expires_at")
+            .eq("membership_type", "Subscription")
             .range(from, to)),
     ]);
     const subscribers = subsRows
@@ -244,7 +285,17 @@ export async function fetchChurnFlags(now = new Date()) {
         email: r.contact_email,
         paymentDate: new Date(r.payment_date),
     }));
-    const flags = computeChurnFlags(subscribers, bookings, failedPayments, now);
+    // Raw cycle windows, unfiltered — computeChurnFlags itself decides what
+    // counts as a "stretched" cycle (PAUSE_STRETCH_THRESHOLD_DAYS), so that
+    // rule is testable directly against it, not just at this I/O layer.
+    const pausedCycles = membershipRows
+        .filter((r) => r.contact_email && r.membership_starts_at && r.membership_expires_at)
+        .map((r) => ({
+        email: r.contact_email,
+        start: new Date(r.membership_starts_at),
+        end: new Date(r.membership_expires_at),
+    }));
+    const flags = computeChurnFlags(subscribers, bookings, failedPayments, pausedCycles, now);
     const activeEmails = new Set(dedupeLatestPerEmail(subscribers).keys());
     // Phone isn't in kenko_subscriptions — look it up from kenko_customers
     // (which includes Leads alongside real customers, so this can hit even

@@ -138,6 +138,60 @@ describe("churn-risk", () => {
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes a row when only the detail text changed (same signal type), without pinging the digest", async () => {
+    fetchChurnFlags.mockResolvedValue({
+      flags: [
+        {
+          email: "i@x.com",
+          name: "Inês",
+          plano: "4x Monthly",
+          telefone: null,
+          signals: [{ type: "Sem reservas 14+ dias", detail: "24 dias sem reservar (última reserva: 28/08/2026)" }],
+        },
+      ],
+      activeEmails: new Set(["i@x.com"]),
+    });
+    getChurnRowByEmail.mockResolvedValue({
+      id: "row-i",
+      sinais: ["Sem reservas 14+ dias"],
+      detalhes: "20 dias sem reservar (última reserva: 28/08/2026)", // same type, stale count
+    });
+
+    await run();
+
+    expect(updateChurnFlag).toHaveBeenCalledWith(
+      "row-i",
+      ["Sem reservas 14+ dias"],
+      "24 dias sem reservar (última reserva: 28/08/2026)",
+    );
+    expect(sendGroupMessage).not.toHaveBeenCalled(); // not new news, just a number ticking up
+  });
+
+  it("skips a row entirely when neither the signal types nor the detail text changed", async () => {
+    fetchChurnFlags.mockResolvedValue({
+      flags: [
+        {
+          email: "n@x.com",
+          name: "Nuno",
+          plano: "4x Monthly",
+          telefone: null,
+          signals: [{ type: "Pagamento falhado", detail: "pagamento falhado a 10/09" }],
+        },
+      ],
+      activeEmails: new Set(["n@x.com"]),
+    });
+    getChurnRowByEmail.mockResolvedValue({
+      id: "row-n",
+      sinais: ["Pagamento falhado"],
+      detalhes: "pagamento falhado a 10/09",
+    });
+
+    await run();
+
+    expect(updateChurnFlag).not.toHaveBeenCalled();
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
   it("archives a still-active row once it resolves every signal, and reports it as a bare count — not by name", async () => {
     mockOpenAndClosedRows(
       [],

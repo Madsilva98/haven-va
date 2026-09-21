@@ -13,7 +13,14 @@
  *    new ones added), and posts one digest listing who's newly flagged,
  *    gained a signal, or lost one this week — found in production
  *    2026-09-21: without this, a row like "sem reservas 14+ dias" stayed
- *    stuck showing that even after the person booked again.
+ *    stuck showing that even after the person booked again. The row is
+ *    also re-written whenever just the DETAIL TEXT changed (day count,
+ *    date, percentage) even if the signal TYPE set didn't — otherwise a
+ *    row showing "20 dias sem reservar" the week it's created never
+ *    advances to 24, 30, etc., because nothing was comparing the numbers,
+ *    only the type list (also found 2026-09-21, several real rows frozen
+ *    at their first-ever computed values). A details-only refresh isn't
+ *    posted to the digest, since it's not new information for the founder.
  * 3. Reconciles every OTHER still-open row (i.e. not touched by #2 because
  *    Studio Supabase no longer flags that email at all this week) — the
  *    founder's call (2026-09-21): once a row shows zero current signals
@@ -97,13 +104,22 @@ export async function run() {
             }
             const added = signalTypes.filter((t) => !existing.sinais.includes(t));
             const resolved = existing.sinais.filter((t) => !signalTypes.includes(t));
-            if (added.length === 0 && resolved.length === 0)
-                continue; // nothing changed since last week
+            const detailsChanged = detalhes !== existing.detalhes;
+            if (added.length === 0 && resolved.length === 0 && !detailsChanged)
+                continue; // truly nothing changed
             // Sync to exactly this week's signals — not a union — so a signal
             // the person has since resolved (e.g. booked again) actually drops
-            // off the row instead of sticking around forever.
+            // off the row instead of sticking around forever. Written even when
+            // the TYPE set is unchanged (detailsChanged only) — found 2026-09-21:
+            // several rows had frozen at their first-ever numbers for days because
+            // this only used to check the type set, e.g. "20 dias sem reservar"
+            // never advancing to 24, or the exact date/percentage never updating.
             await notion.updateChurnFlag(existing.id, signalTypes, detalhes);
-            changed.push({ nome: flag.name, sinais: [...added, ...resolved.map((t) => `${t} (resolvido)`)] });
+            // Only ping the digest on real news (a signal appearing/clearing) —
+            // a same-signals detail refresh is not worth a Telegram message.
+            if (added.length > 0 || resolved.length > 0) {
+                changed.push({ nome: flag.name, sinais: [...added, ...resolved.map((t) => `${t} (resolvido)`)] });
+            }
         }
         catch (err) {
             log.error("churn_risk.write_failed", { email: flag.email, message: errMsg(err) });

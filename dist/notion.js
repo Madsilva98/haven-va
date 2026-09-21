@@ -1802,7 +1802,11 @@ async function findLeadByEmailAny(email) {
 }
 // ----- Clientes em risco de churn -----
 // Returns an OPEN churn-risk row (Status not Resolvido/Arquivado) for this
-// email, if any.
+// email, if any. Includes `detalhes` (not just `sinais`) so the caller can
+// tell a row apart that still has the same signal TYPES but stale numbers
+// (e.g. "20 dias sem reservar" sitting unrefreshed while the real gap grows
+// every week) — found 2026-09-21, several real rows had been frozen since
+// creation because nothing ever compared the detail text, only the type set.
 async function getChurnRowByEmail(email) {
     if (!NOTION_CHURN_RISK_DB_ID)
         return null;
@@ -1824,6 +1828,7 @@ async function getChurnRowByEmail(email) {
     return {
         id: row.id,
         sinais: readMultiSelectNames(props["Sinais"]),
+        detalhes: readPlainText(props["Detalhes"]),
     };
 }
 // Every churn-risk row currently in one of `statuses` — full cursor loop,
