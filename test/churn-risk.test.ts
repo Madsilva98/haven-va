@@ -138,15 +138,15 @@ describe("churn-risk", () => {
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("updates a still-active row to no signals when Studio Supabase no longer flags it at all, without archiving", async () => {
+  it("archives a still-active row once it resolves every signal — nothing left to watch", async () => {
     mockOpenAndClosedRows([], [{ id: "row-d", nome: "Diana", email: "d@x.com", status: "Aberto" }]);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com"]) });
 
     await run();
 
-    expect(updateChurnFlag).toHaveBeenCalledWith("row-d", [], "Sem sinais de risco na última verificação.");
-    expect(archivePage).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(archivePage).toHaveBeenCalledWith("row-d");
+    expect(updateChurnFlag).not.toHaveBeenCalled();
+    expect(sendGroupMessage).not.toHaveBeenCalled(); // silent, like any other archive
   });
 
   it("auto-archives an open row once the person is no longer an active subscriber at all", async () => {

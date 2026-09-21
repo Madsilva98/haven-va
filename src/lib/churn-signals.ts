@@ -164,16 +164,23 @@ export function computeChurnFlags(
     const subBookings = bookingsByEmail.get(email) ?? [];
 
     // Signal 1 — no booking in >21 days, subscription itself old enough to judge.
+    // Bookings are bounded to >= subscriptionStartsAt (the start of THIS active
+    // stretch) so a pause/resume can't leak in: pausing and resuming creates a
+    // new subscription row with its own start date, so a booking made before
+    // pausing must never count as "last booking" once someone's back — that
+    // would cite a stale pre-pause date and overstate the gap.
     const tenureDays = (nowMs - sub.subscriptionStartsAt.getTime()) / 86_400_000;
     if (tenureDays >= NO_BOOKING_GAP_DAYS) {
-      const bookingsBeforeNow = subBookings.filter((b) => b.bookingDate.getTime() <= nowMs);
-      const lastBooking = bookingsBeforeNow.reduce<Date | null>(
+      const bookingsThisStretch = subBookings.filter(
+        (b) => b.bookingDate.getTime() <= nowMs && b.bookingDate >= sub.subscriptionStartsAt,
+      );
+      const lastBooking = bookingsThisStretch.reduce<Date | null>(
         (latest, b) => (!latest || b.bookingDate > latest ? b.bookingDate : latest),
         null,
       );
       const gapDays = lastBooking
         ? (nowMs - lastBooking.getTime()) / 86_400_000
-        : tenureDays; // never booked at all since signup — treat as a full gap
+        : tenureDays; // never booked since this active stretch began (new signup, or resumed from a pause) — treat as a full gap
       if (gapDays > NO_BOOKING_GAP_DAYS) {
         const detail = lastBooking
           ? `${Math.round(gapDays)} dias sem reservar (última reserva: ${formatDatePt(lastBooking)})`

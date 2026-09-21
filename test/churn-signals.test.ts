@@ -154,6 +154,22 @@ describe("computeChurnFlags", () => {
     expect(flags).toHaveLength(0);
   });
 
+  it("ignores a booking from before the current active stretch (e.g. before resuming from a pause) as the last booking", () => {
+    // Pausing/resuming creates a new subscription row with its own start
+    // date — a booking from the stretch before pausing must not count as
+    // "last booking" once someone's back, or the reported gap would cite a
+    // stale pre-pause date and overstate how long they've been away.
+    const subs = [subscriber("i@x.com", "4x Monthly | Premium", "2026-09-01T00:00:00Z")]; // resumed 15 days ago
+    const bookings: BookingRecord[] = [
+      { email: "i@x.com", bookingDate: new Date("2026-06-01T00:00:00Z"), eventDate: new Date("2026-06-01T00:00:00Z"), status: "Booked" },
+    ];
+    const flags = computeChurnFlags(subs, bookings, [], NOW);
+    expect(flags).toHaveLength(1);
+    const detail = flags[0]!.signals.find((s) => s.type === "Sem reservas 14+ dias")!.detail;
+    expect(detail).toContain("nenhuma reserva desde a inscrição");
+    expect(detail).not.toContain("01/06/2026");
+  });
+
   it("excludes staff/test accounts even if they'd otherwise be flagged", () => {
     const subs = [subscriber("madsilva3+test1@gmail.com", "4x Monthly | Premium", "2026-01-01T00:00:00Z")];
     const flags = computeChurnFlags(subs, [], [], NOW);

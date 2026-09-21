@@ -15,16 +15,18 @@
  *    2026-09-21: without this, a row like "sem reservas 14+ dias" stayed
  *    stuck showing that even after the person booked again.
  * 3. Reconciles every OTHER still-open row (i.e. not touched by #2 because
- *    Studio Supabase no longer flags that email at all this week):
- *    - still an Active subscriber, just no current signal → update the row
- *      to show no signals and post it in the digest too, so the founder
- *      can decide herself whether to keep watching or close it out.
- *    - not an Active subscriber anymore (cancelled/deactivated) → archive
- *      automatically. Nothing left to watch once someone's actually gone;
- *      also found in production 2026-09-21 — a churned customer's row (no
- *      longer queried at all once their subscription drops out of the
- *      "Active" filter in churn-signals.ts) was sitting open indefinitely
- *      with no auto-archive path, unlike Leads a contactar.
+ *    Studio Supabase no longer flags that email at all this week) — the
+ *    founder's call (2026-09-21): once a row shows zero current signals
+ *    there's nothing left to watch, archive it like any other closed-out
+ *    row, whether that's because the person cancelled/deactivated
+ *    (subscription no longer Active — also found in production 2026-09-21,
+ *    a churned customer's row was sitting open indefinitely since nothing
+ *    ever re-checked it once their subscription dropped out of the
+ *    "Active" filter in churn-signals.ts) or because they're still active
+ *    but resolved every signal (e.g. booked again). A row that resolved
+ *    SOME signals but still has at least one open one is handled by #2
+ *    instead — it stays open and in the digest, since that's still worth
+ *    watching or contacting about.
  *
  * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
  * the birthday cron.
@@ -99,7 +101,11 @@ export async function run() {
         }
     }
     // Reconcile every other still-open row: not touched above because
-    // Studio Supabase doesn't flag that email at all this week.
+    // Studio Supabase doesn't flag that email at all this week — zero
+    // current signals either way, so archive it (silently, like the
+    // Resolvido/Arquivado sweep above — not something to nag the founder
+    // about in the digest).
+    let archivedResolved = 0;
     let archivedChurned = 0;
     try {
         const open = await notion.getChurnRowsByStatus(["Aberto", "Contactado"]);
@@ -110,18 +116,12 @@ export async function run() {
             if (flaggedEmails.has(email))
                 continue; // already handled above
             try {
+                await notion.archivePage(row.id);
                 if (activeEmails.has(email)) {
-                    // Still an active subscriber, just no current signal — the
-                    // founder decides whether to keep watching or close it out, so
-                    // just surface it rather than archiving automatically.
-                    await notion.updateChurnFlag(row.id, [], "Sem sinais de risco na última verificação.");
-                    changed.push({ nome: row.nome || row.email, sinais: ["sem sinais atuais (resolvido)"] });
+                    archivedResolved++; // still active, just resolved every signal
                 }
                 else {
-                    // No longer an active subscriber at all (cancelled/deactivated)
-                    // — nothing left to watch.
-                    await notion.archivePage(row.id);
-                    archivedChurned++;
+                    archivedChurned++; // no longer an active subscriber at all
                 }
             }
             catch (err) {
@@ -134,12 +134,18 @@ export async function run() {
     }
     const message = formatChurnDigest(changed);
     if (!message) {
-        log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedChurned });
+        log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedResolved, archivedChurned });
         return;
     }
     try {
         const messageId = await sendGroupMessage(message);
-        log.info("churn_risk.posted", { messageId, count: changed.length, archivedClosed, archivedChurned });
+        log.info("churn_risk.posted", {
+            messageId,
+            count: changed.length,
+            archivedClosed,
+            archivedResolved,
+            archivedChurned,
+        });
     }
     catch (err) {
         log.error("churn_risk.send_failed", { message: errMsg(err) });
