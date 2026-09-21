@@ -22,6 +22,7 @@ export interface InstagramContact {
   displayName: string | null;
   username: string | null;
   messageCount: number;
+  lastMessageAt: string | null; // ISO
 }
 
 export interface InstagramTranscriptMessage {
@@ -91,6 +92,7 @@ interface InboxContactRow {
   display_name: string | null;
   username: string | null;
   message_count: number;
+  last_message_at: string | null;
 }
 
 interface InboxMessageRow {
@@ -123,6 +125,7 @@ export function groupMessagesByContact(
     displayName: row.display_name,
     username: row.username,
     messageCount: row.message_count,
+    lastMessageAt: row.last_message_at,
     messages: messagesByContact.get(row.id) ?? [],
   }));
 }
@@ -138,7 +141,7 @@ export async function fetchInstagramContactsWithMessages(): Promise<InstagramCon
 
   const [contactRows, messageRows] = await Promise.all([
     query<InboxContactRow>(
-      `select id, platform_user_id, display_name, username, message_count
+      `select id, platform_user_id, display_name, username, message_count, last_message_at
          from inbox_contacts where platform = 'instagram'`,
     ),
     query<InboxMessageRow>(

@@ -52,7 +52,7 @@ async function main() {
     }
 
     const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
-    const handle = contact.username ? `@${contact.username}` : contact.platformUserId;
+    const handle = contact.username ? `@${contact.username}` : "sem @ (só nome no Instagram)";
 
     // The studio's own cold outreach (e.g. an influencer/brand campaign)
     // that never got a reply — must be checked before classifying, since
