@@ -10,6 +10,22 @@
  *    away" half of that workflow. (Convertido is never the bot's own
  *    write — see point 2 — only ever a manual override, but once it's set
  *    the row shouldn't stick around either.)
+ *
+ *    EXCEPTION: Perdido rows on the Intro Pack channel are left alone,
+ *    NOT archived. Archiving makes a page invisible to every future Notion
+ *    query (Notion excludes archived pages from query results, with no way
+ *    to opt back in) — and leads-intro-pack.ts re-derives the same
+ *    candidate every Monday for as long as that person's pack stays
+ *    unconverted (there's no independent "already rejected" signal for it
+ *    the way there is for Convertido, which the Studio Supabase purchase
+ *    data itself guarantees won't recur). Archiving a Perdido Intro Pack
+ *    row made it invisible to leads-intro-pack.ts's dedup check, so the
+ *    following Monday it silently recreated the same person as a fresh
+ *    "Novo" lead — undoing the founder's Perdido call (broke in production
+ *    2026-09-21, e.g. Marta Somborn). Leaving the row un-archived and
+ *    Estado=Perdido keeps it visible to that dedup check forever, at the
+ *    cost of it staying visible in Notion (tagged Perdido) instead of
+ *    disappearing — the founder's explicit trade-off.
  * 2. Any still-open row (Novo/Contactado) that has genuinely converted
  *    gets archived too — automatically, without the founder having to
  *    notice and flip the status herself. The bot marking it "Convertido"
@@ -52,6 +68,10 @@ export async function run(): Promise<void> {
   try {
     const closed = await notion.getLeadsByEstado(["Perdido", "Convertido"]);
     for (const row of closed) {
+      // See the module docstring's EXCEPTION: archiving a Perdido Intro Pack
+      // row would make it invisible to leads-intro-pack.ts's dedup check,
+      // which would then recreate it the following Monday.
+      if (row.estado === "Perdido" && row.canal === "Intro Pack") continue;
       try {
         await notion.archivePage(row.id);
         archivedClosed++;

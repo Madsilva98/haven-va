@@ -40,8 +40,14 @@ export async function run(): Promise<void> {
 
   for (const c of candidates) {
     try {
-      const existing = await notion.findLeadByEmail(c.email);
-      if (existing) continue; // already an open lead for this person
+      // findLeadByEmailAny, not findLeadByEmail: an Intro Pack candidate
+      // re-derives every Monday for as long as the pack stays unconverted,
+      // so a row the founder marked Perdido (deliberately left un-archived
+      // by leads-reconcile.ts for exactly this reason) must still block
+      // recreation — findLeadByEmail's open-only filter would ignore it and
+      // silently undo her Perdido call (broke in production 2026-09-21).
+      const existing = await notion.findLeadByEmailAny(c.email);
+      if (existing) continue; // already a lead (open, Perdido, or Convertido) for this person
 
       const postExpiryNote = describePostExpiryVisit(c);
       const motivo = `${c.packName} — terminou há ${c.daysSinceExpiry} dias, sem converter para mensalidade${

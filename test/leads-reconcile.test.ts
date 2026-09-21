@@ -68,6 +68,23 @@ describe("leads-reconcile", () => {
     expect(archivePage).toHaveBeenCalledWith("c1");
   });
 
+  it("does NOT archive a Perdido Intro Pack row — regression for the 2026-09-21 resurrection incident (Marta Somborn)", async () => {
+    getLeadsByEstado.mockImplementation(async (estados: string[]) =>
+      estados.includes("Perdido")
+        ? [{ id: "p2", email: "marta@x.com", estado: "Perdido", canal: "Intro Pack" }]
+        : [],
+    );
+    loadConversionCheckData.mockResolvedValue({
+      firstPackByEmail: new Map(),
+      subsByEmail: new Map(),
+      membershipsByEmail: new Map(),
+    });
+
+    await run();
+
+    expect(archivePage).not.toHaveBeenCalledWith("p2");
+  });
+
   it("archives an Email-channel lead that now has a real purchase on file", async () => {
     getLeadsByEstado.mockImplementation(async (estados: string[]) =>
       estados.includes("Novo")
