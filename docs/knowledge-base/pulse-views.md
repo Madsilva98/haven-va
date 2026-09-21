@@ -28,22 +28,24 @@ Gotchas:
 
 | Question | View | Notes |
 |---|---|---|
+| What is "today"? | `v_pulse_data_as_of` | One row, one call (`fetchDataAsOf`), everywhere — the same anchor Studio Pulse uses. Never `current_date`, never derived from `max(cycle_starts_at)`. |
 | Who is a paying member? | `v_pulse_membership_state` | One row per billing cycle. Active = `is_paying_cycle` and the cycle overlaps the **data-as-of** date. `Cancelation scheduled` and `NULL` (pause scheduled) are paying; `Paused`/`Suspended` are not. `activeMembersAsOf` in `pulse-views.ts` is the spec's SQL in code: 75 on the 2026-09-18 snapshot (`test/pulse-views.test.ts`, real rows). |
+| How long have they been a member? | `v_pulse_member_tenure` | `member_since` = start of the latest continuous run (a gap of up to 3 days is the same run — a plan change is a cancel + new subscription in Kenko). The bot derives no tenure of its own. |
 | Who is paused, since when, last visit | `v_pulse_paused_detail` | `next_charge_on` is the next charge, **not** the return date. |
 | Pause history / stretched cycles | `v_pulse_pause_history` | Signal 1's "measure from the end of the pause" and signal 3's `had_pause`. |
 | Name, email, phone, birthday | `v_pulse_member_identity` | The one PII view. Staff excluded. |
 | Last booked / last visit / visit count | `v_pulse_member_activity` | Attended = `checkin_status = 'Yes'` alone. `next_or_last_booked` includes future bookings (a future booking is engagement); `last_booked` stops at today. |
 | Attended per month | `v_pulse_attendance_monthly` | Feeds utilization. |
-| Utilization vs plan | `v_pulse_utilization_monthly` | Skip `had_pause` and `in_progress` months; `allowance` NULL = Unlimited. ±1 class of noise; never one month as a verdict. |
+| Utilization vs plan | `v_pulse_utilization_monthly` | Read only `is_full_month` rows without `had_pause`; `allowance` NULL = Unlimited. ±1 class of noise; never one month as a verdict. |
 | Failed payments | `v_pulse_failed_payments` | `failed_45d` counts from calendar today. A failed payment is a signal, not a suspension. |
 | Ever paid? | `v_pulse_first_paid` | Absent = a lead. Replaced `hasRealPurchase`'s two-table count. |
-| Intro packs sold, real expiry | `v_pulse_intro_purchase` | `intro_end` = Kenko's ledger expiry when the sale matched a pack (`intro_end_source = 'kenko'`), else modeled. Never compute purchase + 10/21. |
+| Intro packs sold, real expiry, pack use | `v_pulse_intro_purchase` | `intro_end` = Kenko's ledger expiry when the sale matched a pack (`intro_end_source = 'kenko'`), else modeled. Never compute purchase + 10/21. `visits_in_pack` = check-ins booked ON that pack — the "2-Class, exactly 1 visit" rule reads this, never lifetime `visit_count`. |
 | Converted after an intro | `v_pulse_intro_conversion` | `converted` (membership on/after the purchase, mid-pack counts) or `converted_pack` (a real 5x/10x pack). Either = never chase as a lead. A drop-in is not a conversion. |
 | Class packs / intro holders (birthday audience) | `v_pulse_classpack_state`, `v_pulse_intro_holder_state` | Windows keyed by `member_id`. |
 | The ledger of wrong numbers | `v_pulse_known_cases` | Open first. Read it before changing any studio definition. |
 
 Two rules every reader follows:
-- **Data-as-of, never the calendar.** `computeDataAsOf` = `max(cycle_starts_at) <= today` over `v_pulse_membership_state`. A renewal after the last Kenko import is not a churn (Tatyana Khvesko, case #6). The churn signals are computed as of that date too, and the digest's `Fonte:` line says `dados até dd/mm/aaaa`.
+- **Data-as-of, never the calendar.** `fetchDataAsOf()` reads `v_pulse_data_as_of`, one row, and every digest carries it as `dados até dd/mm/aaaa`. A renewal after the last Kenko import is not a churn (Tatyana Khvesko, case #6).
 - **`member_id = md5(lower(email))`, no trim.** The views' join key; `memberIdFromEmail` in `pulse-views.ts`. Trim user-entered emails *before* hashing (Notion, /flag); never trim what the views give back.
 
 ## Fonte, porquê?, /flag, /casos
@@ -56,7 +58,11 @@ Two rules every reader follows:
 
 ## The `kenko_` guard
 
-`test/kenko-guard.test.ts` scans `src/**/*.ts` (comments stripped) for a `kenko_*` table name as a whole string literal and fails on anything not in `src/lib/kenko-allowlist.json` — which is empty and asserted empty. The role could not read those tables anyway; the guard keeps a definition from being smuggled back in as SQL. If a new question has no view: write the `pulse_cases` row, do not add an entry.
+`test/kenko-guard.test.ts` scans every string and template literal in `src/**/*.ts` (comments stripped) and fails on a `kenko_*` table name **anywhere inside one** — `query(\`select * from kenko_customers\`)` goes red, not only a bare `"kenko_customers"` — as well as on `public.` (the bot's role has nothing in that schema) and `service_role`. The allowlist (`src/lib/kenko-allowlist.json`) is empty and asserted empty. If a new question has no view: write the `pulse_cases` row, do not add an entry.
+
+## Pause dates
+
+`v_pulse_pause_history.cycle_end` is **the next charge, not the return date** (case #2): the pause ended earlier by whatever was left of the cycle, and only the Kenko timeline knows when. Churn signal 1 therefore measures from `cycle_end` and says "de volta até dd/mm" — at most — never "voltou a". A member whose pause row is `is_current` is skipped entirely: there is nothing to judge while they are still paused.
 
 ## Verifying against the spec
 
