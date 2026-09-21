@@ -72,8 +72,22 @@ import {
   isExcludedInstagramContact,
   type InstagramContactWithMessages,
 } from "../lib/instagram-inbox.js";
-import { checkExistingCustomer, fetchAllCustomerNames, type CustomerNameRecord } from "../lib/leads.js";
-import { classifyInstagramDM, type InstagramDMClassification } from "../lib/lead-classifier.js";
+import {
+  checkExistingCustomer,
+  fetchAllCustomerNames,
+  fetchAllVisitHistory,
+  findBestNameMatch,
+  findVisitHistory,
+  type CustomerNameRecord,
+  type VisitHistory,
+} from "../lib/leads.js";
+import {
+  classifyInstagramDM,
+  enrichInfluencerFromTranscript,
+  enrichPartnerFromTranscript,
+  summarizeRelationshipUpdate,
+  type InstagramDMClassification,
+} from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessage } from "../lib/telegram.js";
@@ -123,6 +137,159 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function formatDatePt(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
+}
+
+/**
+ * Only trusts a VOLUNTEERED email for asserting real Kenko visit history —
+ * a fuzzy name match is flagged as uncertain instead of fed into the visit
+ * lookup, since stating "already visited N times" off a guessed identity
+ * would overclaim. Mirrors this file's existing "Match incerto — rever
+ * manualmente" posture for the lead-matching path below.
+ */
+function formatKenkoLine(
+  volunteeredEmail: string | null,
+  name: string,
+  customers: CustomerNameRecord[],
+  activity: Map<string, VisitHistory>,
+): string {
+  if (volunteeredEmail) {
+    const history = findVisitHistory(volunteeredEmail, activity);
+    if (history && history.visitCount > 0 && history.firstVisit && history.lastVisit) {
+      return `Kenko: já visitou o estúdio — ${history.visitCount} visitas, primeira em ${formatDatePt(history.firstVisit)}, última em ${formatDatePt(history.lastVisit)}.`;
+    }
+    return "Kenko: sem histórico de visitas para este email.";
+  }
+  const fuzzy = findBestNameMatch(name, customers);
+  if (fuzzy) {
+    return `Kenko: possível correspondência (nome semelhante a ${fuzzy.name}) — por confirmar manualmente.`;
+  }
+  return "Kenko: sem correspondência.";
+}
+
+function dated(text: string): string {
+  return `[${formatDatePt(new Date().toISOString())}] ${text}`;
+}
+
+/**
+ * "Current state" fields only (Sobre/Deal/Perfil e stats) — always judged
+ * from the FULL transcript, since e.g. a deal's terms can only be read
+ * correctly in light of the whole conversation, and always REPLACES the
+ * section so re-running as a conversation evolves never piles up stale
+ * versions. Returns the raw enrichment (including .log) so callers decide
+ * separately how to handle the Log/Relação e histórico entry — first-time
+ * creation logs the whole-transcript summary as the opening entry;
+ * reEnrichContact logs a delta-only summary instead (see below), so this
+ * never appends anything itself.
+ */
+async function applyPartnerCurrentState(pageId: string, transcript: string) {
+  const enrichment = await enrichPartnerFromTranscript(transcript);
+  if (!enrichment) return null;
+  if (enrichment.sobre) await notion.replacePageSection(pageId, enrichment.sobre, "Sobre o parceiro");
+  if (enrichment.deal) await notion.replacePageSection(pageId, enrichment.deal, "Deal e proposta");
+  return enrichment;
+}
+
+async function applyInfluencerCurrentState(
+  pageId: string,
+  transcript: string,
+  name: string,
+  volunteeredEmail: string | null,
+  customers: CustomerNameRecord[],
+  activity: Map<string, VisitHistory>,
+) {
+  const enrichment = await enrichInfluencerFromTranscript(transcript);
+  const kenkoLine = formatKenkoLine(volunteeredEmail, name, customers, activity);
+  const perfilStats = [enrichment?.sobre, kenkoLine].filter((s): s is string => Boolean(s)).join("\n");
+  if (perfilStats) await notion.replacePageSection(pageId, perfilStats, "Perfil e stats");
+  return enrichment ?? null;
+}
+
+/**
+ * First-time enrichment, called right after a partner/influencer page is
+ * created. Best-effort: every step logs and swallows its own failure
+ * rather than throwing, so a Haiku/Notion hiccup here never affects the
+ * page that's already been created, or the checkpoint that already
+ * recorded it — enrichment is a bonus on top of a real page, not a
+ * condition for one. Logs the whole-transcript summary as the Log
+ * section's opening entry (there's no prior entry to build a delta from
+ * yet).
+ */
+async function enrichPartnerPage(pageId: string, transcript: string): Promise<void> {
+  try {
+    const enrichment = await applyPartnerCurrentState(pageId, transcript);
+    if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
+  } catch (err) {
+    log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "partner", message: errMsg(err) });
+  }
+}
+
+async function enrichInfluencerPage(
+  pageId: string,
+  transcript: string,
+  name: string,
+  volunteeredEmail: string | null,
+  customers: CustomerNameRecord[],
+  activity: Map<string, VisitHistory>,
+): Promise<void> {
+  try {
+    const enrichment = await applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity);
+    if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Relação e histórico");
+  } catch (err) {
+    log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "influencer", message: errMsg(err) });
+  }
+}
+
+/**
+ * Re-enrichment for a contact that already has a page and got new
+ * messages since the last checkpoint. Never creates or touches a second
+ * page — only refreshes Sobre/Deal/Perfil e stats (current-state, full
+ * transcript) and appends ONE new dated Log/Relação e histórico entry
+ * summarizing just the new messages (delta transcript), so the log stays
+ * a readable chronological journal instead of repeating the whole history
+ * every run. Returns true on success (caller advances messageCountSeen);
+ * false leaves the checkpoint stale so the next run's delta naturally
+ * includes whatever was missed, same retry posture as the rest of this
+ * file.
+ */
+async function reEnrichContact(
+  contact: InstagramContactWithMessages,
+  existing: ContactState,
+  customers: CustomerNameRecord[],
+  activity: Map<string, VisitHistory>,
+): Promise<boolean> {
+  if (existing.classification !== "parceiro" && existing.classification !== "influencer") return true;
+  const pageId = existing.notionPageId;
+  if (!pageId) return true;
+
+  const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
+  const fullTranscript = buildTranscript(contact.messages);
+  const deltaTranscript = buildTranscript(contact.messages.slice(existing.messageCountSeen));
+  if (!fullTranscript) return true;
+
+  try {
+    if (existing.classification === "parceiro") {
+      await applyPartnerCurrentState(pageId, fullTranscript);
+    } else {
+      const volunteeredEmail = extractVolunteeredEmail(contact.messages);
+      await applyInfluencerCurrentState(pageId, fullTranscript, name, volunteeredEmail, customers, activity);
+    }
+    if (deltaTranscript) {
+      const update = await summarizeRelationshipUpdate(deltaTranscript);
+      if (update) {
+        const section = existing.classification === "parceiro" ? "Log" : "Relação e histórico";
+        await notion.appendToPageSection(pageId, dated(update), section);
+      }
+    }
+    return true;
+  } catch (err) {
+    log.warn("leads_instagram_scan.reenrich_failed", { contactId: contact.id, message: errMsg(err) });
+    return false;
+  }
+}
+
 function setCheckpoint(
   state: SyncState,
   contact: InstagramContactWithMessages,
@@ -146,6 +313,7 @@ type ProcessResult =
 async function processContact(
   contact: InstagramContactWithMessages,
   customers: CustomerNameRecord[],
+  activity: Map<string, VisitHistory>,
   state: SyncState,
 ): Promise<ProcessResult> {
   const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
@@ -209,8 +377,9 @@ async function processContact(
   }
 
   if (classification === "parceiro") {
+    let pageId: string;
     try {
-      const pageId = await notion.createPartner(
+      pageId = await notion.createPartner(
         name,
         "Unassigned",
         origem,
@@ -219,16 +388,22 @@ async function processContact(
         contact.lastMessageAt,
       );
       setCheckpoint(state, contact, classification, pageId);
-      return { type: "partner", summary: { nome: name } };
     } catch (err) {
       log.error("leads_instagram_scan.partner_write_failed", { contactId: contact.id, message: errMsg(err) });
       return null; // leave checkpoint untouched — retry next run
     }
+    // Outside the try/catch above: the page is created and checkpointed at
+    // this point no matter what happens next — enrichPartnerPage already
+    // swallows its own failures, so it can never turn a successful create
+    // into a misleading "write_failed" log.
+    await enrichPartnerPage(pageId, transcript);
+    return { type: "partner", summary: { nome: name } };
   }
 
   if (classification === "influencer") {
+    let pageId: string;
     try {
-      const pageId = await notion.createInfluencer(
+      pageId = await notion.createInfluencer(
         name,
         "Unassigned",
         origem,
@@ -236,11 +411,13 @@ async function processContact(
         contact.lastMessageAt,
       );
       setCheckpoint(state, contact, classification, pageId);
-      return { type: "influencer", summary: { nome: name } };
     } catch (err) {
       log.error("leads_instagram_scan.influencer_write_failed", { contactId: contact.id, message: errMsg(err) });
       return null; // leave checkpoint untouched — retry next run
     }
+    const volunteeredEmail = extractVolunteeredEmail(contact.messages);
+    await enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity);
+    return { type: "influencer", summary: { nome: name } };
   }
 
   // classification === "cliente"
@@ -284,8 +461,13 @@ export async function run(): Promise<void> {
 
   let contacts: InstagramContactWithMessages[];
   let customers: CustomerNameRecord[];
+  let activity: Map<string, VisitHistory>;
   try {
-    [contacts, customers] = await Promise.all([fetchInstagramContactsWithMessages(), fetchAllCustomerNames()]);
+    [contacts, customers, activity] = await Promise.all([
+      fetchInstagramContactsWithMessages(),
+      fetchAllCustomerNames(),
+      fetchAllVisitHistory(),
+    ]);
   } catch (err) {
     log.error("leads_instagram_scan.fetch_failed", { message: errMsg(err) });
     return;
@@ -307,10 +489,18 @@ export async function run(): Promise<void> {
     const existing = state[contact.id];
     if (existing?.notionPageId) {
       // Already has a page (lead or partner) — never create a second one.
-      // Just keep the checkpoint's message count current.
+      // New messages since last time re-run enrichment (parceiro/influencer
+      // only) rather than just silently bumping the message count — see
+      // reEnrichContact. A failed re-enrichment leaves messageCountSeen
+      // stale on purpose, so the next run's delta naturally includes what
+      // was missed.
       if (existing.messageCountSeen !== contact.messageCount) {
-        state[contact.id] = { ...existing, messageCountSeen: contact.messageCount };
-        saveState(state);
+        const shouldReEnrich = contact.messageCount > existing.messageCountSeen;
+        const ok = shouldReEnrich ? await reEnrichContact(contact, existing, customers, activity) : true;
+        if (ok) {
+          state[contact.id] = { ...existing, messageCountSeen: contact.messageCount };
+          saveState(state);
+        }
       }
       continue;
     }
@@ -319,7 +509,7 @@ export async function run(): Promise<void> {
       continue;
     }
 
-    const result = await processContact(contact, customers, state);
+    const result = await processContact(contact, customers, activity, state);
     saveState(state);
     if (result?.type === "lead") createdLeads.push(result.summary);
     if (result?.type === "partner") createdPartners.push(result.summary);
