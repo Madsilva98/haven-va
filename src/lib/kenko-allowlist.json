@@ -1,0 +1,4 @@
+{
+  "_": "Raw kenko_* reads still allowed in src/, each waiting on a v_pulse_* view (pulse_cases id). Empty since 2026-09-21: every studio number comes from a view, and role haven_va cannot read a kenko_* table anyway. test/kenko-guard.test.ts fails on any read not listed here and on any entry that no longer matches code.",
+  "entries": []
+}
