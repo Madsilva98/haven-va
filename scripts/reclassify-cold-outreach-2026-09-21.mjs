@@ -69,8 +69,29 @@ async function main() {
       skippedNoContact++;
       continue;
     }
+    // "You sent an attachment." (25 chars) or a bare reaction like
+    // "Heheheh" isn't real content to classify from — found two of these
+    // in the initial dry-run (DepilNails, Martim Saudade e Silva), both
+    // would have been guessed at off noise. Same bar as the live cron's
+    // MIN_OUTREACH_TEXT_LENGTH.
+    if (outreachText.length < 30) {
+      skippedNoContact++;
+      continue;
+    }
 
     const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
+
+    // Cascaisnews: not outreach at all — a courtesy "thank you for the
+    // story mention" to a local press/media account. Genuinely neither
+    // parceiro nor influencer in the outreach-intent sense; the binary
+    // classifier has no third option and guessed influencer. Correctly
+    // stays a Partner Pipeline (media/press) contact — found reviewing
+    // the dry-run output 2026-09-21, excluded by name rather than
+    // generalizing the prompt for a one-off case.
+    if (name === "Cascaisnews") {
+      confirmedPartner++;
+      continue;
+    }
 
     try {
       const intent = await classifyOutreachIntent(outreachText);

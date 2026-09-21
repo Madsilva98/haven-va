@@ -144,6 +144,10 @@ function dated(text) {
 // e.g. "Wanderlust" / "Wanderlust_Portugal" — the real duplicate found in
 // production 2026-09-21) already scores 0.8, comfortably above this.
 const DUPLICATE_NAME_THRESHOLD = 0.75;
+// Below this, a cold-outreach message is almost certainly not real
+// content to classify from — "You sent an attachment." is 25 chars,
+// every genuine outreach template seen in production is 100+.
+const MIN_OUTREACH_TEXT_LENGTH = 30;
 function findDuplicateName(name, existing) {
     let best = null;
     for (const e of existing) {
@@ -302,13 +306,24 @@ async function processContact(contact, customers, activity, existingPartners, ex
             setCheckpoint(state, contact, "nenhum", null);
             return null;
         }
+        // Meta's export sometimes has no real text for an attachment-only
+        // message ("You sent an attachment.", 25 chars) or a bare reaction
+        // ("Heheheh") — found in production 2026-09-21 feeding the classifier
+        // effectively nothing to go on, producing an unreliable guess. Below
+        // this bar, skip the Haiku call and use the same safe default as an
+        // API failure, rather than classify noise.
         let intent;
-        try {
-            intent = await classifyOutreachIntent(outreachText);
+        if (outreachText.length < MIN_OUTREACH_TEXT_LENGTH) {
+            intent = "parceiro";
         }
-        catch (err) {
-            log.error("leads_instagram_scan.outreach_classify_failed", { contactId: contact.id, message: errMsg(err) });
-            return null; // leave checkpoint untouched — retry next run
+        else {
+            try {
+                intent = await classifyOutreachIntent(outreachText);
+            }
+            catch (err) {
+                log.error("leads_instagram_scan.outreach_classify_failed", { contactId: contact.id, message: errMsg(err) });
+                return null; // leave checkpoint untouched — retry next run
+            }
         }
         if (intent === "influencer") {
             const dup = findDuplicateName(name, existingInfluencers);
