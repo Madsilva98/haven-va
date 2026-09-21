@@ -1,7 +1,9 @@
 /**
- * Single Claude Haiku call classifying whether an inbound email is a
- * genuine "I want to know more" lead, for src/crons/leads-email-scan.ts.
- * Same singleton-init pattern as src/bot/assistant.ts's initRuntime().
+ * Single Claude Haiku call classifying whether an inbound message is a
+ * genuine "I want to know more" lead. Two prompt variants share the same
+ * client/error-handling: "email" for src/crons/leads-email-scan.ts,
+ * "dm" for src/crons/leads-instagram-scan.ts's DM transcripts. Same
+ * singleton-init pattern as src/bot/assistant.ts's initRuntime().
  */
 
 import { readFileSync } from "node:fs";
@@ -12,29 +14,36 @@ import { log } from "./log.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-let anthropicClient: Anthropic | null = null;
-let promptText: string | null = null;
+const PROMPT_FILES = {
+  email: "../prompts/lead-classifier.md",
+  dm: "../prompts/lead-classifier-dm.md",
+} as const;
+type PromptKey = keyof typeof PROMPT_FILES;
 
-function initRuntime(): { client: Anthropic; prompt: string; model: string } {
+let anthropicClient: Anthropic | null = null;
+const promptCache = new Map<PromptKey, string>();
+
+function initRuntime(promptKey: PromptKey): { client: Anthropic; prompt: string; model: string } {
   if (!anthropicClient) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
     anthropicClient = new Anthropic({ apiKey });
   }
-  if (!promptText) {
-    promptText = readFileSync(new URL("../prompts/lead-classifier.md", import.meta.url), "utf8");
+  let prompt = promptCache.get(promptKey);
+  if (!prompt) {
+    prompt = readFileSync(new URL(PROMPT_FILES[promptKey], import.meta.url), "utf8");
+    promptCache.set(promptKey, prompt);
   }
   const model = process.env.LEAD_CLASSIFIER_MODEL ?? DEFAULT_MODEL;
-  return { client: anthropicClient, prompt: promptText, model };
+  return { client: anthropicClient, prompt, model };
 }
 
 /**
- * `text` should be the email's subject + body (plain text). Defaults to
- * false (don't classify as a lead) on any API error — a missed lead is
- * far cheaper than a crashed weekly cron.
+ * Defaults to false (don't classify as a lead) on any API error — a missed
+ * lead is far cheaper than a crashed cron.
  */
-export async function isGenuineInformationRequest(text: string): Promise<boolean> {
-  const { client, prompt, model } = initRuntime();
+async function classify(text: string, promptKey: PromptKey): Promise<boolean> {
+  const { client, prompt, model } = initRuntime(promptKey);
   try {
     const response = await client.messages.create({
       model,
@@ -47,8 +56,19 @@ export async function isGenuineInformationRequest(text: string): Promise<boolean
     return answer.startsWith("SIM");
   } catch (err) {
     log.warn("lead_classifier.request_failed", {
+      promptKey,
       message: err instanceof Error ? err.message : String(err),
     });
     return false;
   }
+}
+
+/** `text` should be the email's subject + body (plain text). */
+export async function isGenuineInformationRequest(text: string): Promise<boolean> {
+  return classify(text, "email");
+}
+
+/** `text` should be a chronological Cliente/Haven Instagram DM transcript. */
+export async function isGenuineInformationRequestDM(text: string): Promise<boolean> {
+  return classify(text, "dm");
 }
