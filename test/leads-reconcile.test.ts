@@ -12,21 +12,15 @@ vi.mock("../src/lib/leads.js", () => ({
   hasRealPurchase: (...args: unknown[]) => hasRealPurchase(...args),
 }));
 
-const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
-vi.mock("../src/lib/studio-supabase.js", () => ({
-  isStudioSupabaseAvailable: () => isStudioSupabaseAvailable(),
+const isStudioDbAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../src/lib/studio-db.js", () => ({
+  isStudioDbAvailable: () => isStudioDbAvailable(),
 }));
 
 const loadConversionCheckData = vi.fn();
-vi.mock("../src/lib/intro-pack-conversion.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/intro-pack-conversion.js")>(
-    "../src/lib/intro-pack-conversion.js",
-  );
-  return {
-    hasConvertedAfter: actual.hasConvertedAfter,
-    loadConversionCheckData: (...args: unknown[]) => loadConversionCheckData(...args),
-  };
-});
+vi.mock("../src/lib/intro-pack-conversion.js", () => ({
+  loadConversionCheckData: (...args: unknown[]) => loadConversionCheckData(...args),
+}));
 
 import { run } from "../src/crons/leads-reconcile.js";
 
@@ -40,7 +34,7 @@ describe("leads-reconcile", () => {
     getLeadsByEstado.mockReset();
     archivePage.mockClear();
     hasRealPurchase.mockReset();
-    isStudioSupabaseAvailable.mockReturnValue(true);
+    isStudioDbAvailable.mockReturnValue(true);
     loadConversionCheckData.mockReset();
   });
 
@@ -60,8 +54,7 @@ describe("leads-reconcile", () => {
     );
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map(),
-      subsByEmail: new Map(),
-      membershipsByEmail: new Map(),
+      convertedMemberIds: new Set(),
     });
 
     await run();
@@ -102,8 +95,7 @@ describe("leads-reconcile", () => {
     hasRealPurchase.mockResolvedValue(true);
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map(),
-      subsByEmail: new Map(),
-      membershipsByEmail: new Map(),
+      convertedMemberIds: new Set(),
     });
 
     await run();
@@ -123,10 +115,9 @@ describe("leads-reconcile", () => {
     hasRealPurchase.mockResolvedValue(true);
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map([
-        ["intro-lead@x.com", { email: "intro-lead@x.com", name: "Intro Lead", packName: "2 Classes | Premium", startsAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
+        ["intro-lead@x.com", { memberId: "m-intro", email: "intro-lead@x.com", name: "Intro Lead", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
       ]),
-      subsByEmail: new Map(), // never started a subscription
-      membershipsByEmail: new Map(), // never started a non-intro membership
+      convertedMemberIds: new Set(), // v_pulse_intro_conversion: neither converted nor converted_pack
     });
 
     await run();
@@ -135,7 +126,7 @@ describe("leads-reconcile", () => {
     expect(archivePage).not.toHaveBeenCalledWith("ip1");
   });
 
-  it("archives an Intro Pack lead that genuinely converted after their pack expired", async () => {
+  it("archives an Intro Pack lead the conversion view says converted (membership or 5x/10x pack, mid-pack counts)", async () => {
     getLeadsByEstado.mockImplementation(async (estados: string[]) =>
       estados.includes("Novo")
         ? [{ id: "ip2", email: "converted@x.com", estado: "Novo", canal: "Intro Pack" }]
@@ -143,10 +134,9 @@ describe("leads-reconcile", () => {
     );
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map([
-        ["converted@x.com", { email: "converted@x.com", name: "Converted", packName: "2 Classes | Premium", startsAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
+        ["converted@x.com", { memberId: "m-converted", email: "converted@x.com", name: "Converted", pack: "2-Class", packName: "2 Classes | Premium", purchasedAt: new Date("2026-06-01"), expiresAt: new Date("2026-06-15") }],
       ]),
-      subsByEmail: new Map([["converted@x.com", [new Date("2026-07-01")]]]), // started a subscription after expiry
-      membershipsByEmail: new Map(),
+      convertedMemberIds: new Set(["m-converted"]), // v_pulse_intro_conversion says converted
     });
 
     await run();
@@ -162,8 +152,7 @@ describe("leads-reconcile", () => {
     );
     loadConversionCheckData.mockResolvedValue({
       firstPackByEmail: new Map(),
-      subsByEmail: new Map(),
-      membershipsByEmail: new Map(),
+      convertedMemberIds: new Set(),
     });
 
     await run();

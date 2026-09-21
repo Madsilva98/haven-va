@@ -1,140 +1,93 @@
 /**
- * Finds people who finished an intro pack and never converted to a real
- * membership/pack — for src/crons/leads-intro-pack.ts and the one-off
- * scripts/backfill-intro-pack-summer-2026.mjs.
+ * Intro packs, from the studio's views (spec docs/plans/2026-09-21-pulse-views-spec.md):
+ * - v_pulse_intro_purchase: one row per pack sold; intro_end is Kenko's own
+ *   expiry from the ledger when the sale matched a pack (a hand-edited date
+ *   shows up here: Carla Costa, 10-Day valid to 8 Sep not 1 Sep, case #7),
+ *   else modeled — never compute purchase + 10/21 here.
+ * - v_pulse_intro_conversion: converted (a 4x/8x/12x/Unlimited subscription
+ *   on or after the purchase — mid-pack counts, Sofia Orellana, case #8) or
+ *   converted_pack (a real 5x/10x pack; a drop-in is not a conversion, case
+ *   #9). Either one means "never chase as a lead".
+ * - v_pulse_member_activity: last_visit / visit_count (checkin_status Yes
+ *   alone, Roberta Dias, case #10).
+ * - v_pulse_member_identity: name and phone, on member_id.
+ * Only 2-Class and 10-Day packs are tracked here — the ones with real
+ * volume, founder's scope; the view also labels 5-Class / Open Day /
+ * Intro other, which are left alone.
  *
- * Day-21 threshold and the "don't split by pack type" call were both
- * empirically validated in session: comparing how many eventual converters
- * were still converting organically after each candidate day, day 21 turned
- * out to serve both real intro-pack products equally well (nobody in the
- * 10-Day Unlimited cohort converts between days 17-21 at all, so waiting
- * costs it nothing; it meaningfully reduces false "why didn't you convert"
- * outreach for the 2 Classes cohort). See docs/knowledge-base for the
- * session notes if this ever needs re-deriving.
+ * Day-21 threshold: empirically validated in session (see git history of
+ * this file) — nobody in the 10-Day cohort converts between days 17-21, so
+ * waiting costs it nothing and cuts false outreach for the 2-Class cohort.
+ * Used by src/crons/leads-intro-pack.ts, src/crons/leads-reconcile.ts,
+ * src/crons/intro-pack-expiring.ts and the one-off scripts/ backfills.
  */
-import { isExcludedEmail } from "./churn-signals.js";
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { fetchAllPages, studioSupabase } from "./studio-supabase.js";
-// The only 3 intro-pack products with real volume (see kenko_product_catalogue
-// revenue_bucket='intro_packs' — the rest, "Open Day" one-off events etc.,
-// are too low-volume to matter here).
-export const INTRO_PACK_NAMES = [
-    "2 Classes + Free Socks | Premium",
-    "2 Classes | Premium",
-    "10-Day Unlimited Pass",
-];
+import { fetchIntroConversion, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, } from "./pulse-views.js";
+import { isStudioDbAvailable } from "./studio-db.js";
+import { lisbonDateString, lisbonNaiveToUtcIso } from "./tz.js";
+/** The view's `pack` labels this bot tracks. */
+export const TRACKED_PACKS = ["2-Class", "10-Day"];
 export const DEFAULT_CUTOFF_DAYS = 21;
-async function fetchIntroPackFinishers() {
-    if (!studioSupabase)
-        return [];
-    const rows = await fetchAllPages((from, to) => studioSupabase
-        .from("kenko_memberships")
-        .select("contact_email, contact_name, membership_name, membership_starts_at, membership_expires_at")
-        .in("membership_name", [...INTRO_PACK_NAMES])
-        .eq("membership_status", "Expired")
-        .not("membership_expires_at", "is", null)
-        .range(from, to));
-    return rows
-        .filter((r) => r.contact_email && r.membership_starts_at && r.membership_expires_at)
-        .map((r) => ({
-        email: r.contact_email.toLowerCase().trim(),
-        name: r.contact_name || r.contact_email,
-        packName: r.membership_name,
-        startsAt: new Date(r.membership_starts_at),
-        expiresAt: new Date(r.membership_expires_at),
-    }));
+function lisbonEndOfDay(dateStr) {
+    return new Date(lisbonNaiveToUtcIso(`${dateStr.slice(0, 10)}T23:59:59`));
 }
-/** email (lowercased) -> every subscription_starts_at ever seen for them. */
-async function fetchAllSubscriptionStarts() {
-    if (!studioSupabase)
-        return new Map();
-    const rows = await fetchAllPages((from, to) => studioSupabase
-        .from("kenko_subscriptions")
-        .select("contact_email, subscription_starts_at")
-        .not("subscription_starts_at", "is", null)
-        .range(from, to));
-    const map = new Map();
-    for (const r of rows) {
-        if (!r.contact_email)
-            continue;
-        const email = r.contact_email.toLowerCase().trim();
-        const list = map.get(email) ?? [];
-        list.push(new Date(r.subscription_starts_at));
-        map.set(email, list);
-    }
-    return map;
+function lisbonNoon(dateStr) {
+    return new Date(lisbonNaiveToUtcIso(`${dateStr.slice(0, 10)}T12:00:00`));
 }
-/** email (lowercased) -> every non-intro-pack membership_starts_at ever seen. */
-async function fetchAllNonIntroMembershipStarts() {
-    if (!studioSupabase)
-        return new Map();
-    const rows = await fetchAllPages((from, to) => studioSupabase
-        .from("kenko_memberships")
-        .select("contact_email, membership_name, membership_starts_at")
-        .not("membership_starts_at", "is", null)
-        .range(from, to));
-    const introNames = new Set(INTRO_PACK_NAMES);
-    const map = new Map();
-    for (const r of rows) {
-        if (!r.contact_email || !r.membership_name)
-            continue;
-        if (introNames.has(r.membership_name))
-            continue;
-        const email = r.contact_email.toLowerCase().trim();
-        const list = map.get(email) ?? [];
-        list.push(new Date(r.membership_starts_at));
-        map.set(email, list);
-    }
-    return map;
+function isTracked(pack) {
+    return TRACKED_PACKS.includes(pack);
+}
+function nameByMemberId(customers) {
+    const out = new Map();
+    for (const c of customers)
+        if (c.email && c.name)
+            out.set(memberIdFromEmail(c.email), c.name);
+    return out;
 }
 /**
- * email (lowercased) -> attendance stats, counting only checkin_status =
- * "Yes" (an actual attended class, not just a reservation made).
+ * Pure — no I/O. First tracked pack per person (earliest intro_purchase),
+ * keyed by lower-cased email. Open Day / Valentine / "for members" sales
+ * are not intro packs for this purpose.
  */
-async function fetchVisitHistory() {
-    if (!studioSupabase)
-        return new Map();
-    const rows = await fetchAllPages((from, to) => studioSupabase
-        .from("kenko_bookings")
-        .select("contact_email, event_date, checkin_status")
-        .eq("checkin_status", "Yes")
-        .range(from, to));
-    const map = new Map();
+export function selectFirstTrackedPacks(rows, customers) {
+    const names = nameByMemberId(customers);
+    const out = new Map();
     for (const r of rows) {
-        if (!r.contact_email || !r.event_date)
+        if (!isTracked(r.pack) || r.is_open_day || r.is_valentine || r.is_for_members)
             continue;
-        const email = r.contact_email.toLowerCase().trim();
-        const eventDate = new Date(r.event_date);
-        const existing = map.get(email);
-        if (!existing) {
-            map.set(email, { lastVisit: eventDate, count: 1 });
-        }
-        else {
-            existing.count += 1;
-            if (eventDate > existing.lastVisit)
-                existing.lastVisit = eventDate;
-        }
+        const email = r.email.toLowerCase();
+        const purchasedAt = lisbonNoon(r.intro_purchase);
+        const existing = out.get(email);
+        if (existing && existing.purchasedAt <= purchasedAt)
+            continue;
+        out.set(email, {
+            memberId: r.member_id,
+            email,
+            name: names.get(r.member_id) ?? email,
+            pack: r.pack,
+            packName: r.item_name,
+            purchasedAt,
+            expiresAt: lisbonEndOfDay(r.intro_end),
+        });
     }
-    return map;
+    return out;
 }
-// Exported for unit testing without a Supabase call.
-export function hasConvertedAfter(email, after, subsByEmail, membershipsByEmail) {
-    const subs = subsByEmail.get(email) ?? [];
-    const mems = membershipsByEmail.get(email) ?? [];
-    return subs.some((d) => d > after) || mems.some((d) => d > after);
+function visitStats(rows) {
+    const out = new Map();
+    for (const r of rows) {
+        out.set(r.member_id, { lastVisit: r.last_visit ? lisbonNoon(r.last_visit) : null, count: r.visit_count });
+    }
+    return out;
 }
 /**
- * If the person visited again (an attended, checked-in booking) after
- * their own pack's expiry date but never started a subscription/non-intro
- * membership (hasConvertedAfter), that's a meaningfully different signal
- * from total silence — a paid drop-in return, not silence — and reads as
- * contradictory next to a plain "sem converter" if left unsaid (caught by
- * the founder on Liza Kupriievych: pack expired 16/07, but she came back
- * and paid for a one-off Yin Yoga drop-in on 24/08, attended 25/08 — she
- * never bought a plan, so hasConvertedAfter is correctly false, but the
- * Motivo text needs to say she came back rather than imply she vanished).
- * Returns null when there's nothing to add.
+ * If the person visited again (a checked-in class) after their own pack's
+ * expiry date but never converted, that's a meaningfully different signal
+ * from total silence — a paid drop-in return — and reads as contradictory
+ * next to a plain "sem converter" if left unsaid (caught by the founder on
+ * Liza Kupriievych: pack expired 16/07, came back for a one-off Yin Yoga
+ * drop-in on 25/08, never bought a plan). Returns null when there's
+ * nothing to add.
  */
 export function describePostExpiryVisit(c) {
     if (!c.lastVisit || c.lastVisit <= c.expiresAt)
@@ -142,118 +95,98 @@ export function describePostExpiryVisit(c) {
     const formatted = c.lastVisit.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
     return `voltou depois disso (última visita a ${formatted}), mas sem fazer plano`;
 }
-// Exported for src/crons/leads-reconcile.ts, which needs the same
-// subs/memberships lookup to check "did this specific Intro Pack lead
-// convert after THEIR pack's expiry" — a per-email question hasRealPurchase
-// can't answer, since it treats the intro-pack purchase itself as a
-// conversion.
+// Exported for src/crons/leads-reconcile.ts, which asks the same "did this
+// Intro Pack lead convert" question for rows already in Notion.
 export async function loadConversionCheckData() {
-    const [introRows, subsByEmail, membershipsByEmail, visitsByEmail, customers] = await Promise.all([
-        fetchIntroPackFinishers(),
-        fetchAllSubscriptionStarts(),
-        fetchAllNonIntroMembershipStarts(),
-        fetchVisitHistory(),
+    const [purchases, conversions, activity, customers] = await Promise.all([
+        fetchIntroPurchases(),
+        fetchIntroConversion(),
+        fetchMemberActivity(),
         fetchAllCustomerNames(),
     ]);
-    // First intro pack per person — a second/later intro pack purchase would
-    // otherwise re-anchor the clock, which isn't the question being asked.
-    const firstPackByEmail = new Map();
-    for (const row of introRows) {
-        if (isExcludedEmail(row.email))
-            continue;
-        const existing = firstPackByEmail.get(row.email);
-        if (!existing || row.startsAt < existing.startsAt) {
-            firstPackByEmail.set(row.email, row);
-        }
-    }
-    return { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers };
+    return {
+        firstPackByEmail: selectFirstTrackedPacks(purchases, customers),
+        convertedMemberIds: new Set(conversions.filter((c) => c.converted || c.converted_pack).map((c) => c.member_id)),
+        visitsByMember: visitStats(activity),
+        customers,
+    };
 }
-function toUnconverted(row, now, visitsByEmail, customers) {
-    const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
-    const visits = visitsByEmail.get(row.email);
+function toUnconverted(row, now, visitsByMember, customers) {
+    const visits = visitsByMember.get(row.memberId);
     return {
         email: row.email,
         name: row.name,
         phone: findPhoneByEmail(row.email, customers),
+        pack: row.pack,
         packName: row.packName,
         expiresAt: row.expiresAt,
-        daysSinceExpiry: Math.round(daysSinceExpiry),
+        daysSinceExpiry: Math.round((now.getTime() - row.expiresAt.getTime()) / 86_400_000),
         lastVisit: visits?.lastVisit ?? null,
         visitCount: visits?.count ?? 0,
     };
 }
 /**
  * Standing weekly signal: intro pack finished at least `cutoffDays` ago
- * (default 21, validated for both real pack types — no need to split),
- * and the person never activated anything else since.
+ * (default 21) and the person never converted since.
  */
 export async function findUnconvertedIntroPacks(cutoffDays = DEFAULT_CUTOFF_DAYS, now = new Date()) {
-    if (!studioSupabase) {
-        log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_supabase_not_configured" });
+    if (!isStudioDbAvailable()) {
+        log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
         return [];
     }
-    const { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers } = await loadConversionCheckData();
+    const { firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
     const out = [];
     for (const row of firstPackByEmail.values()) {
-        if (hasConvertedAfter(row.email, row.expiresAt, subsByEmail, membershipsByEmail))
+        if (convertedMemberIds.has(row.memberId))
             continue;
         const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
-        if (daysSinceExpiry >= cutoffDays) {
-            out.push(toUnconverted(row, now, visitsByEmail, customers));
-        }
+        if (daysSinceExpiry >= cutoffDays)
+            out.push(toUnconverted(row, now, visitsByMember, customers));
     }
     return out;
 }
-const TWO_CLASSES_NAMES = new Set(["2 Classes + Free Socks | Premium", "2 Classes | Premium"]);
-const TEN_DAY_NAME = "10-Day Unlimited Pass";
 /**
- * Still-active intro packs expiring within `daysAhead` days (default 3),
+ * Intro packs whose intro_end falls within `daysAhead` days (default 3),
  * filtered to the two usage patterns worth a proactive nudge before the
  * pack lapses — founder's spec, 2026-09-20, not empirically derived like
  * DEFAULT_CUTOFF_DAYS above:
- * - 2 Classes: exactly 1 of the 2 classes attended so far (one class
- *   would otherwise go unused).
- * - 10-Day Unlimited: more than 5 classes attended already (clearly
- *   engaged, a good conversion candidate before the pack ends).
+ * - 2-Class: exactly 1 of the 2 classes attended so far.
+ * - 10-Day: more than 5 classes attended already.
  * Used by src/crons/intro-pack-expiring.ts.
  */
 export async function findExpiringIntroPacksToWatch(daysAhead = 3, now = new Date()) {
-    if (!studioSupabase) {
-        log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_supabase_not_configured" });
+    if (!isStudioDbAvailable()) {
+        log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_db_not_configured" });
         return [];
     }
-    const to = new Date(now.getTime() + daysAhead * 86_400_000);
-    const rows = await fetchAllPages((from, rangeTo) => studioSupabase
-        .from("kenko_memberships")
-        .select("contact_email, contact_name, membership_name, membership_expires_at")
-        .in("membership_name", [...INTRO_PACK_NAMES])
-        .eq("membership_status", "Active")
-        .gte("membership_expires_at", now.toISOString())
-        .lte("membership_expires_at", to.toISOString())
-        .range(from, rangeTo));
-    const [visitsByEmail, customers] = await Promise.all([fetchVisitHistory(), fetchAllCustomerNames()]);
+    const today = lisbonDateString(now);
+    const until = lisbonDateString(new Date(now.getTime() + daysAhead * 86_400_000));
+    const [purchases, activity, customers] = await Promise.all([
+        fetchIntroPurchases(),
+        fetchMemberActivity(),
+        fetchAllCustomerNames(),
+    ]);
+    const visitsByMember = visitStats(activity);
+    const names = nameByMemberId(customers);
     const out = [];
-    for (const r of rows) {
-        if (!r.contact_email || !r.membership_name || !r.membership_expires_at)
+    for (const r of purchases) {
+        if (!isTracked(r.pack) || r.is_open_day || r.is_valentine || r.is_for_members)
             continue;
-        const email = r.contact_email.toLowerCase().trim();
-        if (isExcludedEmail(email))
+        if (r.intro_end < today || r.intro_end > until)
             continue;
-        const visitCount = visitsByEmail.get(email)?.count ?? 0;
-        const isTwoClasses = TWO_CLASSES_NAMES.has(r.membership_name);
-        const isTenDay = r.membership_name === TEN_DAY_NAME;
-        if (isTwoClasses && visitCount !== 1)
+        const visitCount = visitsByMember.get(r.member_id)?.count ?? 0;
+        if (r.pack === "2-Class" && visitCount !== 1)
             continue;
-        if (isTenDay && visitCount <= 5)
+        if (r.pack === "10-Day" && visitCount <= 5)
             continue;
-        if (!isTwoClasses && !isTenDay)
-            continue;
+        const email = r.email.toLowerCase();
         out.push({
             email,
-            name: r.contact_name?.trim() || email,
+            name: names.get(r.member_id) ?? email,
             phone: findPhoneByEmail(email, customers),
-            packName: r.membership_name,
-            expiresAt: new Date(r.membership_expires_at),
+            pack: r.pack,
+            packName: r.item_name,
+            expiresAt: lisbonEndOfDay(r.intro_end),
             visitCount,
         });
     }
@@ -264,24 +197,23 @@ export async function findExpiringIntroPacksToWatch(daysAhead = 3, now = new Dat
  * One-off backfill helper (scripts/backfill-intro-pack-summer-2026.mjs):
  * everyone whose intro pack expired within [fromISO, toISO) and never
  * converted, with NO day-count gate — the founder asked for this specific
- * window caught immediately, acknowledging the summer/vacation effect on
- * conversion timing as a one-time exception, not a standing seasonal rule.
+ * window caught immediately, a one-time exception for the summer effect.
  */
 export async function findUnconvertedIntroPacksInRange(fromISO, toISO, now = new Date()) {
-    if (!studioSupabase) {
-        log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_supabase_not_configured" });
+    if (!isStudioDbAvailable()) {
+        log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
         return [];
     }
     const from = new Date(fromISO);
     const to = new Date(toISO);
-    const { firstPackByEmail, subsByEmail, membershipsByEmail, visitsByEmail, customers } = await loadConversionCheckData();
+    const { firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
     const out = [];
     for (const row of firstPackByEmail.values()) {
         if (row.expiresAt < from || row.expiresAt >= to)
             continue;
-        if (hasConvertedAfter(row.email, row.expiresAt, subsByEmail, membershipsByEmail))
+        if (convertedMemberIds.has(row.memberId))
             continue;
-        out.push(toUnconverted(row, now, visitsByEmail, customers));
+        out.push(toUnconverted(row, now, visitsByMember, customers));
     }
     return out;
 }

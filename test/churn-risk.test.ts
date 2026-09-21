@@ -18,9 +18,9 @@ vi.mock("../src/lib/churn-signals.js", () => ({
   fetchChurnFlags: (...args: unknown[]) => fetchChurnFlags(...args),
 }));
 
-const isStudioSupabaseAvailable = vi.fn().mockReturnValue(true);
-vi.mock("../src/lib/studio-supabase.js", () => ({
-  isStudioSupabaseAvailable: () => isStudioSupabaseAvailable(),
+const isStudioDbAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../src/lib/studio-db.js", () => ({
+  isStudioDbAvailable: () => isStudioDbAvailable(),
 }));
 
 const sendGroupMessage = vi.fn().mockResolvedValue(1);
@@ -55,8 +55,8 @@ describe("churn-risk", () => {
     getChurnRowByEmail.mockReset().mockResolvedValue(null);
     createChurnFlag.mockClear();
     updateChurnFlag.mockClear();
-    fetchChurnFlags.mockReset().mockResolvedValue({ flags: [], activeEmails: new Set() });
-    isStudioSupabaseAvailable.mockReturnValue(true);
+    fetchChurnFlags.mockReset().mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
+    isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
   });
 
@@ -88,6 +88,7 @@ describe("churn-risk", () => {
         },
       ],
       activeEmails: new Set(["new@x.com"]),
+      asOf: "2026-09-18",
     });
 
     await run();
@@ -104,7 +105,7 @@ describe("churn-risk", () => {
   });
 
   it("does nothing when Studio Supabase isn't configured, without touching closed rows", async () => {
-    isStudioSupabaseAvailable.mockReturnValue(false);
+    isStudioDbAvailable.mockReturnValue(false);
 
     await run();
 
@@ -124,6 +125,7 @@ describe("churn-risk", () => {
         },
       ],
       activeEmails: new Set(["c@x.com"]),
+      asOf: "2026-09-18",
     });
     getChurnRowByEmail.mockResolvedValue({
       id: "row-c",
@@ -150,6 +152,7 @@ describe("churn-risk", () => {
         },
       ],
       activeEmails: new Set(["i@x.com"]),
+      asOf: "2026-09-18",
     });
     getChurnRowByEmail.mockResolvedValue({
       id: "row-i",
@@ -179,6 +182,7 @@ describe("churn-risk", () => {
         },
       ],
       activeEmails: new Set(["n@x.com"]),
+      asOf: "2026-09-18",
     });
     getChurnRowByEmail.mockResolvedValue({
       id: "row-n",
@@ -200,7 +204,7 @@ describe("churn-risk", () => {
         { id: "row-f", nome: "Filipe", email: "f@x.com", status: "Aberto" },
       ],
     );
-    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com", "f@x.com"]) });
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com", "f@x.com"]), asOf: "2026-09-18" });
 
     await run();
 
@@ -216,7 +220,7 @@ describe("churn-risk", () => {
 
   it("fetches 'A vigiar' rows too when reconciling open rows — it's an open status the founder sets by hand", async () => {
     mockOpenAndClosedRows([], []);
-    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set() });
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
 
     await run();
 
@@ -225,7 +229,7 @@ describe("churn-risk", () => {
 
   it("archives an 'A vigiar' row too once it resolves every signal — watching doesn't exempt it from cleanup", async () => {
     mockOpenAndClosedRows([], [{ id: "row-g", nome: "Gabriela", email: "g@x.com", status: "A vigiar" }]);
-    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["g@x.com"]) });
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["g@x.com"]), asOf: "2026-09-18" });
 
     await run();
 
@@ -244,6 +248,7 @@ describe("churn-risk", () => {
         },
       ],
       activeEmails: new Set(["h@x.com"]),
+      asOf: "2026-09-18",
     });
     // getChurnRowByEmail doesn't return Status — it already treats anything
     // other than Resolvido/Arquivado as open, "A vigiar" included.
@@ -256,7 +261,7 @@ describe("churn-risk", () => {
 
   it("auto-archives an open row once the person is no longer an active subscriber at all, silently (no digest)", async () => {
     mockOpenAndClosedRows([], [{ id: "row-e", nome: "Andrew", email: "e@x.com", status: "Aberto" }]);
-    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set() });
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
 
     await run();
 

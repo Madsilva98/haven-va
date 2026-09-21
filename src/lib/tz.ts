@@ -62,3 +62,17 @@ export function lisbonNaiveToUtcIso(naive: string): string {
   const offsetMs = new Date(lisbonStr).getTime() - new Date(utcStr).getTime();
   return new Date(guessUtc.getTime() - offsetMs).toISOString();
 }
+
+/**
+ * "YYYY-MM-DD" of `d` as a calendar day in Europe/Lisbon — the shape every
+ * date column in the v_pulse_* views comes back in, so the two compare as
+ * plain strings (see src/lib/pulse-views.ts).
+ */
+export function lisbonDateString(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}

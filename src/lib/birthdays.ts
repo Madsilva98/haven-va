@@ -1,65 +1,60 @@
 /**
- * Customer-birthday lookup against the Studio Supabase kenko_customers
- * table. Year-agnostic: matches month+day of date_of_birth against a
- * reference date or range.
+ * Customer-birthday lookup against the studio's views
+ * (docs/plans/2026-09-21-pulse-views-spec.md). Year-agnostic: matches
+ * month+day of date_of_birth against a reference date or range.
  *
- * Only customers with an active membership or active credit pack are
- * included — kenko_customers has no active/inactive flag of its own and
- * includes Leads alongside real customers, so without this filter the
- * digest would wish happy birthday to leads and churned customers too
- * (confirmed for real, 2026-09-16 — see docs/knowledge-base/
- * bot-architecture.md). Active intro-pack holders are a real third
- * category the founders want included too, but the only source for that
- * (a Supabase view keyed by an opaque member_id with no discoverable
- * mapping back to contact_email/kenko_customers) can't be joined against
- * anything else in this database — deliberately deferred, not forgotten.
+ * Who gets a message: a paying member (v_pulse_membership_state, as of the
+ * data date), a class-pack holder with credits left
+ * (v_pulse_classpack_state) or an intro-pack holder
+ * (v_pulse_intro_holder_state) — without that filter the digest would wish
+ * happy birthday to leads and churned customers too (confirmed for real,
+ * 2026-09-16). Names and dates of birth come from v_pulse_member_identity,
+ * the one PII view, joined on member_id = md5(lower(email)); staff and
+ * test accounts are already excluded there.
  *
  * Used by the daily birthdays cron — see src/crons/birthdays.ts.
  */
 
 import { log } from "./log.js";
-import { studioSupabase } from "./studio-supabase.js";
-
-// membership_type values seen on kenko_memberships besides these two:
-// null (used for add-on "Top-up" packs, not a standalone active state —
-// deliberately excluded, not an oversight).
-const ACTIVE_MEMBERSHIP_TYPES = ["Subscription", "Credit pack"];
+import {
+  activeMembersAsOf,
+  computeDataAsOf,
+  fetchClasspackState,
+  fetchIntroHolderState,
+  fetchMemberIdentity,
+  fetchMembershipState,
+  type ActiveMember,
+  type PackWindowRow,
+} from "./pulse-views.js";
+import { isStudioDbAvailable } from "./studio-db.js";
+import { lisbonDateString } from "./tz.js";
 
 /**
- * Every contact_email with a currently active membership (recurring
- * subscription or a standalone "Subscription"-type membership row) or an
- * active credit pack, lowercased. Two tables because kenko_subscriptions
- * (billing/recurring) and kenko_memberships (broader grant records,
- * including credit packs) aren't the same data — a Set naturally
- * dedupes any real overlap between them.
+ * Pure — no I/O. The birthday audience as of the data date: a paying
+ * member, a class-pack holder with credits, or an intro-pack holder.
  */
-async function fetchActiveContactEmails(): Promise<Set<string>> {
-  if (!studioSupabase) return new Set();
+export function activeMemberIdsForBirthdays(
+  members: Map<string, ActiveMember>,
+  classpacks: PackWindowRow[],
+  introHolders: PackWindowRow[],
+  asOf: string,
+): Set<string> {
+  const live = (w: PackWindowRow) => !!w.started && w.started <= asOf && (!w.expires || w.expires >= asOf);
+  const ids = new Set(members.keys());
+  for (const w of classpacks) if (live(w) && w.has_credits) ids.add(w.member_id);
+  for (const w of introHolders) if (live(w)) ids.add(w.member_id);
+  return ids;
+}
 
-  const [subs, memberships] = await Promise.all([
-    studioSupabase.from("kenko_subscriptions").select("contact_email").eq("subscription_status", "Active"),
-    studioSupabase
-      .from("kenko_memberships")
-      .select("contact_email")
-      .eq("membership_status", "Active")
-      .in("membership_type", ACTIVE_MEMBERSHIP_TYPES),
+async function fetchActiveMemberIds(now: Date): Promise<Set<string>> {
+  const [stateRows, classpacks, introHolders] = await Promise.all([
+    fetchMembershipState(),
+    fetchClasspackState(),
+    fetchIntroHolderState(),
   ]);
-
-  if (subs.error) {
-    throw new Error(`Studio Supabase active-subscriptions query failed: ${subs.error.message}`);
-  }
-  if (memberships.error) {
-    throw new Error(`Studio Supabase active-memberships query failed: ${memberships.error.message}`);
-  }
-
-  const emails = new Set<string>();
-  for (const row of subs.data ?? []) {
-    if (row.contact_email) emails.add(row.contact_email.toLowerCase());
-  }
-  for (const row of memberships.data ?? []) {
-    if (row.contact_email) emails.add(row.contact_email.toLowerCase());
-  }
-  return emails;
+  const asOf = computeDataAsOf(stateRows, lisbonDateString(now));
+  if (!asOf) return new Set();
+  return activeMemberIdsForBirthdays(activeMembersAsOf(stateRows, asOf), classpacks, introHolders, asOf);
 }
 
 export interface Birthday {
@@ -70,6 +65,7 @@ export interface Birthday {
 }
 
 interface KenkoCustomerRow {
+  member_id?: string;
   contact_name: string | null;
   contact_email: string;
   date_of_birth: string | null;
@@ -89,27 +85,21 @@ export async function fetchUpcomingBirthdays(
   from: Date,
   daysAhead: number,
 ): Promise<Birthday[]> {
-  if (!studioSupabase) {
-    log.warn("birthdays.fetch_skipped", { reason: "studio_supabase_not_configured" });
+  if (!isStudioDbAvailable()) {
+    log.warn("birthdays.fetch_skipped", { reason: "studio_db_not_configured" });
     return [];
   }
 
-  // Pull every customer with a non-null DOB. The table is small enough
-  // (a few hundred to low thousands of rows) that client-side filtering
-  // is cheaper than maintaining a stored procedure for month/day extract.
-  const { data, error } = await studioSupabase
-    .from("kenko_customers")
-    .select("contact_name, contact_email, date_of_birth")
-    .not("date_of_birth", "is", null);
-
-  if (error) {
-    log.error("birthdays.query_failed", { message: error.message, code: error.code });
-    throw new Error(`Studio Supabase query failed: ${error.message}`);
-  }
-
-  const allRows = (data ?? []) as KenkoCustomerRow[];
-  const activeEmails = await fetchActiveContactEmails();
-  const rows = allRows.filter((r) => activeEmails.has(r.contact_email.toLowerCase()));
+  const [identity, activeIds] = await Promise.all([fetchMemberIdentity(), fetchActiveMemberIds(from)]);
+  const allRows: KenkoCustomerRow[] = identity
+    .filter((r) => r.contact_email && r.date_of_birth)
+    .map((r) => ({
+      member_id: r.member_id,
+      contact_name: r.contact_name,
+      contact_email: r.contact_email!,
+      date_of_birth: r.date_of_birth,
+    }));
+  const rows = allRows.filter((r) => r.member_id && activeIds.has(r.member_id));
   log.debug("birthdays.rows_fetched", { total: allRows.length, active: rows.length });
 
   return filterUpcomingBirthdays(rows, from, daysAhead);

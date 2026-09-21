@@ -7,8 +7,6 @@
 
 import type { ExpiringIntroPackToWatch } from "../lib/intro-pack-conversion.js";
 
-const TWO_CLASSES_NAMES = new Set(["2 Classes + Free Socks | Premium", "2 Classes | Premium"]);
-
 function formatDate(d: Date): string {
   return d.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
 }
@@ -16,8 +14,8 @@ function formatDate(d: Date): string {
 export function formatExpiringIntroPacksDigest(packs: ExpiringIntroPackToWatch[]): string | null {
   if (packs.length === 0) return null;
 
-  const twoClasses = packs.filter((p) => TWO_CLASSES_NAMES.has(p.packName));
-  const tenDay = packs.filter((p) => !TWO_CLASSES_NAMES.has(p.packName));
+  const twoClasses = packs.filter((p) => p.pack === "2-Class");
+  const tenDay = packs.filter((p) => p.pack === "10-Day");
 
   const lines: string[] = ["📦 *Intro packs a terminar nos próximos 3 dias:*"];
 

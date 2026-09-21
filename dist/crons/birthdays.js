@@ -1,6 +1,7 @@
 import { fetchUpcomingBirthdays } from "../lib/birthdays.js";
 import { log } from "../lib/log.js";
-import { sendGroupMessage } from "../lib/telegram.js";
+import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
+import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatBirthdayDigest } from "../messages/birthdays.js";
 /**
  * Daily birthday digest. Looks up kenko_customers in Studio Supabase for
@@ -27,7 +28,11 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessage(message);
+        const messageId = await sendGroupMessageWithSource(message, [
+            PULSE_VIEW.membershipState,
+            PULSE_VIEW.classpackState,
+            PULSE_VIEW.introHolderState,
+        ]);
         log.info("cron.birthdays.posted", { messageId, today: birthdays.length });
     }
     catch (err) {

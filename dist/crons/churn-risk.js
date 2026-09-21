@@ -6,8 +6,9 @@
  *    time the cron runs, tidy it away" half of that workflow. Same "stay
  *    alive" behaviour the founder asked for on Leads a contactar
  *    (src/crons/leads-reconcile.ts).
- * 2. Computes the 3 validated signals (src/lib/churn-signals.ts) against
- *    Studio Supabase for every still-Active subscriber, creates/updates
+ * 2. Computes the 3 validated signals (src/lib/churn-signals.ts) from the
+ *    studio's v_pulse_* views for every paying member as of the data
+ *    date, creates/updates
  *    "Clientes em risco" rows to match exactly (not an additive union —
  *    a signal that's no longer true gets dropped from the row, not just
  *    new ones added), and posts one digest listing who's newly flagged,
@@ -28,8 +29,7 @@
  *    row, whether that's because the person cancelled/deactivated
  *    (subscription no longer Active — also found in production 2026-09-21,
  *    a churned customer's row was sitting open indefinitely since nothing
- *    ever re-checked it once their subscription dropped out of the
- *    "Active" filter in churn-signals.ts) or because they're still active
+ *    ever re-checked it once they dropped off the roster) or because they're still active
  *    but resolved every signal (e.g. booked again — this case only is
  *    mentioned in the digest as a bare count, not by name: also the
  *    founder's call, same day). A row that resolved SOME signals but
@@ -44,13 +44,14 @@
  * and it still gets archived once genuinely resolved or churned, same as
  * Aberto/Contactado.
  *
- * No-ops silently if STUDIO_SUPABASE_URL/KEY aren't configured, same as
- * the birthday cron.
+ * No-ops silently if STUDIO_DATABASE_URL isn't configured, same as the
+ * birthday cron.
  */
 import { fetchChurnFlags } from "../lib/churn-signals.js";
 import { log } from "../lib/log.js";
-import { isStudioSupabaseAvailable } from "../lib/studio-supabase.js";
-import { sendGroupMessage } from "../lib/telegram.js";
+import { isStudioDbAvailable } from "../lib/studio-db.js";
+import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
+import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatChurnDigest } from "../messages/churn.js";
 import * as notion from "../notion.js";
 function errMsg(err) {
@@ -61,7 +62,7 @@ export async function run() {
         log.debug("churn_risk.skipped", { reason: "NOTION_CHURN_RISK_DB_ID not set" });
         return;
     }
-    if (!isStudioSupabaseAvailable()) {
+    if (!isStudioDbAvailable()) {
         log.debug("churn_risk.skipped", { reason: "studio_supabase_not_configured" });
         return;
     }
@@ -83,8 +84,9 @@ export async function run() {
     }
     let flags;
     let activeEmails;
+    let asOf;
     try {
-        ({ flags, activeEmails } = await fetchChurnFlags());
+        ({ flags, activeEmails, asOf } = await fetchChurnFlags());
     }
     catch (err) {
         log.error("churn_risk.fetch_failed", { message: errMsg(err) });
@@ -125,8 +127,8 @@ export async function run() {
             log.error("churn_risk.write_failed", { email: flag.email, message: errMsg(err) });
         }
     }
-    // Reconcile every other still-open row: not touched above because
-    // Studio Supabase doesn't flag that email at all this week — zero
+    // Reconcile every other still-open row: not touched above because the
+    // views don't flag that email at all this week — zero
     // current signals either way, so archive it. "A vigiar" counts as open
     // here too — the founder's call (2026-09-21): a row she's set to keep
     // watching still needs to be archived once it's genuinely resolved or
@@ -166,7 +168,13 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessage(message);
+        const messageId = await sendGroupMessageWithSource(message, [
+            PULSE_VIEW.membershipState,
+            PULSE_VIEW.memberActivity,
+            PULSE_VIEW.failedPayments,
+            PULSE_VIEW.utilizationMonthly,
+            PULSE_VIEW.pauseHistory,
+        ], asOf);
         log.info("churn_risk.posted", {
             messageId,
             count: changed.length,
