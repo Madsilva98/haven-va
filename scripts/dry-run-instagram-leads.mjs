@@ -122,7 +122,11 @@ async function main() {
       const volunteeredEmail = extractVolunteeredEmail(contact.messages);
       console.log(`  Perfil e stats — Sobre: ${enrichment?.sobre ?? "(NADA)"}`);
       console.log(`  Perfil e stats — ${formatKenkoLine(volunteeredEmail, name, customers, activity)}`);
-      console.log(`  Relação e histórico: ${enrichment?.log ?? "(falhou)"}\n`);
+      console.log(`  Relação e histórico: ${enrichment?.log ?? "(falhou)"}`);
+      console.log(`  Status: ${enrichment?.status ?? "(sem alteração)"}`);
+      console.log(`  Tipo de colaboração: ${enrichment?.tipoColaboracao?.join(", ") || "(NADA)"}`);
+      console.log(`  Nicho: ${enrichment?.nicho ?? "(NADA)"}`);
+      console.log(`  Próximo passo: ${enrichment?.proximoPasso ?? "(NADA)"}\n`);
       continue;
     }
 

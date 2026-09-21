@@ -114,12 +114,51 @@ export async function enrichPartnerFromTranscript(transcript) {
         log: extractField(reply, "LOG") ?? "",
     };
 }
+/** Subset of InfluencerStatus (src/types.ts) this classifier can output —
+ * minus "A identificar" (pre-outreach — never applies once a page exists
+ * from a real DM) and "A contactar" (the creation-time default; enrichment
+ * only ever moves this forward, never back to the default). */
+const INFLUENCER_ENRICHED_STATUSES = [
+    "Contactado",
+    "Em conversa",
+    "Proposta enviada",
+    "Fechado",
+    "Arquivado",
+];
+function parseInfluencerStatus(reply) {
+    const value = extractField(reply, "STATUS");
+    return INFLUENCER_ENRICHED_STATUSES.includes(value ?? "")
+        ? value
+        : null;
+}
+/** Matches the Influencer Pipeline Notion DB's real Tipo de colaboração
+ * multi-select options. */
+export const INFLUENCER_COLLAB_TYPES = [
+    "Visita ao estúdio",
+    "Post patrocinado",
+    "Parceria de longo prazo",
+    "Evento",
+    "Outro",
+];
+function parseCollabTypes(reply) {
+    const raw = extractField(reply, "TIPO_COLABORACAO");
+    if (!raw)
+        return [];
+    return raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => INFLUENCER_COLLAB_TYPES.includes(s));
+}
 export async function enrichInfluencerFromTranscript(transcript) {
-    const reply = await callFreeform(transcript, "influencerEnrichment", 400);
+    const reply = await callFreeform(transcript, "influencerEnrichment", 500);
     if (!reply)
         return null;
     return {
         sobre: extractField(reply, "SOBRE"),
+        nicho: extractField(reply, "NICHO"),
+        tipoColaboracao: parseCollabTypes(reply),
+        status: parseInfluencerStatus(reply),
+        proximoPasso: extractField(reply, "PROXIMO_PASSO"),
         log: extractField(reply, "LOG") ?? "",
     };
 }

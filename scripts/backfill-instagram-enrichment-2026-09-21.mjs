@@ -21,7 +21,12 @@
  *
  * Idempotent: checks each target section's existing children first and
  * skips if already non-empty, so a partial/interrupted run resumes
- * cleanly and this never overwrites a founder's manual edit.
+ * cleanly and this never overwrites a founder's manual edit. Also covers
+ * a second wave of Influencer Pipeline fields added later the same day
+ * (Status/Tipo de colaboração/Nicho/Próximo passo/Último contacto) —
+ * gated independently of the toggle sections (checked via the page's
+ * current Status value, not section content), so re-running this after
+ * the first pass already filled the sections still catches these up.
  *
  * Usage:
  *   npm run build
@@ -34,7 +39,13 @@ import { Client } from "@notionhq/client";
 import { buildTranscript, extractVolunteeredEmail, fetchInstagramContactsWithMessages, hasInboundMessage } from "../dist/lib/instagram-inbox.js";
 import { fetchAllCustomerNames, fetchAllVisitHistory, findBestNameMatch, findVisitHistory } from "../dist/lib/leads.js";
 import { enrichInfluencerFromTranscript, enrichPartnerFromTranscript } from "../dist/lib/lead-classifier.js";
-import { appendToPageSection, replacePageSection } from "../dist/notion.js";
+import { appendToPageSection, replacePageSection, updateInfluencerFields } from "../dist/notion.js";
+
+// Statuses enrichInfluencerFromTranscript can output — same list as
+// src/lib/lead-classifier.ts's INFLUENCER_ENRICHED_STATUSES, kept local
+// here since it's not exported (this script matches this repo's
+// convention of one-off scripts being self-contained).
+const INFLUENCER_ENRICHED_STATUSES = ["Contactado", "Em conversa", "Proposta enviada", "Fechado", "Arquivado"];
 
 const notionClient = new Client({ auth: process.env.NOTION_API_KEY, notionVersion: "2025-09-03" });
 const STATE_PATH = process.env.STATE_PATH ?? "instagram-leads-sync-state.json";
@@ -73,6 +84,11 @@ async function sectionHasContent(pageId, sectionName) {
     }
   }
   return false; // toggle doesn't exist yet on this page — definitely empty
+}
+
+async function currentInfluencerStatus(pageId) {
+  const page = await notionClient.pages.retrieve({ page_id: pageId });
+  return page.properties?.Status?.select?.name ?? null;
 }
 
 function formatKenkoLine(volunteeredEmail, name, customers, activity) {
@@ -164,11 +180,20 @@ async function main() {
         if (!logFilled && enrichment.log) await appendToPageSection(pageId, dated(enrichment.log), "Log");
         enriched++;
       } else {
-        const [perfilFilled, logFilled] = await Promise.all([
+        const [perfilFilled, logFilled, currentStatus] = await Promise.all([
           sectionHasContent(pageId, "Perfil e stats"),
           sectionHasContent(pageId, "Relação e histórico"),
+          currentInfluencerStatus(pageId),
         ]);
-        if (perfilFilled && logFilled) {
+        // Sections (from the first backfill pass, 2026-09-21) and
+        // properties (Status/Tipo de colaboração/Nicho/Próximo passo/
+        // Último contacto, added later the same day) are independent —
+        // a page can have one done and not the other, so neither gates
+        // the other. Properties are considered "done" once Status has
+        // moved off the pre-enrichment defaults ("A contactar"/"A
+        // identificar"/unset) to one of the 5 values enrichment can set.
+        const propertiesFilled = INFLUENCER_ENRICHED_STATUSES.includes(currentStatus);
+        if (perfilFilled && logFilled && propertiesFilled) {
           alreadyFilled++;
           continue;
         }
@@ -181,12 +206,28 @@ async function main() {
           console.log(`[dry-run influencer] ${name} (${pageId})`);
           if (!perfilFilled && perfilStats) console.log(`  Perfil e stats: ${perfilStats}`);
           if (!logFilled && enrichment?.log) console.log(`  Relação e histórico: ${dated(enrichment.log)}`);
+          if (!propertiesFilled && enrichment) {
+            console.log(`  Status: ${enrichment.status ?? "(sem alteração)"}`);
+            console.log(`  Tipo de colaboração: ${enrichment.tipoColaboracao?.join(", ") || "(NADA)"}`);
+            console.log(`  Nicho: ${enrichment.nicho ?? "(NADA)"}`);
+            console.log(`  Próximo passo: ${enrichment.proximoPasso ?? "(NADA)"}`);
+            console.log(`  Último contacto: ${contact.lastMessageAt ?? "(sem alteração)"}`);
+          }
           console.log();
           enriched++;
           continue;
         }
         if (!perfilFilled && perfilStats) await replacePageSection(pageId, perfilStats, "Perfil e stats");
         if (!logFilled && enrichment?.log) await appendToPageSection(pageId, dated(enrichment.log), "Relação e histórico");
+        if (!propertiesFilled && enrichment) {
+          await updateInfluencerFields(pageId, {
+            status: enrichment.status,
+            tipoColaboracao: enrichment.tipoColaboracao,
+            nicho: enrichment.nicho,
+            proximoPasso: enrichment.proximoPasso,
+            ultimoContacto: contact.lastMessageAt,
+          });
+        }
         enriched++;
       }
     } catch (err) {

@@ -140,12 +140,19 @@ async function applyPartnerCurrentState(pageId, transcript) {
         await notion.replacePageSection(pageId, enrichment.deal, "Deal e proposta");
     return enrichment;
 }
-async function applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity) {
+async function applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto) {
     const enrichment = await enrichInfluencerFromTranscript(transcript);
     const kenkoLine = formatKenkoLine(volunteeredEmail, name, customers, activity);
     const perfilStats = [enrichment?.sobre, kenkoLine].filter((s) => Boolean(s)).join("\n");
     if (perfilStats)
         await notion.replacePageSection(pageId, perfilStats, "Perfil e stats");
+    await notion.updateInfluencerFields(pageId, {
+        status: enrichment?.status,
+        tipoColaboracao: enrichment?.tipoColaboracao,
+        nicho: enrichment?.nicho,
+        proximoPasso: enrichment?.proximoPasso,
+        ultimoContacto,
+    });
     return enrichment ?? null;
 }
 /**
@@ -168,9 +175,9 @@ async function enrichPartnerPage(pageId, transcript) {
         log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "partner", message: errMsg(err) });
     }
 }
-async function enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity) {
+async function enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto) {
     try {
-        const enrichment = await applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity);
+        const enrichment = await applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto);
         if (enrichment?.log)
             await notion.appendToPageSection(pageId, dated(enrichment.log), "Relação e histórico");
     }
@@ -207,7 +214,7 @@ async function reEnrichContact(contact, existing, customers, activity) {
         }
         else {
             const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-            await applyInfluencerCurrentState(pageId, fullTranscript, name, volunteeredEmail, customers, activity);
+            await applyInfluencerCurrentState(pageId, fullTranscript, name, volunteeredEmail, customers, activity, contact.lastMessageAt);
         }
         if (deltaTranscript) {
             const update = await summarizeRelationshipUpdate(deltaTranscript);
@@ -310,7 +317,7 @@ async function processContact(contact, customers, activity, state) {
             return null; // leave checkpoint untouched — retry next run
         }
         const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-        await enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity);
+        await enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity, contact.lastMessageAt);
         return { type: "influencer", summary: { nome: name } };
     }
     // classification === "cliente"

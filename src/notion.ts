@@ -2080,6 +2080,42 @@ async function createInfluencer(
   return page.id;
 }
 
+// "Current state" property update for an existing Influencer Pipeline
+// page — Status/Tipo de colaboração/Nicho/Próximo passo/Último contacto,
+// as opposed to createInfluencer's free-text toggle sections. Every field
+// is optional and only included in the update when given, so a caller can
+// refresh just what it actually knows without clobbering the rest (e.g.
+// Owner/Notas stay founder-managed, untouched here).
+async function updateInfluencerFields(
+  pageId: string,
+  fields: {
+    status?: InfluencerStatus | null;
+    tipoColaboracao?: string[];
+    nicho?: string | null;
+    proximoPasso?: string | null;
+    ultimoContacto?: string | null;
+  },
+): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (fields.status) properties["Status"] = { select: { name: fields.status } };
+  if (fields.tipoColaboracao && fields.tipoColaboracao.length > 0) {
+    properties["Tipo de colaboração"] = { multi_select: fields.tipoColaboracao.map((name) => ({ name })) };
+  }
+  if (fields.nicho) properties["Nicho"] = richText(fields.nicho);
+  if (fields.proximoPasso) properties["Próximo passo"] = richText(fields.proximoPasso);
+  if (fields.ultimoContacto) properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+
+  if (Object.keys(properties).length === 0) return;
+
+  await withRetry("updateInfluencerFields", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.influencer_fields_updated", { pageId, fields: Object.keys(properties) });
+}
+
 // ----- Leads a contactar -----
 
 interface CreateLeadOptions {
@@ -2941,6 +2977,7 @@ export {
   createEvent,
   createPartner,
   createInfluencer,
+  updateInfluencerFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists
@@ -3017,6 +3054,7 @@ export const notion = {
   createEvent,
   createPartner,
   createInfluencer,
+  updateInfluencerFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists
