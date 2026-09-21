@@ -17,6 +17,9 @@ const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const PROMPT_FILES = {
   email: "../prompts/lead-classifier.md",
   dm: "../prompts/lead-classifier-dm.md",
+  partnerEnrichment: "../prompts/partner-enrichment.md",
+  influencerEnrichment: "../prompts/influencer-enrichment.md",
+  relationshipLogUpdate: "../prompts/relationship-log-update.md",
 } as const;
 type PromptKey = keyof typeof PROMPT_FILES;
 
@@ -63,6 +66,91 @@ async function callClassifier(text: string, promptKey: PromptKey): Promise<strin
     });
     return "";
   }
+}
+
+/**
+ * Same client/prompt-cache machinery as callClassifier, but for a longer
+ * freeform reply (a summary, not a one-word category) — higher max_tokens,
+ * no uppercasing (would mangle prose). Returns "" on any API error, same
+ * as callClassifier; callers treat that as "skip, nothing to write."
+ */
+async function callFreeform(text: string, promptKey: PromptKey, maxTokens: number): Promise<string> {
+  const { client, prompt, model } = initRuntime(promptKey);
+  try {
+    const response = await client.messages.create({
+      model,
+      max_tokens: maxTokens,
+      system: prompt,
+      messages: [{ role: "user", content: text.slice(0, 8000) }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    return block && block.type === "text" ? block.text.trim() : "";
+  } catch (err) {
+    log.warn("lead_classifier.request_failed", {
+      promptKey,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return "";
+  }
+}
+
+/** Pulls a `LABEL: value` line out of a callFreeform reply. "NADA" (the
+ * prompts' explicit "nothing here" sentinel) becomes null, same spirit as
+ * NENHUM elsewhere in this file. Missing label also becomes null — an
+ * API hiccup or a malformed reply should look like "nothing to write",
+ * never crash the caller. */
+function extractField(reply: string, label: string): string | null {
+  const match = reply.match(new RegExp(`^${label}:\\s*(.*)$`, "im"));
+  const value = match?.[1]?.trim();
+  if (!value || value.toUpperCase() === "NADA") return null;
+  return value;
+}
+
+export interface PartnerEnrichment {
+  sobre: string | null;
+  deal: string | null;
+  log: string;
+}
+
+/**
+ * `transcript` should be the contact's full Cliente/Haven DM transcript
+ * (same shape classifyInstagramDM takes). Returns null only on total API
+ * failure (logged already by callFreeform) — caller skips enrichment for
+ * this run and leaves the checkpoint stale so it retries next time.
+ */
+export async function enrichPartnerFromTranscript(transcript: string): Promise<PartnerEnrichment | null> {
+  const reply = await callFreeform(transcript, "partnerEnrichment", 500);
+  if (!reply) return null;
+  return {
+    sobre: extractField(reply, "SOBRE"),
+    deal: extractField(reply, "DEAL"),
+    log: extractField(reply, "LOG") ?? "",
+  };
+}
+
+export interface InfluencerEnrichment {
+  sobre: string | null;
+  log: string;
+}
+
+export async function enrichInfluencerFromTranscript(transcript: string): Promise<InfluencerEnrichment | null> {
+  const reply = await callFreeform(transcript, "influencerEnrichment", 400);
+  if (!reply) return null;
+  return {
+    sobre: extractField(reply, "SOBRE"),
+    log: extractField(reply, "LOG") ?? "",
+  };
+}
+
+/**
+ * `deltaTranscript` should be built from only the NEW messages since the
+ * last enrichment pass (see leads-instagram-scan.ts's reEnrichContact) —
+ * not the whole conversation. Returns "" on API failure or an empty reply;
+ * caller skips appending a Log entry in that case rather than writing
+ * nothing useful.
+ */
+export async function summarizeRelationshipUpdate(deltaTranscript: string): Promise<string> {
+  return callFreeform(deltaTranscript, "relationshipLogUpdate", 200);
 }
 
 /** `text` should be the email's subject + body (plain text). */

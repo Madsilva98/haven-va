@@ -37,14 +37,26 @@ vi.mock("../src/lib/instagram-inbox.js", () => ({
 
 const checkExistingCustomer = vi.fn();
 const fetchAllCustomerNames = vi.fn().mockResolvedValue([]);
+const fetchAllVisitHistory = vi.fn().mockResolvedValue(new Map());
+const findVisitHistory = vi.fn().mockReturnValue(null);
+const findBestNameMatch = vi.fn().mockReturnValue(null);
 vi.mock("../src/lib/leads.js", () => ({
   checkExistingCustomer: (...args: unknown[]) => checkExistingCustomer(...args),
   fetchAllCustomerNames: (...args: unknown[]) => fetchAllCustomerNames(...args),
+  fetchAllVisitHistory: (...args: unknown[]) => fetchAllVisitHistory(...args),
+  findVisitHistory: (...args: unknown[]) => findVisitHistory(...args),
+  findBestNameMatch: (...args: unknown[]) => findBestNameMatch(...args),
 }));
 
 const classifyInstagramDM = vi.fn();
+const enrichPartnerFromTranscript = vi.fn().mockResolvedValue(null);
+const enrichInfluencerFromTranscript = vi.fn().mockResolvedValue(null);
+const summarizeRelationshipUpdate = vi.fn().mockResolvedValue("");
 vi.mock("../src/lib/lead-classifier.js", () => ({
   classifyInstagramDM: (...args: unknown[]) => classifyInstagramDM(...args),
+  enrichPartnerFromTranscript: (...args: unknown[]) => enrichPartnerFromTranscript(...args),
+  enrichInfluencerFromTranscript: (...args: unknown[]) => enrichInfluencerFromTranscript(...args),
+  summarizeRelationshipUpdate: (...args: unknown[]) => summarizeRelationshipUpdate(...args),
 }));
 
 const isStudioDbAvailable = vi.fn().mockReturnValue(true);
@@ -60,10 +72,14 @@ vi.mock("../src/lib/telegram.js", () => ({
 const createLead = vi.fn().mockResolvedValue("new-lead-page-id");
 const createPartner = vi.fn().mockResolvedValue("new-partner-page-id");
 const createInfluencer = vi.fn().mockResolvedValue("new-influencer-page-id");
+const appendToPageSection = vi.fn().mockResolvedValue(undefined);
+const replacePageSection = vi.fn().mockResolvedValue(undefined);
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
   createPartner: (...args: unknown[]) => createPartner(...args),
   createInfluencer: (...args: unknown[]) => createInfluencer(...args),
+  appendToPageSection: (...args: unknown[]) => appendToPageSection(...args),
+  replacePageSection: (...args: unknown[]) => replacePageSection(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -94,12 +110,20 @@ describe("leads-instagram-scan", () => {
     hasInboundMessage.mockReset().mockReturnValue(true);
     checkExistingCustomer.mockReset();
     fetchAllCustomerNames.mockReset().mockResolvedValue([]);
+    fetchAllVisitHistory.mockReset().mockResolvedValue(new Map());
+    findVisitHistory.mockReset().mockReturnValue(null);
+    findBestNameMatch.mockReset().mockReturnValue(null);
     classifyInstagramDM.mockReset();
+    enrichPartnerFromTranscript.mockReset().mockResolvedValue(null);
+    enrichInfluencerFromTranscript.mockReset().mockResolvedValue(null);
+    summarizeRelationshipUpdate.mockReset().mockResolvedValue("");
     isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
     createLead.mockClear().mockResolvedValue("new-lead-page-id");
     createPartner.mockClear().mockResolvedValue("new-partner-page-id");
     createInfluencer.mockClear().mockResolvedValue("new-influencer-page-id");
+    appendToPageSection.mockClear().mockResolvedValue(undefined);
+    replacePageSection.mockClear().mockResolvedValue(undefined);
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
@@ -325,5 +349,149 @@ describe("leads-instagram-scan", () => {
       expect.any(String),
       { telefone: null },
     );
+  });
+
+  it("enriches a newly-created partner page: replaces Sobre/Deal, appends the initial Log entry", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
+    classifyInstagramDM.mockResolvedValue("parceiro");
+    enrichPartnerFromTranscript.mockResolvedValue({
+      sobre: "Estúdio de massagem em Cascais",
+      deal: "Workshop conjunto em outubro",
+      log: "Propôs um workshop conjunto.",
+    });
+
+    await run();
+
+    expect(replacePageSection).toHaveBeenCalledWith(
+      "new-partner-page-id",
+      "Estúdio de massagem em Cascais",
+      "Sobre o parceiro",
+    );
+    expect(replacePageSection).toHaveBeenCalledWith(
+      "new-partner-page-id",
+      "Workshop conjunto em outubro",
+      "Deal e proposta",
+    );
+    expect(appendToPageSection).toHaveBeenCalledWith(
+      "new-partner-page-id",
+      expect.stringContaining("Propôs um workshop conjunto."),
+      "Log",
+    );
+  });
+
+  it("enriches a newly-created influencer page: writes Kenko line + Sobre into Perfil e stats, appends Relação e histórico", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava experimentar uma aula e partilhar nos meus stories!");
+    classifyInstagramDM.mockResolvedValue("influencer");
+    extractVolunteeredEmail.mockReturnValue(null);
+    findBestNameMatch.mockReturnValue({ name: "Joana F.", email: null, score: 0.7 });
+    enrichInfluencerFromTranscript.mockResolvedValue({
+      sobre: "Cria conteúdo de lifestyle",
+      log: "Propôs experimentar uma aula.",
+    });
+
+    await run();
+
+    expect(replacePageSection).toHaveBeenCalledWith(
+      "new-influencer-page-id",
+      expect.stringContaining("Cria conteúdo de lifestyle"),
+      "Perfil e stats",
+    );
+    const [, perfilContent] = replacePageSection.mock.calls[0]!;
+    expect(perfilContent).toContain("Kenko: possível correspondência (nome semelhante a Joana F.)");
+    expect(appendToPageSection).toHaveBeenCalledWith(
+      "new-influencer-page-id",
+      expect.stringContaining("Propôs experimentar uma aula."),
+      "Relação e histórico",
+    );
+  });
+
+  it("a first-time enrichment failure never affects the checkpoint or fails the run", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: adorava fazer uma parceria com a Haven!");
+    classifyInstagramDM.mockResolvedValue("parceiro");
+    enrichPartnerFromTranscript.mockRejectedValue(new Error("anthropic down"));
+
+    await run();
+
+    expect(createPartner).toHaveBeenCalled();
+    expect((fsState as Record<string, { notionPageId: string | null }>)["contact-1"]?.notionPageId).toBe(
+      "new-partner-page-id",
+    );
+  });
+
+  it("re-enriches an existing partner page on new messages: full-transcript replace + delta-only Log entry", async () => {
+    fsState = {
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "parceiro",
+        notionPageId: "existing-partner-page",
+        classifiedAt: "x",
+      },
+    };
+    const grownContact = {
+      ...contact,
+      messageCount: 3,
+      messages: [
+        { direction: "in" as const, text: "primeira mensagem", sentAt: "2026-01-01T00:00:00Z" },
+        { direction: "out" as const, text: "resposta", sentAt: "2026-01-01T00:01:00Z" },
+        { direction: "in" as const, text: "nova mensagem", sentAt: "2026-01-02T00:00:00Z" },
+      ],
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([grownContact]);
+    buildTranscript.mockImplementation((messages: unknown[]) =>
+      messages.length ? `transcript-of-${messages.length}-messages` : "",
+    );
+    enrichPartnerFromTranscript.mockResolvedValue({ sobre: "Sobre atualizado", deal: null, log: "ignorado aqui" });
+    summarizeRelationshipUpdate.mockResolvedValue("Enviou uma nova mensagem a confirmar interesse.");
+
+    await run();
+
+    // full transcript (all 3 messages) used for the current-state replace
+    expect(enrichPartnerFromTranscript).toHaveBeenCalledWith("transcript-of-3-messages");
+    expect(replacePageSection).toHaveBeenCalledWith("existing-partner-page", "Sobre atualizado", "Sobre o parceiro");
+    // only the DELTA (messages after index messageCountSeen=1, i.e. the last 2) goes into the update summary
+    expect(summarizeRelationshipUpdate).toHaveBeenCalledWith("transcript-of-2-messages");
+    expect(appendToPageSection).toHaveBeenCalledWith(
+      "existing-partner-page",
+      expect.stringContaining("Enviou uma nova mensagem a confirmar interesse."),
+      "Log",
+    );
+    // never creates a second page
+    expect(createPartner).not.toHaveBeenCalled();
+    expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(3);
+  });
+
+  it("leaves the checkpoint stale when re-enrichment fails, so the next run retries", async () => {
+    fsState = {
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "influencer",
+        notionPageId: "existing-influencer-page",
+        classifiedAt: "x",
+      },
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]); // messageCount: 3
+    buildTranscript.mockReturnValue("some transcript");
+    enrichInfluencerFromTranscript.mockRejectedValue(new Error("anthropic down"));
+
+    await run();
+
+    expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(1);
+  });
+
+  it("does not re-enrich a cliente/nenhum checkpoint entry, just refreshes the message count", async () => {
+    fsState = {
+      "contact-1": { messageCountSeen: 1, classification: "nenhum", notionPageId: "existing-page", classifiedAt: "x" },
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]); // messageCount: 3
+
+    await run();
+
+    expect(enrichPartnerFromTranscript).not.toHaveBeenCalled();
+    expect(enrichInfluencerFromTranscript).not.toHaveBeenCalled();
+    expect(summarizeRelationshipUpdate).not.toHaveBeenCalled();
+    expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(3);
   });
 });

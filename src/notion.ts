@@ -2464,6 +2464,35 @@ async function appendToPageSection(
   log.info("notion.page_content_added", { pageId, section: section ?? "root" });
 }
 
+/**
+ * Like appendToPageSection, but for a "current state" field (e.g. "Sobre o
+ * parceiro", "Deal e proposta") rather than a chronological log: clears the
+ * section's existing content first, so re-running enrichment as a
+ * conversation evolves always leaves ONE coherent, up-to-date version —
+ * never a pile of stale/contradictory snapshots from earlier runs.
+ */
+async function replacePageSection(pageId: string, content: string, section: string): Promise<void> {
+  const targetId = await getOrCreateToggleId(pageId, section);
+  const existing = await withRetry("listSectionChildren", () =>
+    client.blocks.children.list({ block_id: targetId, page_size: 100 }),
+  );
+  for (const block of existing.results) {
+    if ("id" in block) {
+      await withRetry("deleteSectionChild", () => client.blocks.delete({ block_id: block.id }));
+    }
+  }
+  const blocks = contentToBlocks(content);
+  if (blocks.length) {
+    await withRetry("replaceSection", () =>
+      client.blocks.children.append({
+        block_id: targetId,
+        children: blocks as Parameters<typeof client.blocks.children.append>[0]["children"],
+      }),
+    );
+  }
+  log.info("notion.page_section_replaced", { pageId, section });
+}
+
 const NOTION_API_BASE = "https://api.notion.com/v1";
 const NOTION_VERSION = "2025-09-03";
 
@@ -2927,6 +2956,7 @@ export {
   // Page section editing
   findPageInDb,
   appendToPageSection,
+  replacePageSection,
   uploadAndAttachFile,
   // Entity dashboards
   getEntitiesForOwner,
@@ -3002,6 +3032,7 @@ export const notion = {
   // Page section editing
   findPageInDb,
   appendToPageSection,
+  replacePageSection,
   uploadAndAttachFile,
   // Entity dashboards
   getEntitiesForOwner,

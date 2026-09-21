@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { findBestNameMatch, findPhoneByEmail, type CustomerNameRecord } from "../src/lib/leads.js";
+import {
+  findBestNameMatch,
+  findPhoneByEmail,
+  findVisitHistory,
+  type CustomerNameRecord,
+  type VisitHistory,
+} from "../src/lib/leads.js";
+import { memberIdFromEmail } from "../src/lib/pulse-views.js";
 
 describe("findBestNameMatch", () => {
   const customers: CustomerNameRecord[] = [
@@ -26,6 +33,29 @@ describe("findBestNameMatch", () => {
 
   it("returns null against an empty customer list", () => {
     expect(findBestNameMatch("Anyone", [])).toBeNull();
+  });
+});
+
+describe("findVisitHistory", () => {
+  const email = "maria@example.com";
+  const activity = new Map<string, VisitHistory>([
+    [memberIdFromEmail(email), { firstVisit: "2026-01-05", lastVisit: "2026-06-10", visitCount: 12 }],
+  ]);
+
+  it("finds visit history by email, case-insensitive", () => {
+    expect(findVisitHistory("MARIA@example.com", activity)).toEqual({
+      firstVisit: "2026-01-05",
+      lastVisit: "2026-06-10",
+      visitCount: 12,
+    });
+  });
+
+  it("returns null when the email has no visit history on file", () => {
+    expect(findVisitHistory("nobody@example.com", activity)).toBeNull();
+  });
+
+  it("returns null when no email is given", () => {
+    expect(findVisitHistory(null, activity)).toBeNull();
   });
 });
 
