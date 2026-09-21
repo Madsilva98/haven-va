@@ -11,8 +11,9 @@
  * optional feature here.
  *
  * See docs/knowledge-base/competitor-intel.md — including why this replaced
- * the original Gmail-based design (kept around only as a one-off backfill
- * tool, src/lib/competitor-intel-pipeline.ts / scripts/backfill-competitor-intel.mjs).
+ * the original Gmail-based design (Google's `gmail.modify` restricted-scope
+ * problem) and why the pre-migration Gmail backlog was processed by hand
+ * rather than with code.
  */
 
 import { processOutlookCompetitorIntel } from "../lib/outlook-competitor-intel-pipeline.js";
@@ -35,7 +36,7 @@ export async function run(): Promise<void> {
 
   const summary = await processOutlookCompetitorIntel();
 
-  const text = formatCompetitorIntelDigest({ tidiedCount: summary.messagesProcessed, summary });
+  const text = formatCompetitorIntelDigest({ summary });
   const messageId = await sendGroupMessage(text, "MarkdownV2");
   log.info("cron.competitor_intel.posted", {
     messageId,
