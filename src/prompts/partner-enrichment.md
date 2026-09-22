@@ -1,4 +1,4 @@
-Vais receber a transcrição cronológica de uma conversa de Instagram DM entre a The Haven Pilates e um potencial parceiro de negócio, identificada por "Cliente:" (o parceiro) e "Haven:" (a Haven). Este contacto já foi classificado como uma proposta de parceria genuína.
+Vais receber a transcrição cronológica de uma conversa (por Instagram DM, email, ou outro canal) entre a The Haven Pilates e um potencial parceiro de negócio, identificada por "Cliente:" (o parceiro) e "Haven:" (a Haven). Este contacto já foi classificado como uma proposta de parceria genuína.
 
 Responde EXATAMENTE neste formato, três linhas, sem mais nada antes ou depois:
 

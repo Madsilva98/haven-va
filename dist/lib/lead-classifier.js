@@ -16,6 +16,8 @@ const PROMPT_FILES = {
     influencerEnrichment: "../prompts/influencer-enrichment.md",
     relationshipLogUpdate: "../prompts/relationship-log-update.md",
     outreachIntent: "../prompts/outreach-intent.md",
+    partnershipEmailIntent: "../prompts/partnership-email-intent.md",
+    supplierEnrichment: "../prompts/supplier-enrichment.md",
 };
 let anthropicClient = null;
 const promptCache = new Map();
@@ -115,6 +117,17 @@ export async function enrichPartnerFromTranscript(transcript) {
         log: extractField(reply, "LOG") ?? "",
     };
 }
+/** Same shape/failure mode as enrichPartnerFromTranscript, for Fornecedores. */
+export async function enrichSupplierFromTranscript(transcript) {
+    const reply = await callFreeform(transcript, "supplierEnrichment", 500);
+    if (!reply)
+        return null;
+    return {
+        sobre: extractField(reply, "SOBRE"),
+        termos: extractField(reply, "TERMOS"),
+        log: extractField(reply, "LOG") ?? "",
+    };
+}
 /** Subset of InfluencerStatus (src/types.ts) this classifier can output —
  * minus "A identificar" (pre-outreach — never applies once a page exists
  * from a real DM) and "A contactar" (the creation-time default; enrichment
@@ -191,13 +204,16 @@ export async function isGenuineInformationRequest(text) {
  * "cliente" = genuine information request from a prospective client;
  * "parceiro" = another business/professional proposing a genuine business
  * collaboration (workshop, event, corporate, cross-promotion — not about
- * content/social media); "influencer" = a content creator offering to try
- * a class in exchange for posting about it; "nenhum" = none of the above —
- * including job applications and vendor/supplier sales pitches, which are
- * deliberately excluded from "parceiro" (founder's call, 2026-09-21: those
- * aren't partnerships, they're the opposite — someone selling to us, or
- * applying to us). Also the fallback for an API error or unrecognized
- * answer.
+ * content/social media, and nobody's selling to the other); "influencer" =
+ * a content creator offering to try a class in exchange for posting about
+ * it; "fornecedor" = a vendor/supplier genuinely trying to SELL a product
+ * or service to the Haven (2026-09-22: previously dropped as "nenhum"
+ * alongside job applications — the founder now wants these tracked in
+ * their own Fornecedores pipeline instead of discarded); "nenhum" = none
+ * of the above — job applications (instructors, reception, any role) stay
+ * "nenhum", NEVER "fornecedor" even though both involve someone offering
+ * something to the Haven — applying for a job isn't a sale. Also the
+ * fallback for an API error or unrecognized answer.
  */
 export async function classifyInstagramDM(text) {
     const answer = await callClassifier(text, "dm");
@@ -207,6 +223,8 @@ export async function classifyInstagramDM(text) {
         return "parceiro";
     if (answer.startsWith("INFLUENCER"))
         return "influencer";
+    if (answer.startsWith("FORNECEDOR"))
+        return "fornecedor";
     return "nenhum";
 }
 /**
@@ -224,4 +242,26 @@ export async function classifyInstagramDM(text) {
 export async function classifyOutreachIntent(text) {
     const answer = await callClassifier(text, "outreachIntent");
     return answer.startsWith("INFLUENCER") ? "influencer" : "parceiro";
+}
+/**
+ * `text` should be a single email's subject + body (plain text), not a
+ * thread — mirrors classifyInstagramDM's parceiro/influencer/fornecedor/nenhum
+ * split (2026-09-22: added fornecedor, see that function's docstring —
+ * job applications stay "nenhum", never "fornecedor"), but for
+ * src/crons/sync-partnerships.ts's per-message classification instead of a
+ * DM transcript. No "cliente" outcome here — a genuine client information
+ * request over email is a different pipeline (leads-email-scan.ts,
+ * currently disabled), not this cron's concern. Defaults to "nenhum" on an
+ * API error or unrecognized answer, same bias as every other classifier in
+ * this file.
+ */
+export async function classifyPartnershipEmailIntent(text) {
+    const answer = await callClassifier(text, "partnershipEmailIntent");
+    if (answer.startsWith("PARCEIRO"))
+        return "parceiro";
+    if (answer.startsWith("INFLUENCER"))
+        return "influencer";
+    if (answer.startsWith("FORNECEDOR"))
+        return "fornecedor";
+    return "nenhum";
 }

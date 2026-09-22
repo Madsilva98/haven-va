@@ -29,8 +29,7 @@ export function formatLeadsDigest(newLeads: NewLeadSummary[]): string | null {
 const MAX_CHUNK_CHARS = 3500;
 
 // Pure — splits `lines` into Telegram-safe chunks, prefixing each with
-// `header(total, part, parts)`. Shared by formatLeadsDigests and
-// formatPartnerCandidatesDigests below.
+// `header(total, part, parts)`.
 function chunkDigest(lines: string[], header: (total: number, part: number, parts: number) => string): string[] {
   if (lines.length === 0) return [];
 
@@ -60,69 +59,18 @@ export function formatLeadsDigests(newLeads: NewLeadSummary[]): string[] {
   );
 }
 
-/**
- * Separate from formatLeadsDigests on purpose — these are potential
- * partners noticed via Instagram DM (src/crons/leads-instagram-scan.ts),
- * not leads to contact, so they get their own digest wording and land in
- * a different Notion DB (Partner Pipeline, not Leads a contactar).
- */
+// Partner/influencer/supplier creation has no digest of its own (founder's
+// call, 2026-09-21, extended to suppliers 2026-09-22 — that signal lives in
+// Notion, not the group chat), but the summary shapes stay here since
+// src/crons/leads-instagram-scan.ts's ProcessResult still uses them.
 export interface NewPartnerSummary {
   nome: string;
 }
 
-export function formatPartnerCandidatesDigests(newPartners: NewPartnerSummary[]): string[] {
-  const lines = newPartners.map((p) => `• ${p.nome}`);
-  return chunkDigest(
-    lines,
-    (total, part, parts) =>
-      parts > 1
-        ? `🤝 *${total} potencial(is) parceiro(s) via Instagram (parte ${part}/${parts}):*`
-        : `🤝 *${total} potencial(is) parceiro(s) via Instagram:*`,
-  );
-}
-
-/**
- * Separate from formatPartnerCandidatesDigests on purpose — content
- * creators offering a class-for-post trade land in "Influencer Pipeline",
- * not "Partner Pipeline" (founder's call, 2026-09-21).
- */
 export interface NewInfluencerSummary {
   nome: string;
 }
 
-export function formatInfluencerCandidatesDigests(newInfluencers: NewInfluencerSummary[]): string[] {
-  const lines = newInfluencers.map((p) => `• ${p.nome}`);
-  return chunkDigest(
-    lines,
-    (total, part, parts) =>
-      parts > 1
-        ? `📸 *${total} potencial(is) influencer(s) via Instagram (parte ${part}/${parts}):*`
-        : `📸 *${total} potencial(is) influencer(s) via Instagram:*`,
-  );
-}
-
-/**
- * Instagram contacts whose name fuzzy-matched an existing Partner/
- * Influencer Pipeline row closely enough that leads-instagram-scan.ts
- * skipped creating a page rather than risk a silent duplicate (e.g.
- * "Wanderlust" already existing from the Outlook partnerships sync, then
- * "Wanderlust_Portugal" showing up via Instagram a week later — found in
- * production 2026-09-21, no dedup existed at all before this). Never
- * auto-merged — a human decides whether it's really the same contact.
- */
-export interface DuplicateCandidateSummary {
+export interface NewSupplierSummary {
   nome: string;
-  existente: string;
-  pipeline: "Partner Pipeline" | "Influencer Pipeline";
-}
-
-export function formatDuplicateCandidatesDigests(duplicates: DuplicateCandidateSummary[]): string[] {
-  const lines = duplicates.map((d) => `• ${d.nome} — parece igual a "${d.existente}" (${d.pipeline})`);
-  return chunkDigest(
-    lines,
-    (total, part, parts) =>
-      parts > 1
-        ? `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente (parte ${part}/${parts}):*`
-        : `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente:*`,
-  );
 }

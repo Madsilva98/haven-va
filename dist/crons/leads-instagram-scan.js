@@ -2,7 +2,7 @@
  * Weekly scan of the studio's Instagram DM inbox (public.inbox_contacts /
  * public.inbox_messages in Studio Supabase — Mafalda's own tooling, see
  * src/lib/instagram-inbox.ts). Classifies each contact's whole
- * conversation into one of four buckets and routes accordingly:
+ * conversation into one of five buckets and routes accordingly:
  *   - "cliente": genuine information request from a prospective client —
  *     written into "Leads a contactar" (Canal = "Instagram"), same as the
  *     email/intro-pack pipelines.
@@ -18,12 +18,21 @@
  *     (Canal de contacto = "Instagram DM"). Founder's call, 2026-09-21:
  *     distinct from "parceiro" because that DB already has the right
  *     fields (follower count, collaboration type) for this specific case.
+ *   - "fornecedor": a vendor/supplier genuinely trying to SELL a product or
+ *     service to the Haven — written into "Fornecedores" instead. Founder's
+ *     call, 2026-09-22: previously dropped as "nenhum" alongside job
+ *     applications (2026-09-21's fix); now tracked in its own pipeline
+ *     instead of discarded. Skipped gracefully (never a hard error) if
+ *     NOTION_SUPPLIER_DB_ID isn't set yet — the DB is provisioned by hand
+ *     in Notion first.
  *   - "nenhum": none of the above — dropped, debug-level only. Explicitly
- *     includes job applications and vendor/supplier sales pitches, which
- *     the classifier is instructed NOT to call "parceiro" (founder's
- *     call, 2026-09-21, after the dry-run review turned up e.g. a cleaning-
- *     supplies vendor and several "are you hiring?" messages wrongly
- *     landing as partner candidates).
+ *     includes job applications (instructors, reception, any role), which
+ *     the classifier is instructed to keep OUT of both "parceiro" and
+ *     "fornecedor" (founder's call, 2026-09-21, after the dry-run review
+ *     turned up e.g. a cleaning-supplies vendor and several "are you
+ *     hiring?" messages wrongly landing as partner candidates — reaffirmed
+ *     2026-09-22 when "fornecedor" was added, since a hiring inquiry could
+ *     otherwise be mistaken for a sales pitch).
  * A fifth case is handled BEFORE the CLIENTE/PARCEIRO/INFLUENCER/NENHUM
  * classification, with a different Haiku call: a contact the studio
  * itself cold-messaged (e.g. an influencer/brand outreach campaign) who
@@ -42,15 +51,17 @@
  * call): written with Status="Contactado" instead of the default
  * "A contactar"/"A contactar", since we're the ones waiting to hear back.
  *
- * Before creating ANY Partner or Influencer Pipeline page (all three
- * paths above), the name is fuzzy-matched against every existing row in
+ * Before creating ANY Partner, Influencer, or Fornecedores page (every
+ * path above), the name is fuzzy-matched against every existing row in
  * that same pipeline (findDuplicateName) — this cron used to have zero
  * cross-channel dedup, so the same real contact reached both by email
  * (via the Outlook partnerships sync) and by Instagram DM got two rows
  * ("Wanderlust" and "Wanderlust_Portugal", found in production
- * 2026-09-21). A likely match skips creation and gets flagged in the
- * weekly digest instead — never auto-merged, since deciding which record
- * is authoritative needs a human.
+ * 2026-09-21). A likely match skips creation — logged
+ * (leads_instagram_scan.duplicate_skipped), never a Telegram digest
+ * (founder's call, 2026-09-21: only the Leads a contactar pipeline below
+ * gets one) — and never auto-merged, since deciding which record is
+ * authoritative needs a human.
  *
  * Classification is per CONTACT, not per message — one Haiku call on
  * their whole transcript, since this is a holistic judgment, not
@@ -79,12 +90,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildTranscript, extractVolunteeredEmail, extractVolunteeredPhone, fetchInstagramContactsWithMessages, hasInboundMessage, isExcludedInstagramContact, } from "../lib/instagram-inbox.js";
 import { scoreMatch } from "../lib/fuzzy-match.js";
-import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, findBestNameMatch, findVisitHistory, } from "../lib/leads.js";
-import { classifyInstagramDM, classifyOutreachIntent, enrichInfluencerFromTranscript, enrichPartnerFromTranscript, summarizeRelationshipUpdate, } from "../lib/lead-classifier.js";
+import { applyInfluencerCurrentState, applyPartnerCurrentState, applySupplierCurrentState, dated, enrichInfluencerPageFromText, enrichPartnerPageFromText, enrichSupplierPageFromText, } from "../lib/entity-enrichment.js";
+import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, } from "../lib/leads.js";
+import { classifyInstagramDM, classifyOutreachIntent, summarizeRelationshipUpdate, } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessage } from "../lib/telegram.js";
-import { formatDuplicateCandidatesDigests, formatInfluencerCandidatesDigests, formatLeadsDigests, formatPartnerCandidatesDigests, } from "../messages/leads.js";
+import { formatLeadsDigests } from "../messages/leads.js";
 import * as notion from "../notion.js";
 const DATA_DIR = process.env.DATA_DIR ?? ".";
 const STATE_PATH = path.join(DATA_DIR, "instagram-leads-sync-state.json");
@@ -107,34 +119,6 @@ function saveState(state) {
 }
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
-}
-function formatDatePt(iso) {
-    const [y, m, d] = iso.slice(0, 10).split("-");
-    return `${d}/${m}/${y}`;
-}
-/**
- * Only trusts a VOLUNTEERED email for asserting real Kenko visit history —
- * a fuzzy name match is flagged as uncertain instead of fed into the visit
- * lookup, since stating "already visited N times" off a guessed identity
- * would overclaim. Mirrors this file's existing "Match incerto — rever
- * manualmente" posture for the lead-matching path below.
- */
-function formatKenkoLine(volunteeredEmail, name, customers, activity) {
-    if (volunteeredEmail) {
-        const history = findVisitHistory(volunteeredEmail, activity);
-        if (history && history.visitCount > 0 && history.firstVisit && history.lastVisit) {
-            return `Kenko: já visitou o estúdio — ${history.visitCount} visitas, primeira em ${formatDatePt(history.firstVisit)}, última em ${formatDatePt(history.lastVisit)}.`;
-        }
-        return "Kenko: sem histórico de visitas para este email.";
-    }
-    const fuzzy = findBestNameMatch(name, customers);
-    if (fuzzy) {
-        return `Kenko: possível correspondência (nome semelhante a ${fuzzy.name}) — por confirmar manualmente.`;
-    }
-    return "Kenko: sem correspondência.";
-}
-function dated(text) {
-    return `[${formatDatePt(new Date().toISOString())}] ${text}`;
 }
 // Higher bar than leads.ts's findBestNameMatch (0.5) — that one only ever
 // flags a lead as "rever manualmente", never suppresses the write, so a
@@ -163,72 +147,6 @@ function findDuplicateName(name, existing) {
     return best;
 }
 /**
- * "Current state" fields only (Sobre/Deal/Perfil e stats) — always judged
- * from the FULL transcript, since e.g. a deal's terms can only be read
- * correctly in light of the whole conversation, and always REPLACES the
- * section so re-running as a conversation evolves never piles up stale
- * versions. Returns the raw enrichment (including .log) so callers decide
- * separately how to handle the Log/Relação e histórico entry — first-time
- * creation logs the whole-transcript summary as the opening entry;
- * reEnrichContact logs a delta-only summary instead (see below), so this
- * never appends anything itself.
- */
-async function applyPartnerCurrentState(pageId, transcript) {
-    const enrichment = await enrichPartnerFromTranscript(transcript);
-    if (!enrichment)
-        return null;
-    if (enrichment.sobre)
-        await notion.replacePageSection(pageId, enrichment.sobre, "Sobre o parceiro");
-    if (enrichment.deal)
-        await notion.replacePageSection(pageId, enrichment.deal, "Deal e proposta");
-    return enrichment;
-}
-async function applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto) {
-    const enrichment = await enrichInfluencerFromTranscript(transcript);
-    const kenkoLine = formatKenkoLine(volunteeredEmail, name, customers, activity);
-    const perfilStats = [enrichment?.sobre, kenkoLine].filter((s) => Boolean(s)).join("\n");
-    if (perfilStats)
-        await notion.replacePageSection(pageId, perfilStats, "Perfil e stats");
-    await notion.updateInfluencerFields(pageId, {
-        status: enrichment?.status,
-        tipoColaboracao: enrichment?.tipoColaboracao,
-        nicho: enrichment?.nicho,
-        proximoPasso: enrichment?.proximoPasso,
-        ultimoContacto,
-    });
-    return enrichment ?? null;
-}
-/**
- * First-time enrichment, called right after a partner/influencer page is
- * created. Best-effort: every step logs and swallows its own failure
- * rather than throwing, so a Haiku/Notion hiccup here never affects the
- * page that's already been created, or the checkpoint that already
- * recorded it — enrichment is a bonus on top of a real page, not a
- * condition for one. Logs the whole-transcript summary as the Log
- * section's opening entry (there's no prior entry to build a delta from
- * yet).
- */
-async function enrichPartnerPage(pageId, transcript) {
-    try {
-        const enrichment = await applyPartnerCurrentState(pageId, transcript);
-        if (enrichment?.log)
-            await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
-    }
-    catch (err) {
-        log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "partner", message: errMsg(err) });
-    }
-}
-async function enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto) {
-    try {
-        const enrichment = await applyInfluencerCurrentState(pageId, transcript, name, volunteeredEmail, customers, activity, ultimoContacto);
-        if (enrichment?.log)
-            await notion.appendToPageSection(pageId, dated(enrichment.log), "Relação e histórico");
-    }
-    catch (err) {
-        log.warn("leads_instagram_scan.enrich_failed", { pageId, kind: "influencer", message: errMsg(err) });
-    }
-}
-/**
  * Re-enrichment for a contact that already has a page and got new
  * messages since the last checkpoint. Never creates or touches a second
  * page — only refreshes Sobre/Deal/Perfil e stats (current-state, full
@@ -241,8 +159,11 @@ async function enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, 
  * file.
  */
 async function reEnrichContact(contact, existing, customers, activity) {
-    if (existing.classification !== "parceiro" && existing.classification !== "influencer")
+    if (existing.classification !== "parceiro" &&
+        existing.classification !== "influencer" &&
+        existing.classification !== "fornecedor") {
         return true;
+    }
     const pageId = existing.notionPageId;
     if (!pageId)
         return true;
@@ -255,14 +176,22 @@ async function reEnrichContact(contact, existing, customers, activity) {
         if (existing.classification === "parceiro") {
             await applyPartnerCurrentState(pageId, fullTranscript);
         }
-        else {
+        else if (existing.classification === "influencer") {
             const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-            await applyInfluencerCurrentState(pageId, fullTranscript, name, volunteeredEmail, customers, activity, contact.lastMessageAt);
+            await applyInfluencerCurrentState(pageId, fullTranscript, name, {
+                volunteeredEmail,
+                customers,
+                activity,
+                ultimoContacto: contact.lastMessageAt,
+            });
+        }
+        else {
+            await applySupplierCurrentState(pageId, fullTranscript);
         }
         if (deltaTranscript) {
             const update = await summarizeRelationshipUpdate(deltaTranscript);
             if (update) {
-                const section = existing.classification === "parceiro" ? "Log" : "Relação e histórico";
+                const section = existing.classification === "influencer" ? "Relação e histórico" : "Log";
                 await notion.appendToPageSection(pageId, dated(update), section);
             }
         }
@@ -281,7 +210,7 @@ function setCheckpoint(state, contact, classification, notionPageId) {
         classifiedAt: new Date().toISOString(),
     };
 }
-async function processContact(contact, customers, activity, existingPartners, existingInfluencers, state) {
+async function processContact(contact, customers, activity, existingPartners, existingInfluencers, existingSuppliers, state) {
     const name = contact.displayName || contact.username || `Instagram ${contact.platformUserId}`;
     // contact.platformUserId is Meta's internal numeric id — never surface it
     // as if it were a usable handle (it isn't searchable/linkable). Most
@@ -334,7 +263,7 @@ async function processContact(contact, customers, activity, existingPartners, ex
             if (dup) {
                 setCheckpoint(state, contact, "influencer", null);
                 log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-                return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+                return null;
             }
             try {
                 const pageId = await notion.createInfluencer(name, "Unassigned", origem, "Instagram DM", contact.lastMessageAt, "Contactado");
@@ -354,7 +283,7 @@ async function processContact(contact, customers, activity, existingPartners, ex
         if (dup) {
             setCheckpoint(state, contact, "parceiro", null);
             log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
+            return null;
         }
         try {
             const pageId = await notion.createPartner(name, "Unassigned", origem, "Parceria", "Contactado", contact.lastMessageAt);
@@ -389,7 +318,7 @@ async function processContact(contact, customers, activity, existingPartners, ex
         if (dup) {
             setCheckpoint(state, contact, classification, null);
             log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Partner Pipeline" } };
+            return null;
         }
         let pageId;
         try {
@@ -402,10 +331,10 @@ async function processContact(contact, customers, activity, existingPartners, ex
             return null; // leave checkpoint untouched — retry next run
         }
         // Outside the try/catch above: the page is created and checkpointed at
-        // this point no matter what happens next — enrichPartnerPage already
-        // swallows its own failures, so it can never turn a successful create
-        // into a misleading "write_failed" log.
-        await enrichPartnerPage(pageId, transcript);
+        // this point no matter what happens next — enrichPartnerPageFromText
+        // already swallows its own failures, so it can never turn a
+        // successful create into a misleading "write_failed" log.
+        await enrichPartnerPageFromText(pageId, transcript);
         return { type: "partner", summary: { nome: name } };
     }
     if (classification === "influencer") {
@@ -413,7 +342,7 @@ async function processContact(contact, customers, activity, existingPartners, ex
         if (dup) {
             setCheckpoint(state, contact, classification, null);
             log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
-            return { type: "duplicate", summary: { nome: name, existente: dup.name, pipeline: "Influencer Pipeline" } };
+            return null;
         }
         let pageId;
         try {
@@ -426,8 +355,41 @@ async function processContact(contact, customers, activity, existingPartners, ex
             return null; // leave checkpoint untouched — retry next run
         }
         const volunteeredEmail = extractVolunteeredEmail(contact.messages);
-        await enrichInfluencerPage(pageId, transcript, name, volunteeredEmail, customers, activity, contact.lastMessageAt);
+        await enrichInfluencerPageFromText(pageId, transcript, name, {
+            volunteeredEmail,
+            customers,
+            activity,
+            ultimoContacto: contact.lastMessageAt,
+        });
         return { type: "influencer", summary: { nome: name } };
+    }
+    if (classification === "fornecedor") {
+        // Fornecedores DB not provisioned yet (created by hand in Notion, then
+        // NOTION_SUPPLIER_DB_ID set) — skip gracefully, same "missing ID
+        // disables the feature" convention as every other optional DB here.
+        if (!process.env.NOTION_SUPPLIER_DB_ID) {
+            setCheckpoint(state, contact, classification, null);
+            log.debug("leads_instagram_scan.supplier_not_configured", { contactId: contact.id });
+            return null;
+        }
+        const dup = findDuplicateName(name, existingSuppliers);
+        if (dup) {
+            setCheckpoint(state, contact, classification, null);
+            log.info("leads_instagram_scan.duplicate_skipped", { contactId: contact.id, existing: dup.name });
+            return null;
+        }
+        let pageId;
+        try {
+            pageId = await notion.createSupplier(name, "Unassigned", origem, "Instagram DM", contact.lastMessageAt);
+            setCheckpoint(state, contact, classification, pageId);
+            existingSuppliers.push({ id: pageId, name });
+        }
+        catch (err) {
+            log.error("leads_instagram_scan.supplier_write_failed", { contactId: contact.id, message: errMsg(err) });
+            return null; // leave checkpoint untouched — retry next run
+        }
+        await enrichSupplierPageFromText(pageId, transcript);
+        return { type: "supplier", summary: { nome: name } };
     }
     // classification === "cliente"
     const email = extractVolunteeredEmail(contact.messages);
@@ -468,13 +430,18 @@ export async function run() {
     let activity;
     let existingPartners;
     let existingInfluencers;
+    let existingSuppliers;
     try {
-        [contacts, customers, activity, existingPartners, existingInfluencers] = await Promise.all([
+        [contacts, customers, activity, existingPartners, existingInfluencers, existingSuppliers] = await Promise.all([
             fetchInstagramContactsWithMessages(),
             fetchAllCustomerNames(),
             fetchAllVisitHistory(),
             notion.getAllPartnerContacts(),
             notion.getAllInfluencerContacts(),
+            // Fornecedores may not be provisioned yet (a brand-new DB, created by
+            // hand in Notion) — an empty list is harmless (findDuplicateName just
+            // never matches), so this never blocks partner/influencer/lead.
+            process.env.NOTION_SUPPLIER_DB_ID ? notion.getAllSupplierContacts() : Promise.resolve([]),
         ]);
     }
     catch (err) {
@@ -483,9 +450,9 @@ export async function run() {
     }
     const state = loadState();
     const createdLeads = [];
-    const createdPartners = [];
-    const createdInfluencers = [];
-    const flaggedDuplicates = [];
+    let createdPartners = 0;
+    let createdInfluencers = 0;
+    let createdSuppliers = 0;
     let skippedExcluded = 0;
     let skippedNoNewActivity = 0;
     for (const contact of contacts) {
@@ -515,25 +482,33 @@ export async function run() {
             skippedNoNewActivity++;
             continue;
         }
-        const result = await processContact(contact, customers, activity, existingPartners, existingInfluencers, state);
+        const result = await processContact(contact, customers, activity, existingPartners, existingInfluencers, existingSuppliers, state);
         saveState(state);
         if (result?.type === "lead")
             createdLeads.push(result.summary);
         if (result?.type === "partner")
-            createdPartners.push(result.summary);
+            createdPartners++;
         if (result?.type === "influencer")
-            createdInfluencers.push(result.summary);
-        if (result?.type === "duplicate")
-            flaggedDuplicates.push(result.summary);
+            createdInfluencers++;
+        if (result?.type === "supplier")
+            createdSuppliers++;
     }
+    // Only the Leads a contactar (cliente) pipeline gets a Telegram digest —
+    // founder's call, 2026-09-21, extended to suppliers 2026-09-22:
+    // partner/influencer/supplier creation, updates, and skipped duplicates
+    // are all real signal she reads directly in Notion, not something to
+    // push into the group chat. createdPartners/createdInfluencers/
+    // createdSuppliers/duplicate skips (logged as
+    // leads_instagram_scan.duplicate_skipped) still show up in structured
+    // logs for anyone auditing a run.
     log.info("leads_instagram_scan.done", {
         totalContacts: contacts.length,
         skippedExcluded,
         skippedNoNewActivity,
         createdLeads: createdLeads.length,
-        createdPartners: createdPartners.length,
-        createdInfluencers: createdInfluencers.length,
-        flaggedDuplicates: flaggedDuplicates.length,
+        createdPartners,
+        createdInfluencers,
+        createdSuppliers,
     });
     for (const message of formatLeadsDigests(createdLeads)) {
         try {
@@ -542,33 +517,6 @@ export async function run() {
         }
         catch (err) {
             log.error("leads_instagram_scan.leads_send_failed", { message: errMsg(err) });
-        }
-    }
-    for (const message of formatPartnerCandidatesDigests(createdPartners)) {
-        try {
-            const messageId = await sendGroupMessage(message);
-            log.info("leads_instagram_scan.partners_posted", { messageId });
-        }
-        catch (err) {
-            log.error("leads_instagram_scan.partners_send_failed", { message: errMsg(err) });
-        }
-    }
-    for (const message of formatInfluencerCandidatesDigests(createdInfluencers)) {
-        try {
-            const messageId = await sendGroupMessage(message);
-            log.info("leads_instagram_scan.influencers_posted", { messageId });
-        }
-        catch (err) {
-            log.error("leads_instagram_scan.influencers_send_failed", { message: errMsg(err) });
-        }
-    }
-    for (const message of formatDuplicateCandidatesDigests(flaggedDuplicates)) {
-        try {
-            const messageId = await sendGroupMessage(message);
-            log.info("leads_instagram_scan.duplicates_posted", { messageId });
-        }
-        catch (err) {
-            log.error("leads_instagram_scan.duplicates_send_failed", { message: errMsg(err) });
         }
     }
 }

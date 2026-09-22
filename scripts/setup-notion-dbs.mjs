@@ -17,6 +17,7 @@ const BACKLOG_DB_ID          = process.env.NOTION_BACKLOG_DB_ID;
 const FOUNDER_FOCUS_DB_ID    = process.env.NOTION_FOUNDER_FOCUS_DB_ID;
 const PARTNER_DB_ID          = process.env.NOTION_PARTNER_DB_ID;
 const INFLUENCER_DB_ID       = process.env.NOTION_INFLUENCER_DB_ID;
+const SUPPLIER_DB_ID         = process.env.NOTION_SUPPLIER_DB_ID;
 const TO_DISCUSS_DB_ID       = process.env.NOTION_TO_DISCUSS_DB_ID;
 const DECISIONS_DB_ID        = process.env.NOTION_DECISIONS_DB_ID;
 const STUDIO_LOG_DB_ID       = process.env.NOTION_STUDIO_LOG_DB_ID;
@@ -134,6 +135,28 @@ const influencerProperties = {
     { name: "Visita ao estúdio" }, { name: "Post patrocinado" },
     { name: "Parceria de longo prazo" }, { name: "Evento" }, { name: "Outro" },
   ] } },
+  Email: { email: {} },
+  Origem: { rich_text: {} },
+  "Criado em": { created_time: {} },
+};
+
+// ── Fornecedores ─────────────────────────────────────────────────────────────
+// Added 2026-09-22 — vendor/supplier sales pitches (Instagram + email),
+// previously dropped as noise, now tracked here. "Canal de contacto"
+// includes "WhatsApp" even though no WhatsApp channel writes here yet
+// (Meta verification still blocked) — future-proofs the schema.
+const supplierProperties = {
+  Owner: { select: { options: OWNER_OPTIONS } },
+  Status: { select: { options: [
+    { name: "A avaliar" }, { name: "Fornecedor atual" }, { name: "On hold" }, { name: "Arquivado" },
+  ] } },
+  "Canal de contacto": { select: { options: [
+    { name: "Instagram DM" }, { name: "Email" }, { name: "WhatsApp" }, { name: "Outro" },
+  ] } },
+  "Último contacto": { date: {} },
+  "Próximo passo": { rich_text: {} },
+  Notas: { rich_text: {} },
+  Email: { email: {} },
   Origem: { rich_text: {} },
   "Criado em": { created_time: {} },
 };
@@ -332,6 +355,8 @@ async function main() {
   else console.log("· Partner Pipeline DB id not set — skipping");
   if (INFLUENCER_DB_ID)       await setup("Influencer Pipeline", INFLUENCER_DB_ID,    influencerProperties);
   else console.log("· Influencer Pipeline DB id not set — skipping");
+  if (SUPPLIER_DB_ID)         await setup("Fornecedores",      SUPPLIER_DB_ID,         supplierProperties);
+  else console.log("· Fornecedores DB id not set — skipping");
   if (TO_DISCUSS_DB_ID)       await setup("To Discuss",       TO_DISCUSS_DB_ID,       toDiscussProperties);
   else console.log("· To Discuss DB id not set — skipping");
   if (DECISIONS_DB_ID)        await setup("Decisions",        DECISIONS_DB_ID,        decisionsProperties);

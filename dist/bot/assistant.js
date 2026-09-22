@@ -9,6 +9,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
+import { enrichInfluencerPageFromText, enrichPartnerPageFromText, enrichSupplierPageFromText } from "../lib/entity-enrichment.js";
 import { log } from "../lib/log.js";
 import { weekOfYear } from "../lib/week.js";
 import { lisbonNaiveToUtcIso } from "../lib/tz.js";
@@ -28,7 +29,7 @@ const PRIORITIES = ["Alta", "Média", "Baixa"];
 const TO_DISCUSS_URGENCIES = [
     "Próxima reunião", "Decisão offline", "Urgente",
 ];
-const ENTITY_KINDS = ["projeto", "evento", "parceria", "influencer"];
+const ENTITY_KINDS = ["projeto", "evento", "parceria", "influencer", "fornecedor"];
 const TOOLS = [
     {
         name: "create_task",
@@ -843,6 +844,7 @@ async function execCreateEntity(input, sender, ctx, collector) {
         evento: "evento",
         parceria: "parceiro",
         influencer: "influencer",
+        fornecedor: "fornecedor",
     };
     switch (kind) {
         case "projeto":
@@ -851,12 +853,28 @@ async function execCreateEntity(input, sender, ctx, collector) {
         case "evento":
             await notion.createEvent(nome, owner, ctx.message?.text ?? "");
             break;
-        case "parceria":
-            await notion.createPartner(nome, owner, ctx.message?.text ?? "");
+        case "parceria": {
+            const pageId = await notion.createPartner(nome, owner, ctx.message?.text ?? "");
+            // Best-effort (already try/catch'd internally, never throws) — a
+            // founder's chat message creating a partner is usually just a name
+            // ("cria um parceiro chamado X"), which correctly enriches to
+            // nothing; the occasional richer message ("...vamos fazer posts
+            // patrocinados") now actually gets captured instead of silently
+            // dropped, same pattern already proven for the Instagram/email
+            // creation paths (see src/lib/entity-enrichment.ts).
+            await enrichPartnerPageFromText(pageId, ctx.message?.text ?? "");
             break;
-        case "influencer":
-            await notion.createInfluencer(nome, owner, ctx.message?.text ?? "");
+        }
+        case "influencer": {
+            const pageId = await notion.createInfluencer(nome, owner, ctx.message?.text ?? "");
+            await enrichInfluencerPageFromText(pageId, ctx.message?.text ?? "", nome);
             break;
+        }
+        case "fornecedor": {
+            const pageId = await notion.createSupplier(nome, owner, ctx.message?.text ?? "");
+            await enrichSupplierPageFromText(pageId, ctx.message?.text ?? "");
+            break;
+        }
     }
     log.info("assistant.entity_created", { kind, nome, owner, sender: sender });
     const entityReply = `✅ ${kindLabel[kind]} criado: "${nome}"`;

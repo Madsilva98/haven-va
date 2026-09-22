@@ -67,6 +67,8 @@ export type InfluencerStatus =
   | "Fechado"
   | "Arquivado";
 
+export type SupplierStatus = "A avaliar" | "Fornecedor atual" | "On hold" | "Arquivado";
+
 export type ReminderRecurrence = "diária" | "semanal" | "mensal" | "anual";
 
 export const RECURRENCE_VALUES: readonly ReminderRecurrence[] = [
@@ -267,7 +269,7 @@ export interface ToDiscussIntent {
   area: Area;
 }
 
-export type EntityKind = "projeto" | "evento" | "parceria" | "influencer";
+export type EntityKind = "projeto" | "evento" | "parceria" | "influencer" | "fornecedor";
 
 export interface EntityRef {
   kind: EntityKind;

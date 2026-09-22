@@ -21,8 +21,7 @@ export function formatLeadsDigest(newLeads) {
 // crons stay on the unchunked formatLeadsDigest above, unaffected.
 const MAX_CHUNK_CHARS = 3500;
 // Pure — splits `lines` into Telegram-safe chunks, prefixing each with
-// `header(total, part, parts)`. Shared by formatLeadsDigests and
-// formatPartnerCandidatesDigests below.
+// `header(total, part, parts)`.
 function chunkDigest(lines, header) {
     if (lines.length === 0)
         return [];
@@ -44,22 +43,4 @@ export function formatLeadsDigests(newLeads) {
     return chunkDigest(lines, (total, part, parts) => parts > 1
         ? `📬 *${total} novo(s) lead(s) a contactar (parte ${part}/${parts}):*`
         : `📬 *${total} novo(s) lead(s) a contactar:*`);
-}
-export function formatPartnerCandidatesDigests(newPartners) {
-    const lines = newPartners.map((p) => `• ${p.nome}`);
-    return chunkDigest(lines, (total, part, parts) => parts > 1
-        ? `🤝 *${total} potencial(is) parceiro(s) via Instagram (parte ${part}/${parts}):*`
-        : `🤝 *${total} potencial(is) parceiro(s) via Instagram:*`);
-}
-export function formatInfluencerCandidatesDigests(newInfluencers) {
-    const lines = newInfluencers.map((p) => `• ${p.nome}`);
-    return chunkDigest(lines, (total, part, parts) => parts > 1
-        ? `📸 *${total} potencial(is) influencer(s) via Instagram (parte ${part}/${parts}):*`
-        : `📸 *${total} potencial(is) influencer(s) via Instagram:*`);
-}
-export function formatDuplicateCandidatesDigests(duplicates) {
-    const lines = duplicates.map((d) => `• ${d.nome} — parece igual a "${d.existente}" (${d.pipeline})`);
-    return chunkDigest(lines, (total, part, parts) => parts > 1
-        ? `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente (parte ${part}/${parts}):*`
-        : `🔁 *${total} possível(eis) duplicado(s) via Instagram — não criados, rever manualmente:*`);
 }
