@@ -29,6 +29,7 @@ import type {
   FounderFocusEntry,
   PartnerStatus,
   InfluencerStatus,
+  SupplierStatus,
   ReminderRecurrence,
   ReminderRow,
   ToDiscussRow,
@@ -57,6 +58,7 @@ const NOTION_BACKLOG_DB_ID = process.env.NOTION_BACKLOG_DB_ID;
 const NOTION_FOUNDER_FOCUS_DB_ID = process.env.NOTION_FOUNDER_FOCUS_DB_ID;
 const NOTION_PARTNER_DB_ID = process.env.NOTION_PARTNER_DB_ID;
 const NOTION_INFLUENCER_DB_ID = process.env.NOTION_INFLUENCER_DB_ID;
+const NOTION_SUPPLIER_DB_ID = process.env.NOTION_SUPPLIER_DB_ID;
 const NOTION_REMINDERS_DB_ID = process.env.NOTION_REMINDERS_DB_ID;
 const NOTION_TO_DISCUSS_DB_ID = process.env.NOTION_TO_DISCUSS_DB_ID;
 const NOTION_DECISIONS_DB_ID = process.env.NOTION_DECISIONS_DB_ID;
@@ -95,6 +97,7 @@ export async function initialize(): Promise<void> {
     NOTION_FOUNDER_FOCUS_DB_ID,
     NOTION_PARTNER_DB_ID,
     NOTION_INFLUENCER_DB_ID,
+    NOTION_SUPPLIER_DB_ID,
     NOTION_REMINDERS_DB_ID,
     NOTION_TO_DISCUSS_DB_ID,
     NOTION_DECISIONS_DB_ID,
@@ -402,6 +405,7 @@ const ENTITY_KIND_TO_FIELD: Record<EntityKind, string> = {
   evento: "Events Pipeline",
   parceria: "Partner Pipeline",
   influencer: "Influencer Pipeline",
+  fornecedor: "Fornecedores",
 };
 
 async function findEntityByName(kind: EntityKind, nome: string): Promise<string | null> {
@@ -409,7 +413,8 @@ async function findEntityByName(kind: EntityKind, nome: string): Promise<string 
     kind === "projeto" ? NOTION_PROJECTS_DB_ID
     : kind === "evento" ? NOTION_EVENT_DB_ID
     : kind === "parceria" ? NOTION_PARTNER_DB_ID
-    : NOTION_INFLUENCER_DB_ID;
+    : kind === "influencer" ? NOTION_INFLUENCER_DB_ID
+    : NOTION_SUPPLIER_DB_ID;
   if (!dbId) return null;
   try {
     const res = await withRetry("findEntityByName", () =>
@@ -547,6 +552,21 @@ const RECORD_DB_CONFIGS: Record<string, {
       // Partner Pipeline, see docs/knowledge-base/notion-api-gotchas.md.
       status: { notionProp: "Status", type: "select" },
       owner: { notionProp: "Owner", type: "select" },
+    },
+  },
+  suppliers: {
+    dbId: () => NOTION_SUPPLIER_DB_ID,
+    titleProp: "Name",
+    fields: {
+      // Live property is a select, not Notion's status type — same drift as
+      // Partner/Influencer Pipeline, see docs/knowledge-base/notion-api-gotchas.md.
+      status: { notionProp: "Status", type: "select" },
+      owner: { notionProp: "Owner", type: "select" },
+      ultimoContacto: { notionProp: "Último contacto", type: "date" },
+      notas: { notionProp: "Notas", type: "rich_text" },
+      email: { notionProp: "Email", type: "email" },
+      proximoPasso: { notionProp: "Próximo passo", type: "rich_text" },
+      origem: { notionProp: "Origem", type: "rich_text" },
     },
   },
   events: {
@@ -1478,6 +1498,37 @@ async function getAllInfluencerContacts(): Promise<PartnerContact[]> {
   return rows;
 }
 
+// Every supplier's id/name/email, no filter — same role as
+// getAllPartnerContacts/getAllInfluencerContacts for src/lib/outlook-contact-matching.ts's
+// known-contact matching and src/crons/*'s cross-channel dedup.
+async function getAllSupplierContacts(): Promise<PartnerContact[]> {
+  if (!NOTION_SUPPLIER_DB_ID) {
+    throw new Error("NOTION_SUPPLIER_DB_ID not set");
+  }
+  const rows: PartnerContact[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getAllSupplierContacts", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_SUPPLIER_DB_ID),
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        name: readPlainText(props["Name"]),
+        email: (props["Email"] as { email?: string | null } | undefined)?.email ?? null,
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  log.debug("notion.all_supplier_contacts_fetched", { count: rows.length });
+  return rows;
+}
+
 // Fontes list for the competitor-intel Gmail pipeline — founder-maintained
 // in Notion so senders can be added/paused without a redeploy.
 async function getActiveCompetitorSources(): Promise<CompetitorSourceRow[]> {
@@ -2120,6 +2171,59 @@ async function createInfluencer(
   return page.id;
 }
 
+// `canalContacto`/`ultimoContacto`/`email` all optional, same pattern as
+// createInfluencer — includes "WhatsApp" in the option set even though
+// no WhatsApp channel writes here yet (Meta verification still blocked,
+// see leads-instagram-scan.ts's docstring), so the Notion schema needs no
+// change whenever that channel ships. `status` defaults to "A avaliar" —
+// the normal case: a fresh, undecided sales pitch, not yet a working
+// relationship (that's "Fornecedor atual", set by hand or via
+// updateSupplierFields once a real relationship starts).
+async function createSupplier(
+  nome: string,
+  owner: OwnerValue,
+  originalMsg: string,
+  canalContacto?: "Instagram DM" | "Email" | "WhatsApp" | "Outro",
+  ultimoContacto?: string | null,
+  status: SupplierStatus = "A avaliar",
+  email?: string | null,
+): Promise<string> {
+  if (!NOTION_SUPPLIER_DB_ID) {
+    throw new Error("NOTION_SUPPLIER_DB_ID not set");
+  }
+  const page = await withRetry("createSupplier", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_SUPPLIER_DB_ID!) },
+      properties: {
+        "Name": { title: [{ text: { content: nome } }] },
+        Owner: { select: { name: owner } },
+        Status: { select: { name: status } },
+        Origem: richText(originalMsg),
+        ...(canalContacto ? { "Canal de contacto": { select: { name: canalContacto } } } : {}),
+        ...(ultimoContacto ? { "Último contacto": { date: { start: ultimoContacto.slice(0, 10) } } } : {}),
+        ...(email ? { Email: { email } } : {}),
+      },
+    }),
+  );
+  await withRetry("createSupplier.sections", () =>
+    client.blocks.children.append({
+      block_id: page.id,
+      children: [
+        toggleHeading("🏢 Sobre o fornecedor"),
+        toggleHeading("💰 Termos e condições"),
+        toggleHeading("📓 Log"),
+        toggleHeading("✅ Tasks"),
+        toggleHeading("💬 To Discuss"),
+        toggleHeading("📋 Decisions"),
+        toggleHeading("📞 Contactos"),
+        toggleHeading("📎 Contratos"),
+      ] as Parameters<typeof client.blocks.children.append>[0]["children"],
+    }),
+  );
+  log.info("notion.supplier_created", { pageId: page.id, nome, owner });
+  return page.id;
+}
+
 // "Current state" property update for an existing Influencer Pipeline
 // page — Status/Tipo de colaboração/Nicho/Próximo passo/Último contacto,
 // as opposed to createInfluencer's free-text toggle sections. Every field
@@ -2189,6 +2293,36 @@ async function updatePartnerFields(
     }),
   );
   log.info("notion.partner_fields_updated", { pageId, fields: Object.keys(properties) });
+}
+
+// Same "current state" property update as updatePartnerFields, for
+// Fornecedores — supplier-enrichment.md only produces free-text
+// Sobre/Termos/Log, same as partner enrichment, so a direct property
+// update is needed for Status/Email/Próximo passo/Último contacto.
+async function updateSupplierFields(
+  pageId: string,
+  fields: {
+    status?: SupplierStatus | null;
+    proximoPasso?: string | null;
+    ultimoContacto?: string | null;
+    email?: string | null;
+  },
+): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (fields.status) properties["Status"] = { select: { name: fields.status } };
+  if (fields.proximoPasso) properties["Próximo passo"] = richText(fields.proximoPasso);
+  if (fields.ultimoContacto) properties["Último contacto"] = { date: { start: fields.ultimoContacto.slice(0, 10) } };
+  if (fields.email) properties["Email"] = { email: fields.email };
+
+  if (Object.keys(properties).length === 0) return;
+
+  await withRetry("updateSupplierFields", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.supplier_fields_updated", { pageId, fields: Object.keys(properties) });
 }
 
 // ----- Leads a contactar -----
@@ -3037,6 +3171,7 @@ export {
   // Phase 3
   getAllPartnerContacts,
   getAllInfluencerContacts,
+  getAllSupplierContacts,
   getContentCalendarNeedsScheduling,
   createReminder,
   getDueReminders,
@@ -3053,8 +3188,10 @@ export {
   createEvent,
   createPartner,
   createInfluencer,
+  createSupplier,
   updateInfluencerFields,
   updatePartnerFields,
+  updateSupplierFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists
@@ -3116,6 +3253,7 @@ export const notion = {
   // Phase 3
   getAllPartnerContacts,
   getAllInfluencerContacts,
+  getAllSupplierContacts,
   getContentCalendarNeedsScheduling,
   createReminder,
   getDueReminders,
@@ -3132,8 +3270,10 @@ export const notion = {
   createEvent,
   createPartner,
   createInfluencer,
+  createSupplier,
   updateInfluencerFields,
   updatePartnerFields,
+  updateSupplierFields,
   // Feature E — entity lookup
   findEntityByName,
   // Lists

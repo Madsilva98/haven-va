@@ -11,7 +11,7 @@
  *     here but is, hand their exact display name/username back to be
  *     added to EXCLUDED_INSTAGRAM_NAMES in src/lib/instagram-inbox.ts
  *   - spot-check a few borderline classifications, including
- *     cliente-vs-parceiro-vs-influencer calls
+ *     cliente-vs-parceiro-vs-influencer-vs-fornecedor calls
  *   - confirm extracted emails/phones look right
  *
  * Usage:
@@ -28,7 +28,7 @@ import {
   isExcludedInstagramContact,
 } from "../dist/lib/instagram-inbox.js";
 import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, findBestNameMatch, findVisitHistory } from "../dist/lib/leads.js";
-import { classifyInstagramDM, enrichInfluencerFromTranscript, enrichPartnerFromTranscript } from "../dist/lib/lead-classifier.js";
+import { classifyInstagramDM, enrichInfluencerFromTranscript, enrichPartnerFromTranscript, enrichSupplierFromTranscript } from "../dist/lib/lead-classifier.js";
 
 function formatDatePt(iso) {
   const [y, m, d] = iso.slice(0, 10).split("-");
@@ -63,6 +63,7 @@ async function main() {
   let clienteCandidates = 0;
   let parceiroCandidates = 0;
   let influencerCandidates = 0;
+  let fornecedorCandidates = 0;
 
   for (const contact of contacts) {
     if (isExcludedInstagramContact(contact)) {
@@ -130,6 +131,17 @@ async function main() {
       continue;
     }
 
+    if (classification === "fornecedor") {
+      fornecedorCandidates++;
+      console.log(`[fornecedor] ${name} (${handle}) — id=${contact.id}, ${contact.messageCount} mensagens`);
+      console.log('  -> seria criado em Fornecedores (Canal de contacto = "Instagram DM", Status = "A avaliar")');
+      const enrichment = await enrichSupplierFromTranscript(transcript);
+      console.log(`  Sobre o fornecedor: ${enrichment?.sobre ?? "(NADA)"}`);
+      console.log(`  Termos e condições: ${enrichment?.termos ?? "(NADA)"}`);
+      console.log(`  Log: ${enrichment?.log ?? "(falhou)"}\n`);
+      continue;
+    }
+
     // classification === "cliente"
     const email = extractVolunteeredEmail(contact.messages);
     const phone = extractVolunteeredPhone(contact.messages);
@@ -151,7 +163,7 @@ async function main() {
   }
 
   console.log(
-    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${alreadyContacted} já contactados por nós (Partner Pipeline, Status="Contactado") · ${noText} sem texto · ${nenhum} nenhuma das categorias · ${clienteCandidates} candidatos a lead · ${parceiroCandidates} candidatos a parceiro · ${influencerCandidates} candidatos a influencer.`,
+    `${contacts.length} contactos Instagram · ${excluded} excluídos · ${alreadyContacted} já contactados por nós (Partner Pipeline, Status="Contactado") · ${noText} sem texto · ${nenhum} nenhuma das categorias · ${clienteCandidates} candidatos a lead · ${parceiroCandidates} candidatos a parceiro · ${influencerCandidates} candidatos a influencer · ${fornecedorCandidates} candidatos a fornecedor.`,
   );
   console.log(
     "\nEste script é só de leitura — não escreveu no Notion nem no checkpoint. Revê os candidatos acima antes de confiar no próximo run real do cron.",

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const enrichPartnerFromTranscript = vi.fn();
 const enrichInfluencerFromTranscript = vi.fn();
+const enrichSupplierFromTranscript = vi.fn();
 vi.mock("../src/lib/lead-classifier.js", () => ({
   enrichPartnerFromTranscript: (...args: unknown[]) => enrichPartnerFromTranscript(...args),
   enrichInfluencerFromTranscript: (...args: unknown[]) => enrichInfluencerFromTranscript(...args),
+  enrichSupplierFromTranscript: (...args: unknown[]) => enrichSupplierFromTranscript(...args),
 }));
 
 const findBestNameMatch = vi.fn();
@@ -26,9 +28,11 @@ vi.mock("../src/notion.js", () => ({
 import {
   applyInfluencerCurrentState,
   applyPartnerCurrentState,
+  applySupplierCurrentState,
   dated,
   enrichInfluencerPageFromText,
   enrichPartnerPageFromText,
+  enrichSupplierPageFromText,
   formatDatePt,
   formatKenkoLine,
 } from "../src/lib/entity-enrichment.js";
@@ -37,6 +41,7 @@ describe("entity-enrichment", () => {
   afterEach(() => {
     enrichPartnerFromTranscript.mockReset();
     enrichInfluencerFromTranscript.mockReset();
+    enrichSupplierFromTranscript.mockReset();
     findBestNameMatch.mockReset();
     findVisitHistory.mockReset();
     replacePageSection.mockReset().mockResolvedValue(undefined);
@@ -154,6 +159,33 @@ describe("entity-enrichment", () => {
     });
   });
 
+  describe("applySupplierCurrentState", () => {
+    it("replaces Sobre and Termos sections from the enrichment result", async () => {
+      enrichSupplierFromTranscript.mockResolvedValue({
+        sobre: "Vende equipamento de Pilates",
+        termos: "Desconto de 10% em compras acima de 500€",
+        log: "Contacto inicial recebido.",
+      });
+      const result = await applySupplierCurrentState("page-3", "texto");
+      expect(replacePageSection).toHaveBeenCalledWith("page-3", "Vende equipamento de Pilates", "Sobre o fornecedor");
+      expect(replacePageSection).toHaveBeenCalledWith("page-3", "Desconto de 10% em compras acima de 500€", "Termos e condições");
+      expect(result?.log).toBe("Contacto inicial recebido.");
+    });
+
+    it("skips replacing a section whose field is null", async () => {
+      enrichSupplierFromTranscript.mockResolvedValue({ sobre: null, termos: null, log: "resumo" });
+      await applySupplierCurrentState("page-3", "texto");
+      expect(replacePageSection).not.toHaveBeenCalled();
+    });
+
+    it("returns null when the classifier call fails", async () => {
+      enrichSupplierFromTranscript.mockResolvedValue(null);
+      const result = await applySupplierCurrentState("page-3", "texto");
+      expect(result).toBeNull();
+      expect(replacePageSection).not.toHaveBeenCalled();
+    });
+  });
+
   describe("enrichPartnerPageFromText", () => {
     it("appends a dated Log entry when the enrichment produced one", async () => {
       enrichPartnerFromTranscript.mockResolvedValue({ sobre: null, deal: null, log: "Primeiro contacto." });
@@ -189,6 +221,24 @@ describe("entity-enrichment", () => {
     it("never throws when the underlying classifier call rejects", async () => {
       enrichInfluencerFromTranscript.mockRejectedValue(new Error("API down"));
       await expect(enrichInfluencerPageFromText("page-2", "texto", "Marta")).resolves.toBeUndefined();
+      expect(appendToPageSection).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("enrichSupplierPageFromText", () => {
+    it("appends a dated Log entry when the enrichment produced one", async () => {
+      enrichSupplierFromTranscript.mockResolvedValue({ sobre: null, termos: null, log: "Pediu catálogo." });
+      await enrichSupplierPageFromText("page-3", "texto");
+      expect(appendToPageSection).toHaveBeenCalledTimes(1);
+      const [pageId, content, section] = appendToPageSection.mock.calls[0]!;
+      expect(pageId).toBe("page-3");
+      expect(content).toMatch(/^\[\d{2}\/\d{2}\/\d{4}\] Pediu catálogo\.$/);
+      expect(section).toBe("Log");
+    });
+
+    it("never throws when the underlying classifier call rejects", async () => {
+      enrichSupplierFromTranscript.mockRejectedValue(new Error("API down"));
+      await expect(enrichSupplierPageFromText("page-3", "texto")).resolves.toBeUndefined();
       expect(appendToPageSection).not.toHaveBeenCalled();
     });
   });

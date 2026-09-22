@@ -140,6 +140,21 @@ const dbs = [
     ],
   },
   {
+    sheet: "Fornecedores",
+    envVar: "NOTION_SUPPLIER_DB_ID",
+    rows: [
+      ["Propriedade", "Tipo", "Valores possíveis", "Notas"],
+      ["Name", "title", "", ""],
+      ["Status", "select", "A avaliar | Fornecedor atual | On hold | Arquivado", ""],
+      ["Owner", "select", "Madalena | Mafalda | Beatriz | Unassigned", ""],
+      ["Último contacto", "date", "", ""],
+      ["Próximo passo", "text", "", ""],
+      ["Canal de contacto", "select", "Instagram DM | Email | WhatsApp | Outro", "WhatsApp reservado — canal ainda bloqueado (Meta verification)"],
+      ["Notas", "text", "", ""],
+      ["Origem", "text", "", ""],
+    ],
+  },
+  {
     sheet: "Projetos",
     envVar: "NOTION_PROJECTS_DB_ID",
     rows: [

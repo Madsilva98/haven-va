@@ -32,8 +32,10 @@
 import {
   enrichInfluencerFromTranscript,
   enrichPartnerFromTranscript,
+  enrichSupplierFromTranscript,
   type InfluencerEnrichment,
   type PartnerEnrichment,
+  type SupplierEnrichment,
 } from "./lead-classifier.js";
 import { findBestNameMatch, findVisitHistory, type CustomerNameRecord, type VisitHistory } from "./leads.js";
 import { log } from "./log.js";
@@ -86,6 +88,17 @@ export async function applyPartnerCurrentState(pageId: string, text: string): Pr
   return enrichment;
 }
 
+/** Same shape as applyPartnerCurrentState, for Fornecedores — no Kenko
+ * cross-reference (a supplier selling to us has no client visit history to
+ * check). */
+export async function applySupplierCurrentState(pageId: string, text: string): Promise<SupplierEnrichment | null> {
+  const enrichment = await enrichSupplierFromTranscript(text);
+  if (!enrichment) return null;
+  if (enrichment.sobre) await notion.replacePageSection(pageId, enrichment.sobre, "Sobre o fornecedor");
+  if (enrichment.termos) await notion.replacePageSection(pageId, enrichment.termos, "Termos e condições");
+  return enrichment;
+}
+
 export interface InfluencerEnrichmentContext {
   volunteeredEmail?: string | null;
   customers?: CustomerNameRecord[];
@@ -133,6 +146,15 @@ export async function enrichPartnerPageFromText(pageId: string, text: string): P
     if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
   } catch (err) {
     log.warn("entity_enrichment.failed", { pageId, kind: "partner", message: errMsg(err) });
+  }
+}
+
+export async function enrichSupplierPageFromText(pageId: string, text: string): Promise<void> {
+  try {
+    const enrichment = await applySupplierCurrentState(pageId, text);
+    if (enrichment?.log) await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
+  } catch (err) {
+    log.warn("entity_enrichment.failed", { pageId, kind: "supplier", message: errMsg(err) });
   }
 }
 

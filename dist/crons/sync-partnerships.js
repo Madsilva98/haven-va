@@ -1,28 +1,34 @@
 /**
  * Weekly scan of the configured Outlook mailboxes (OUTLOOK_MAILBOXES, plus
- * "me") that creates/updates both Partner and Influencer Pipeline, the
- * email-side counterpart to src/crons/leads-instagram-scan.ts. Fully
- * automated, no human review gate — replaces the *live* path
- * scripts/scan-outlook-partnerships.mjs + apply-outlook-findings.mjs used
- * to cover; those manual scripts (and the sync-partnerships skill) stay in
- * the repo as an on-demand audit/backfill tool, same relationship
- * scripts/dry-run-instagram-leads.mjs has to the live Instagram cron.
+ * "me") that creates/updates Partner Pipeline, Influencer Pipeline, AND
+ * Fornecedores (Suppliers, added 2026-09-22), the email-side counterpart to
+ * src/crons/leads-instagram-scan.ts. Fully automated, no human review gate
+ * — replaces the *live* path scripts/scan-outlook-partnerships.mjs +
+ * apply-outlook-findings.mjs used to cover; those manual scripts (and the
+ * sync-partnerships skill) stay in the repo as an on-demand audit/backfill
+ * tool, same relationship scripts/dry-run-instagram-leads.mjs has to the
+ * live Instagram cron.
  *
  * Per message, in order:
- *   1. Known-contact check, BOTH pipelines (src/lib/outlook-contact-matching.ts,
- *      built from notion.getAllPartnerContacts()/getAllInfluencerContacts()).
- *      An exact_email match is certain — auto-update that page directly, no
- *      classifier call needed. A domain match only proves "same
- *      organization", never "same initiative" (confirmed wrong for real
- *      once already, see outlook-contact-matching.ts) — never auto-updated,
- *      only carried into step 3 as a dedup candidate.
+ *   1. Known-contact check, ALL THREE pipelines (src/lib/outlook-contact-matching.ts,
+ *      built from notion.getAllPartnerContacts()/getAllInfluencerContacts()/
+ *      getAllSupplierContacts()). An exact_email match is certain —
+ *      auto-update that page directly, no classifier call needed. A domain
+ *      match only proves "same organization", never "same initiative"
+ *      (confirmed wrong for real once already, see
+ *      outlook-contact-matching.ts) — never auto-updated, only carried
+ *      into step 3 as a dedup candidate.
  *   2. Not a certain known-contact: classify with
  *      src/prompts/partnership-email-intent.md → parceiro / influencer /
- *      nenhum (src/lib/lead-classifier.ts's classifyPartnershipEmailIntent).
- *      This REPLACES keyword matching (the manual script's approach) —
- *      keyword matching alone has a confirmed real false-positive rate
- *      (SaaS/vendor noise), unsafe to run unattended. nenhum is dropped,
- *      checkpointed, never written anywhere.
+ *      fornecedor / nenhum (src/lib/lead-classifier.ts's
+ *      classifyPartnershipEmailIntent). This REPLACES keyword matching
+ *      (the manual script's approach) — keyword matching alone has a
+ *      confirmed real false-positive rate (SaaS/vendor noise), unsafe to
+ *      run unattended. nenhum is dropped, checkpointed, never written
+ *      anywhere. fornecedor (added 2026-09-22, founder's call: vendor
+ *      sales pitches used to be dropped as nenhum, now tracked instead) is
+ *      skipped gracefully — never a hard error — if NOTION_SUPPLIER_DB_ID
+ *      isn't set yet (the DB is provisioned by hand in Notion first).
  *   3. guessExternalParty (src/lib/outlook-contact-matching.ts) returns
  *      null when the Haven sent the message and no external recipient was
  *      found — an internal-only forward, most often a founder re-sharing a
@@ -69,7 +75,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { enrichInfluencerPageFromText, enrichPartnerPageFromText, } from "../lib/entity-enrichment.js";
+import { enrichInfluencerPageFromText, enrichPartnerPageFromText, enrichSupplierPageFromText, } from "../lib/entity-enrichment.js";
 import { classifyPartnershipEmailIntent, } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
@@ -139,7 +145,7 @@ async function forwardAndArchiveIfConfigured(msg) {
         // apply-outlook-findings.mjs). Still archive it.
         const isSelfForward = msg.mailbox.toLowerCase() === forwardTo.toLowerCase();
         if (!isSelfForward) {
-            await outlook.forwardMessage(msg.mailbox, msg.id, [forwardTo], "Reencaminhado automaticamente — registado no Partner/Influencer Pipeline.");
+            await outlook.forwardMessage(msg.mailbox, msg.id, [forwardTo], "Reencaminhado automaticamente — registado no Partner/Influencer Pipeline ou em Fornecedores.");
         }
         await outlook.archiveMessage(msg.mailbox, msg.id);
     }
@@ -160,13 +166,19 @@ async function updateKnownInfluencer(contact, msg, text) {
     await enrichInfluencerPageFromText(contact.id, text, contact.name, { ultimoContacto: msg.receivedDateTime });
     await forwardAndArchiveIfConfigured(msg);
 }
-async function processMessage(msg, ownDomains, partnerLookups, influencerLookups, state) {
+async function updateKnownSupplier(contact, msg, text) {
+    await notion.updateSupplierFields(contact.id, { ultimoContacto: msg.receivedDateTime });
+    await enrichSupplierPageFromText(contact.id, text);
+    await forwardAndArchiveIfConfigured(msg);
+}
+async function processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state) {
     const msgKey = findingId(msg.mailbox, msg.id);
     const text = `${msg.subject}\n${msg.body}`;
-    // Step 1: known-contact check, both pipelines. Only an exact_email match
-    // is certain enough to auto-update without a classifier call.
+    // Step 1: known-contact check, all three pipelines. Only an exact_email
+    // match is certain enough to auto-update without a classifier call.
     const partnerMatch = matchKnownContact(msg.from, msg.to, ownDomains, partnerLookups);
     const influencerMatch = matchKnownContact(msg.from, msg.to, ownDomains, influencerLookups);
+    const supplierMatch = matchKnownContact(msg.from, msg.to, ownDomains, supplierLookups);
     if (partnerMatch?.matchBasis === "exact_email") {
         try {
             await updateKnownPartner(partnerMatch.contact, msg, text);
@@ -190,6 +202,21 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
         }
         catch (err) {
             log.error("sync_partnerships.known_influencer_update_failed", {
+                mailbox: msg.mailbox,
+                messageId: msg.id,
+                message: errMsg(err),
+            });
+            return { ok: false };
+        }
+    }
+    if (supplierMatch?.matchBasis === "exact_email") {
+        try {
+            await updateKnownSupplier(supplierMatch.contact, msg, text);
+            setMessageCheckpoint(state, msgKey, "fornecedor", "exact_email", "suppliers", supplierMatch.contact.id);
+            return { ok: true, result: "updated_known" };
+        }
+        catch (err) {
+            log.error("sync_partnerships.known_supplier_update_failed", {
                 mailbox: msg.mailbox,
                 messageId: msg.id,
                 message: errMsg(err),
@@ -232,8 +259,21 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
         });
         return { ok: true, result: "no_external_party" };
     }
-    const domainHintContact = classification === "parceiro" ? partnerMatch?.contact : influencerMatch?.contact;
-    const dbKey = classification === "parceiro" ? "partners" : "influencers";
+    // Fornecedores DB not provisioned yet (created by hand in Notion, then
+    // NOTION_SUPPLIER_DB_ID set) — skip gracefully rather than reaching
+    // createSupplier and throwing. Same "a missing ID disables the feature"
+    // convention as every other optional DB in this codebase; once the DB
+    // exists and the env var is set, fornecedor starts working with no
+    // further code change.
+    if (classification === "fornecedor" && !process.env.NOTION_SUPPLIER_DB_ID) {
+        setMessageCheckpoint(state, msgKey, classification, null, null, null);
+        log.debug("sync_partnerships.supplier_not_configured", { mailbox: msg.mailbox, messageId: msg.id });
+        return { ok: true, result: "supplier_not_configured" };
+    }
+    const domainHintContact = classification === "parceiro" ? partnerMatch?.contact
+        : classification === "influencer" ? influencerMatch?.contact
+            : supplierMatch?.contact;
+    const dbKey = classification === "parceiro" ? "partners" : classification === "influencer" ? "influencers" : "suppliers";
     // Step 3: dedup before create.
     const nameMatch = domainHintContact
         ? { id: domainHintContact.id, title: domainHintContact.name }
@@ -259,13 +299,21 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
             setMessageCheckpoint(state, msgKey, classification, null, "partners", pageId);
             return { ok: true, result: "created_partner" };
         }
-        const pageId = await notion.createInfluencer(externalParty.name, "Unassigned", formatOrigem(msg), "Email", msg.receivedDateTime, "A contactar", externalParty.email || null);
-        await enrichInfluencerPageFromText(pageId, text, externalParty.name, {
-            volunteeredEmail: externalParty.email || null,
-        });
+        if (classification === "influencer") {
+            const pageId = await notion.createInfluencer(externalParty.name, "Unassigned", formatOrigem(msg), "Email", msg.receivedDateTime, "A contactar", externalParty.email || null);
+            await enrichInfluencerPageFromText(pageId, text, externalParty.name, {
+                volunteeredEmail: externalParty.email || null,
+            });
+            await forwardAndArchiveIfConfigured(msg);
+            setMessageCheckpoint(state, msgKey, classification, null, "influencers", pageId);
+            return { ok: true, result: "created_influencer" };
+        }
+        // classification === "fornecedor"
+        const pageId = await notion.createSupplier(externalParty.name, "Unassigned", formatOrigem(msg), "Email", msg.receivedDateTime, "A avaliar", externalParty.email || null);
+        await enrichSupplierPageFromText(pageId, text);
         await forwardAndArchiveIfConfigured(msg);
-        setMessageCheckpoint(state, msgKey, classification, null, "influencers", pageId);
-        return { ok: true, result: "created_influencer" };
+        setMessageCheckpoint(state, msgKey, classification, null, "suppliers", pageId);
+        return { ok: true, result: "created_supplier" };
     }
     catch (err) {
         log.error("sync_partnerships.write_failed", { mailbox: msg.mailbox, messageId: msg.id, message: errMsg(err) });
@@ -289,11 +337,16 @@ export async function run() {
     let myEmail;
     let existingPartners;
     let existingInfluencers;
+    let existingSuppliers;
     try {
-        [myEmail, existingPartners, existingInfluencers] = await Promise.all([
+        [myEmail, existingPartners, existingInfluencers, existingSuppliers] = await Promise.all([
             outlook.getMyEmail(),
             notion.getAllPartnerContacts(),
             notion.getAllInfluencerContacts(),
+            // Fornecedores may not be provisioned yet (a brand-new DB, created by
+            // hand in Notion) — an empty lookup table is harmless (matchKnownContact
+            // just never matches), so this never blocks partner/influencer.
+            process.env.NOTION_SUPPLIER_DB_ID ? notion.getAllSupplierContacts() : Promise.resolve([]),
         ]);
     }
     catch (err) {
@@ -303,13 +356,16 @@ export async function run() {
     const ownDomains = new Set([domainOf(myEmail), ...configuredMailboxes.map(domainOf)].filter(Boolean));
     const partnerLookups = buildContactLookups(existingPartners, ownDomains);
     const influencerLookups = buildContactLookups(existingInfluencers, ownDomains);
+    const supplierLookups = buildContactLookups(existingSuppliers, ownDomains);
     const state = loadState();
     let updatedKnown = 0;
     let createdPartners = 0;
     let createdInfluencers = 0;
+    let createdSuppliers = 0;
     let skippedDuplicates = 0;
     let skippedNenhum = 0;
     let skippedNoExternalParty = 0;
+    let skippedSupplierNotConfigured = 0;
     for (const mailbox of mailboxes) {
         let messages;
         try {
@@ -329,7 +385,7 @@ export async function run() {
             const msgKey = findingId(mailbox, msg.id);
             if (state.messages[msgKey])
                 continue; // already decided — a watermark rewind can re-include this
-            const outcome = await processMessage(msg, ownDomains, partnerLookups, influencerLookups, state);
+            const outcome = await processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state);
             if (outcome.ok) {
                 saveState(state);
                 if (outcome.result === "updated_known")
@@ -338,12 +394,16 @@ export async function run() {
                     createdPartners++;
                 else if (outcome.result === "created_influencer")
                     createdInfluencers++;
+                else if (outcome.result === "created_supplier")
+                    createdSuppliers++;
                 else if (outcome.result === "duplicate_skipped")
                     skippedDuplicates++;
                 else if (outcome.result === "nenhum")
                     skippedNenhum++;
                 else if (outcome.result === "no_external_party")
                     skippedNoExternalParty++;
+                else if (outcome.result === "supplier_not_configured")
+                    skippedSupplierNotConfigured++;
             }
             else if (minUnprocessed === null || msg.receivedDateTime < minUnprocessed) {
                 minUnprocessed = msg.receivedDateTime;
@@ -364,8 +424,10 @@ export async function run() {
         updatedKnown,
         createdPartners,
         createdInfluencers,
+        createdSuppliers,
         skippedDuplicates,
         skippedNenhum,
         skippedNoExternalParty,
+        skippedSupplierNotConfigured,
     });
 }

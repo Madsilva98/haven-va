@@ -10,10 +10,13 @@
  * leads-instagram-scan.ts; mirrors that script's structure.
  *
  * Prints every message that WOULD update a known contact, create a new
- * Partner/Influencer Pipeline row, or get skipped as a likely duplicate —
- * so a founder can spot-check classifier accuracy (known partner, known
- * influencer, known noise/vendor case) before the live cron runs
- * unattended, and confirm the known-contact matching isn't misfiring.
+ * Partner/Influencer/Fornecedores row, or get skipped as a likely
+ * duplicate — so a founder can spot-check classifier accuracy (known
+ * partner, known influencer, known supplier, known noise case) before the
+ * live cron runs unattended, and confirm the known-contact matching isn't
+ * misfiring. Fornecedor candidates print distinctly when
+ * NOTION_SUPPLIER_DB_ID isn't set yet, same graceful-skip behavior as the
+ * live cron.
  *
  * Usage:
  *   npm run build
@@ -25,7 +28,7 @@
  * every address in OUTLOOK_MAILBOXES, same as the live cron.
  */
 
-import { enrichInfluencerFromTranscript, enrichPartnerFromTranscript, classifyPartnershipEmailIntent } from "../dist/lib/lead-classifier.js";
+import { enrichInfluencerFromTranscript, enrichPartnerFromTranscript, enrichSupplierFromTranscript, classifyPartnershipEmailIntent } from "../dist/lib/lead-classifier.js";
 import * as notion from "../dist/notion.js";
 import * as outlook from "../dist/lib/outlook.js";
 import { buildContactLookups, domainOf, guessExternalParty, matchKnownContact } from "../dist/lib/outlook-contact-matching.js";
@@ -53,15 +56,20 @@ async function main() {
   const myEmail = await outlook.getMyEmail();
   const ownDomains = new Set([domainOf(myEmail), ...configuredMailboxes.map(domainOf)].filter(Boolean));
 
-  const [existingPartners, existingInfluencers] = await Promise.all([
+  const [existingPartners, existingInfluencers, existingSuppliers] = await Promise.all([
     notion.getAllPartnerContacts(),
     notion.getAllInfluencerContacts(),
+    // Fornecedores may not be provisioned yet — an empty lookup table is
+    // harmless (matchKnownContact just never matches).
+    process.env.NOTION_SUPPLIER_DB_ID ? notion.getAllSupplierContacts() : Promise.resolve([]),
   ]);
   const partnerLookups = buildContactLookups(existingPartners, ownDomains);
   const influencerLookups = buildContactLookups(existingInfluencers, ownDomains);
+  const supplierLookups = buildContactLookups(existingSuppliers, ownDomains);
   console.log(
     `Known contacts: ${partnerLookups.emailToContact.size} partner email(s)/${partnerLookups.domainToContact.size} domain(s), ` +
-      `${influencerLookups.emailToContact.size} influencer email(s)/${influencerLookups.domainToContact.size} domain(s).`,
+      `${influencerLookups.emailToContact.size} influencer email(s)/${influencerLookups.domainToContact.size} domain(s), ` +
+      `${supplierLookups.emailToContact.size} supplier email(s)/${supplierLookups.domainToContact.size} domain(s).`,
   );
 
   const sinceISO = args.since ? new Date(`${args.since}T00:00:00.000Z`).toISOString() : undefined;
@@ -72,9 +80,11 @@ async function main() {
   let updatedKnown = 0;
   let createdPartners = 0;
   let createdInfluencers = 0;
+  let createdSuppliers = 0;
   let skippedDuplicates = 0;
   let skippedNenhum = 0;
   let skippedNoExternalParty = 0;
+  let skippedSupplierNotConfigured = 0;
 
   for (const mailbox of mailboxes) {
     let messages;
@@ -92,12 +102,19 @@ async function main() {
 
       const partnerMatch = matchKnownContact(msg.from, msg.to, ownDomains, partnerLookups);
       const influencerMatch = matchKnownContact(msg.from, msg.to, ownDomains, influencerLookups);
+      const supplierMatch = matchKnownContact(msg.from, msg.to, ownDomains, supplierLookups);
 
-      if (partnerMatch?.matchBasis === "exact_email" || influencerMatch?.matchBasis === "exact_email") {
+      if (
+        partnerMatch?.matchBasis === "exact_email" ||
+        influencerMatch?.matchBasis === "exact_email" ||
+        supplierMatch?.matchBasis === "exact_email"
+      ) {
         updatedKnown++;
-        const isPartner = partnerMatch?.matchBasis === "exact_email";
-        const contact = isPartner ? partnerMatch.contact : influencerMatch.contact;
-        console.log(`[known ${isPartner ? "partner" : "influencer"}] "${msg.subject}" — de ${msg.from.name} <${msg.from.email}>`);
+        const kind = partnerMatch?.matchBasis === "exact_email" ? "partner"
+          : influencerMatch?.matchBasis === "exact_email" ? "influencer"
+          : "supplier";
+        const contact = kind === "partner" ? partnerMatch.contact : kind === "influencer" ? influencerMatch.contact : supplierMatch.contact;
+        console.log(`[known ${kind}] "${msg.subject}" — de ${msg.from.name} <${msg.from.email}>`);
         console.log(`  -> seria atualizado: ${contact.name} (${contact.id}) — Último contacto = ${msg.receivedDateTime.slice(0, 10)}`);
         continue;
       }
@@ -115,8 +132,17 @@ async function main() {
         console.log(`[sem destinatário externo — ${classification}] "${msg.subject}" — de ${msg.from.name} <${msg.from.email}> (mensagem interna, sem destinatário fora do domínio) — NÃO criaria\n`);
         continue;
       }
-      const domainHintContact = classification === "parceiro" ? partnerMatch?.contact : influencerMatch?.contact;
-      const dbKey = classification === "parceiro" ? "partners" : "influencers";
+
+      if (classification === "fornecedor" && !process.env.NOTION_SUPPLIER_DB_ID) {
+        skippedSupplierNotConfigured++;
+        console.log(`[fornecedor — DB não configurado] "${msg.subject}" — de ${externalParty.name} <${externalParty.email || "sem email"}> — NÃO criaria (NOTION_SUPPLIER_DB_ID por definir)\n`);
+        continue;
+      }
+
+      const domainHintContact = classification === "parceiro" ? partnerMatch?.contact
+        : classification === "influencer" ? influencerMatch?.contact
+        : supplierMatch?.contact;
+      const dbKey = classification === "parceiro" ? "partners" : classification === "influencer" ? "influencers" : "suppliers";
       const nameMatch = domainHintContact
         ? { id: domainHintContact.id, title: domainHintContact.name }
         : await notion.findPageInDb(dbKey, externalParty.name);
@@ -139,21 +165,33 @@ async function main() {
         continue;
       }
 
-      // classification === "influencer"
-      createdInfluencers++;
-      console.log(`[influencer] "${msg.subject}" — de ${externalParty.name} <${externalParty.email || "sem email"}>`);
-      console.log('  -> seria criado em Influencer Pipeline (Canal de contacto = "Email")');
-      const enrichment = await enrichInfluencerFromTranscript(text);
-      console.log(`  Perfil e stats — Sobre: ${enrichment?.sobre ?? "(NADA)"}`);
-      console.log(`  Relação e histórico: ${enrichment?.log ?? "(falhou)"}`);
-      console.log(`  Nicho: ${enrichment?.nicho ?? "(NADA)"}`);
-      console.log(`  Tipo de colaboração: ${enrichment?.tipoColaboracao?.join(", ") || "(NADA)"}\n`);
+      if (classification === "influencer") {
+        createdInfluencers++;
+        console.log(`[influencer] "${msg.subject}" — de ${externalParty.name} <${externalParty.email || "sem email"}>`);
+        console.log('  -> seria criado em Influencer Pipeline (Canal de contacto = "Email")');
+        const enrichment = await enrichInfluencerFromTranscript(text);
+        console.log(`  Perfil e stats — Sobre: ${enrichment?.sobre ?? "(NADA)"}`);
+        console.log(`  Relação e histórico: ${enrichment?.log ?? "(falhou)"}`);
+        console.log(`  Nicho: ${enrichment?.nicho ?? "(NADA)"}`);
+        console.log(`  Tipo de colaboração: ${enrichment?.tipoColaboracao?.join(", ") || "(NADA)"}\n`);
+        continue;
+      }
+
+      // classification === "fornecedor"
+      createdSuppliers++;
+      console.log(`[fornecedor] "${msg.subject}" — de ${externalParty.name} <${externalParty.email || "sem email"}>`);
+      console.log('  -> seria criado em Fornecedores (Canal de contacto = "Email", Status = "A avaliar")');
+      const supplierEnrichment = await enrichSupplierFromTranscript(text);
+      console.log(`  Sobre o fornecedor: ${supplierEnrichment?.sobre ?? "(NADA)"}`);
+      console.log(`  Termos e condições: ${supplierEnrichment?.termos ?? "(NADA)"}`);
+      console.log(`  Log: ${supplierEnrichment?.log ?? "(falhou)"}\n`);
     }
   }
 
   console.log(
     `\n${scanned} mensagens · ${updatedKnown} atualizariam um contacto conhecido · ${createdPartners} candidatos a parceiro · ` +
-      `${createdInfluencers} candidatos a influencer · ${skippedDuplicates} duplicados (não criados) · ${skippedNoExternalParty} sem destinatário externo (mensagem interna) · ${skippedNenhum} nenhuma das categorias.`,
+      `${createdInfluencers} candidatos a influencer · ${createdSuppliers} candidatos a fornecedor · ${skippedDuplicates} duplicados (não criados) · ` +
+      `${skippedNoExternalParty} sem destinatário externo (mensagem interna) · ${skippedSupplierNotConfigured} fornecedor sem DB configurada · ${skippedNenhum} nenhuma das categorias.`,
   );
   console.log(
     "\nEste script é só de leitura — não escreveu no Notion, não reencaminhou/arquivou nenhum email, não tocou no checkpoint. Revê os candidatos acima, especialmente qualquer 'nenhuma das categorias' que devia ter sido apanhado, antes de confiar no próximo run real do cron.",

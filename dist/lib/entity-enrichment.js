@@ -28,7 +28,7 @@
  *   checkpoint that already recorded it. Enrichment is a bonus on top of a
  *   real page, never a condition for one.
  */
-import { enrichInfluencerFromTranscript, enrichPartnerFromTranscript, } from "./lead-classifier.js";
+import { enrichInfluencerFromTranscript, enrichPartnerFromTranscript, enrichSupplierFromTranscript, } from "./lead-classifier.js";
 import { findBestNameMatch, findVisitHistory } from "./leads.js";
 import { log } from "./log.js";
 import * as notion from "../notion.js";
@@ -72,6 +72,19 @@ export async function applyPartnerCurrentState(pageId, text) {
         await notion.replacePageSection(pageId, enrichment.deal, "Deal e proposta");
     return enrichment;
 }
+/** Same shape as applyPartnerCurrentState, for Fornecedores — no Kenko
+ * cross-reference (a supplier selling to us has no client visit history to
+ * check). */
+export async function applySupplierCurrentState(pageId, text) {
+    const enrichment = await enrichSupplierFromTranscript(text);
+    if (!enrichment)
+        return null;
+    if (enrichment.sobre)
+        await notion.replacePageSection(pageId, enrichment.sobre, "Sobre o fornecedor");
+    if (enrichment.termos)
+        await notion.replacePageSection(pageId, enrichment.termos, "Termos e condições");
+    return enrichment;
+}
 export async function applyInfluencerCurrentState(pageId, text, name, ctx = {}) {
     const enrichment = await enrichInfluencerFromTranscript(text);
     // Kenko cross-reference only makes sense when a caller supplied both the
@@ -108,6 +121,16 @@ export async function enrichPartnerPageFromText(pageId, text) {
     }
     catch (err) {
         log.warn("entity_enrichment.failed", { pageId, kind: "partner", message: errMsg(err) });
+    }
+}
+export async function enrichSupplierPageFromText(pageId, text) {
+    try {
+        const enrichment = await applySupplierCurrentState(pageId, text);
+        if (enrichment?.log)
+            await notion.appendToPageSection(pageId, dated(enrichment.log), "Log");
+    }
+    catch (err) {
+        log.warn("entity_enrichment.failed", { pageId, kind: "supplier", message: errMsg(err) });
     }
 }
 export async function enrichInfluencerPageFromText(pageId, text, name, ctx = {}) {

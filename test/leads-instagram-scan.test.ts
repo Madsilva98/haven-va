@@ -52,12 +52,14 @@ const classifyInstagramDM = vi.fn();
 const classifyOutreachIntent = vi.fn().mockResolvedValue("parceiro");
 const enrichPartnerFromTranscript = vi.fn().mockResolvedValue(null);
 const enrichInfluencerFromTranscript = vi.fn().mockResolvedValue(null);
+const enrichSupplierFromTranscript = vi.fn().mockResolvedValue(null);
 const summarizeRelationshipUpdate = vi.fn().mockResolvedValue("");
 vi.mock("../src/lib/lead-classifier.js", () => ({
   classifyInstagramDM: (...args: unknown[]) => classifyInstagramDM(...args),
   classifyOutreachIntent: (...args: unknown[]) => classifyOutreachIntent(...args),
   enrichPartnerFromTranscript: (...args: unknown[]) => enrichPartnerFromTranscript(...args),
   enrichInfluencerFromTranscript: (...args: unknown[]) => enrichInfluencerFromTranscript(...args),
+  enrichSupplierFromTranscript: (...args: unknown[]) => enrichSupplierFromTranscript(...args),
   summarizeRelationshipUpdate: (...args: unknown[]) => summarizeRelationshipUpdate(...args),
 }));
 
@@ -74,20 +76,24 @@ vi.mock("../src/lib/telegram.js", () => ({
 const createLead = vi.fn().mockResolvedValue("new-lead-page-id");
 const createPartner = vi.fn().mockResolvedValue("new-partner-page-id");
 const createInfluencer = vi.fn().mockResolvedValue("new-influencer-page-id");
+const createSupplier = vi.fn().mockResolvedValue("new-supplier-page-id");
 const appendToPageSection = vi.fn().mockResolvedValue(undefined);
 const replacePageSection = vi.fn().mockResolvedValue(undefined);
 const updateInfluencerFields = vi.fn().mockResolvedValue(undefined);
 const getAllPartnerContacts = vi.fn().mockResolvedValue([]);
 const getAllInfluencerContacts = vi.fn().mockResolvedValue([]);
+const getAllSupplierContacts = vi.fn().mockResolvedValue([]);
 vi.mock("../src/notion.js", () => ({
   createLead: (...args: unknown[]) => createLead(...args),
   createPartner: (...args: unknown[]) => createPartner(...args),
   createInfluencer: (...args: unknown[]) => createInfluencer(...args),
+  createSupplier: (...args: unknown[]) => createSupplier(...args),
   appendToPageSection: (...args: unknown[]) => appendToPageSection(...args),
   replacePageSection: (...args: unknown[]) => replacePageSection(...args),
   updateInfluencerFields: (...args: unknown[]) => updateInfluencerFields(...args),
   getAllPartnerContacts: (...args: unknown[]) => getAllPartnerContacts(...args),
   getAllInfluencerContacts: (...args: unknown[]) => getAllInfluencerContacts(...args),
+  getAllSupplierContacts: (...args: unknown[]) => getAllSupplierContacts(...args),
 }));
 
 import { run } from "../src/crons/leads-instagram-scan.js";
@@ -105,11 +111,13 @@ const contact = {
 describe("leads-instagram-scan", () => {
   beforeEach(() => {
     process.env.NOTION_LEADS_DB_ID = "test-leads-db";
+    delete process.env.NOTION_SUPPLIER_DB_ID;
     fsState = null;
   });
 
   afterEach(() => {
     delete process.env.NOTION_LEADS_DB_ID;
+    delete process.env.NOTION_SUPPLIER_DB_ID;
     fetchInstagramContactsWithMessages.mockReset();
     buildTranscript.mockReset();
     extractVolunteeredEmail.mockReset();
@@ -125,17 +133,20 @@ describe("leads-instagram-scan", () => {
     classifyOutreachIntent.mockReset().mockResolvedValue("parceiro");
     enrichPartnerFromTranscript.mockReset().mockResolvedValue(null);
     enrichInfluencerFromTranscript.mockReset().mockResolvedValue(null);
+    enrichSupplierFromTranscript.mockReset().mockResolvedValue(null);
     summarizeRelationshipUpdate.mockReset().mockResolvedValue("");
     isStudioDbAvailable.mockReturnValue(true);
     sendGroupMessage.mockClear();
     createLead.mockClear().mockResolvedValue("new-lead-page-id");
     createPartner.mockClear().mockResolvedValue("new-partner-page-id");
     createInfluencer.mockClear().mockResolvedValue("new-influencer-page-id");
+    createSupplier.mockClear().mockResolvedValue("new-supplier-page-id");
     appendToPageSection.mockClear().mockResolvedValue(undefined);
     replacePageSection.mockClear().mockResolvedValue(undefined);
     updateInfluencerFields.mockClear().mockResolvedValue(undefined);
     getAllPartnerContacts.mockReset().mockResolvedValue([]);
     getAllInfluencerContacts.mockReset().mockResolvedValue([]);
+    getAllSupplierContacts.mockReset().mockResolvedValue([]);
     readFileSync.mockClear();
     writeFileSync.mockClear();
   });
@@ -201,6 +212,51 @@ describe("leads-instagram-scan", () => {
     expect(createPartner).not.toHaveBeenCalled();
     expect(createLead).not.toHaveBeenCalled();
     // no Telegram digest for influencer creation — founder's call, 2026-09-21
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("routes a vendor sales pitch to Fornecedores instead of dropping it, when the DB is configured", async () => {
+    process.env.NOTION_SUPPLIER_DB_ID = "test-supplier-db";
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: vendemos tapetes de pilates com desconto para estúdios!");
+    classifyInstagramDM.mockResolvedValue("fornecedor");
+
+    await run();
+
+    expect(createSupplier).toHaveBeenCalledWith(
+      "Joana Ferreira",
+      "Unassigned",
+      expect.any(String),
+      "Instagram DM",
+      "2026-01-01T00:00:00Z",
+    );
+    expect(createPartner).not.toHaveBeenCalled();
+    expect(createLead).not.toHaveBeenCalled();
+    // no Telegram digest for supplier creation — founder's call, 2026-09-22
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("skips a fornecedor classification gracefully when NOTION_SUPPLIER_DB_ID isn't set, never calling createSupplier", async () => {
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: vendemos tapetes de pilates com desconto para estúdios!");
+    classifyInstagramDM.mockResolvedValue("fornecedor");
+
+    await run();
+
+    expect(createSupplier).not.toHaveBeenCalled();
+    expect(enrichSupplierFromTranscript).not.toHaveBeenCalled();
+  });
+
+  it("skips creating a supplier page when the name fuzzy-matches an existing Fornecedores row", async () => {
+    process.env.NOTION_SUPPLIER_DB_ID = "test-supplier-db";
+    fetchInstagramContactsWithMessages.mockResolvedValue([contact]);
+    buildTranscript.mockReturnValue("Cliente: vendemos tapetes de pilates com desconto para estúdios!");
+    classifyInstagramDM.mockResolvedValue("fornecedor");
+    getAllSupplierContacts.mockResolvedValue([{ id: "existing-id", name: "Joana Ferreira" }]);
+
+    await run();
+
+    expect(createSupplier).not.toHaveBeenCalled();
     expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
@@ -599,6 +655,46 @@ describe("leads-instagram-scan", () => {
       email: null,
     });
     expect(createInfluencer).not.toHaveBeenCalled();
+  });
+
+  it("re-enriches an existing supplier page on new messages: full-transcript replace + delta-only Log entry", async () => {
+    process.env.NOTION_SUPPLIER_DB_ID = "test-supplier-db";
+    fsState = {
+      "contact-1": {
+        messageCountSeen: 1,
+        classification: "fornecedor",
+        notionPageId: "existing-supplier-page",
+        classifiedAt: "x",
+      },
+    };
+    const grownContact = {
+      ...contact,
+      messageCount: 3,
+      messages: [
+        { direction: "in" as const, text: "primeira mensagem", sentAt: "2026-01-01T00:00:00Z" },
+        { direction: "out" as const, text: "resposta", sentAt: "2026-01-01T00:01:00Z" },
+        { direction: "in" as const, text: "nova mensagem", sentAt: "2026-01-02T00:00:00Z" },
+      ],
+    };
+    fetchInstagramContactsWithMessages.mockResolvedValue([grownContact]);
+    buildTranscript.mockImplementation((messages: unknown[]) =>
+      messages.length ? `transcript-of-${messages.length}-messages` : "",
+    );
+    enrichSupplierFromTranscript.mockResolvedValue({ sobre: "Sobre atualizado", termos: null, log: "ignorado aqui" });
+    summarizeRelationshipUpdate.mockResolvedValue("Enviou catálogo atualizado.");
+
+    await run();
+
+    expect(enrichSupplierFromTranscript).toHaveBeenCalledWith("transcript-of-3-messages");
+    expect(replacePageSection).toHaveBeenCalledWith("existing-supplier-page", "Sobre atualizado", "Sobre o fornecedor");
+    expect(summarizeRelationshipUpdate).toHaveBeenCalledWith("transcript-of-2-messages");
+    expect(appendToPageSection).toHaveBeenCalledWith(
+      "existing-supplier-page",
+      expect.stringContaining("Enviou catálogo atualizado."),
+      "Log",
+    );
+    expect(createSupplier).not.toHaveBeenCalled();
+    expect((fsState as Record<string, { messageCountSeen: number }>)["contact-1"]?.messageCountSeen).toBe(3);
   });
 
   it("leaves the checkpoint stale when re-enrichment fails, so the next run retries", async () => {

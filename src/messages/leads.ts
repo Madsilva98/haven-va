@@ -59,14 +59,18 @@ export function formatLeadsDigests(newLeads: NewLeadSummary[]): string[] {
   );
 }
 
-// Partner/influencer creation has no digest of its own (founder's call,
-// 2026-09-21 — that signal lives in Notion, not the group chat), but the
-// summary shapes stay here since src/crons/leads-instagram-scan.ts's
-// ProcessResult still uses them.
+// Partner/influencer/supplier creation has no digest of its own (founder's
+// call, 2026-09-21, extended to suppliers 2026-09-22 — that signal lives in
+// Notion, not the group chat), but the summary shapes stay here since
+// src/crons/leads-instagram-scan.ts's ProcessResult still uses them.
 export interface NewPartnerSummary {
   nome: string;
 }
 
 export interface NewInfluencerSummary {
+  nome: string;
+}
+
+export interface NewSupplierSummary {
   nome: string;
 }
