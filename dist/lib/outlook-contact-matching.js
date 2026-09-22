@@ -43,6 +43,20 @@ function nameFrom(party) {
  * sender — e.g. a reply from partners@thehavenpilates.pt to an external
  * partner. Returns both name and email together so downstream code (the
  * Notion "Email" property) uses the same party the name was guessed from.
+ *
+ * Returns null when the Haven sent the message AND no external recipient
+ * was found — i.e. there is genuinely no external party to name a page
+ * after, not just an unclear one. Falling back to the sender's own name in
+ * this case (the original behavior, until 2026-09-22) looked safe for a
+ * generic shared mailbox ("Geral"/"The Haven" — an obviously-wrong guess a
+ * human reviewer would dismiss on sight) but was confirmed wrong for real
+ * once a founder's own personal mailbox is the sender: an internal
+ * "FW: ..." forward from Madalena to the rest of the team produced
+ * "Madalena Marques Da Silva" as the guessed partner name — a real,
+ * plausible-looking person's name, not an obvious red flag, that a fully
+ * unattended cron (src/crons/sync-partnerships.ts) would have silently
+ * created a Partner/Influencer Pipeline page under. Every caller must skip
+ * rather than guess on null — see that cron's handling.
  */
 export function guessExternalParty(from, to, ownDomains) {
     const senderIsOwn = from.email && ownDomains.has(domainOf(from.email));
@@ -51,6 +65,7 @@ export function guessExternalParty(from, to, ownDomains) {
         if (externalRecipient) {
             return { name: nameFrom(externalRecipient), email: externalRecipient.email ?? "" };
         }
+        return null;
     }
     return { name: nameFrom(from), email: from.email ?? "" };
 }

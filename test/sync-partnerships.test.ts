@@ -188,6 +188,33 @@ describe("sync-partnerships", () => {
     expect(createInfluencer).not.toHaveBeenCalled();
   });
 
+  it("skips creation for an internal-only forward with no external recipient, never guessing the sender's own name as the partner", async () => {
+    // A founder forwarding a partnership email to the rest of the team —
+    // sender AND every recipient are on the Haven's own domain, so there is
+    // no external party to name a page after. Regression for a real
+    // incident (2026-09-22): the pre-fix fallback used the sender's own
+    // name ("Madalena Marques Da Silva") as the guessed partner name,
+    // which would have silently created a Partner Pipeline page titled
+    // after a founder instead of the actual partner.
+    searchMailboxMessages.mockResolvedValue([
+      makeMessage({
+        from: { name: "Madalena Marques Da Silva", email: "madalena@thehavenpilates.pt" },
+        to: [
+          { name: "Mafalda Saudade", email: "mafalda@thehavenpilates.pt" },
+          { name: "Beatriz Rogério", email: "beatriz@thehavenpilates.pt" },
+        ],
+      }),
+    ]);
+    classifyPartnershipEmailIntent.mockResolvedValue("parceiro");
+
+    await run();
+
+    expect(createPartner).not.toHaveBeenCalled();
+    expect(createInfluencer).not.toHaveBeenCalled();
+    expect(findPageInDb).not.toHaveBeenCalled();
+    expect(enrichPartnerPageFromText).not.toHaveBeenCalled();
+  });
+
   it("auto-updates an existing partner on an exact email match, skipping the classifier entirely", async () => {
     getAllPartnerContacts.mockResolvedValue([
       { id: "existing-partner-id", name: "Wanderlust Studio", email: "geral@wanderlust.pt" },

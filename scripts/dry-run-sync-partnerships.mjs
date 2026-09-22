@@ -74,6 +74,7 @@ async function main() {
   let createdInfluencers = 0;
   let skippedDuplicates = 0;
   let skippedNenhum = 0;
+  let skippedNoExternalParty = 0;
 
   for (const mailbox of mailboxes) {
     let messages;
@@ -109,6 +110,11 @@ async function main() {
       }
 
       const externalParty = guessExternalParty(msg.from, msg.to, ownDomains);
+      if (!externalParty) {
+        skippedNoExternalParty++;
+        console.log(`[sem destinatário externo — ${classification}] "${msg.subject}" — de ${msg.from.name} <${msg.from.email}> (mensagem interna, sem destinatário fora do domínio) — NÃO criaria\n`);
+        continue;
+      }
       const domainHintContact = classification === "parceiro" ? partnerMatch?.contact : influencerMatch?.contact;
       const dbKey = classification === "parceiro" ? "partners" : "influencers";
       const nameMatch = domainHintContact
@@ -147,7 +153,7 @@ async function main() {
 
   console.log(
     `\n${scanned} mensagens · ${updatedKnown} atualizariam um contacto conhecido · ${createdPartners} candidatos a parceiro · ` +
-      `${createdInfluencers} candidatos a influencer · ${skippedDuplicates} duplicados (não criados) · ${skippedNenhum} nenhuma das categorias.`,
+      `${createdInfluencers} candidatos a influencer · ${skippedDuplicates} duplicados (não criados) · ${skippedNoExternalParty} sem destinatário externo (mensagem interna) · ${skippedNenhum} nenhuma das categorias.`,
   );
   console.log(
     "\nEste script é só de leitura — não escreveu no Notion, não reencaminhou/arquivou nenhum email, não tocou no checkpoint. Revê os candidatos acima, especialmente qualquer 'nenhuma das categorias' que devia ter sido apanhado, antes de confiar no próximo run real do cron.",

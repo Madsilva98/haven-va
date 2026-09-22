@@ -150,6 +150,26 @@ async function main() {
       }
 
       const externalParty = guessExternalParty(msg.from, msg.to, ownDomains);
+      // No external recipient found (the Haven sent this, internal-only —
+      // most often a founder forwarding a partnership email to the rest of
+      // the team) — there's genuinely no name to guess. Surface that
+      // honestly rather than falling back to the sender's own name (the
+      // pre-2026-09-22 behavior, confirmed wrong for real: a founder's own
+      // real name looks like a plausible partner name, not an obvious
+      // red flag like "Geral"/"The Haven" would be). No dedup check either
+      // — nothing to search for. The reviewer supplies partnerName by hand
+      // in their decision if this really is a new partnership worth adding.
+      if (!externalParty) {
+        newFindings.push({
+          ...baseFinding,
+          matchType: "keyword",
+          guessedPartnerName: null,
+          guessedPartnerEmail: null,
+          noExternalParty: true,
+        });
+        continue;
+      }
+
       const existing = await notion.findPageInDb("partners", externalParty.name);
       const finding = {
         ...baseFinding,

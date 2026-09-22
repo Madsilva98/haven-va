@@ -23,14 +23,25 @@
  *      keyword matching alone has a confirmed real false-positive rate
  *      (SaaS/vendor noise), unsafe to run unattended. nenhum is dropped,
  *      checkpointed, never written anywhere.
- *   3. Dedup before create. Fuzzy-match the guessed name
- *      (guessExternalParty) against notion.findPageInDb("partners" /
- *      "influencers", nome) — a domain-match hint from step 1 is checked
- *      here too, as a candidate. A match SKIPS creation (logged, never
- *      auto-merged — same "needs a human to decide which record is
- *      authoritative" posture as leads-instagram-scan.ts's dedup) rather
- *      than being touched.
- *   4. Create + enrich (src/lib/entity-enrichment.ts) + set Último contacto
+ *   3. guessExternalParty (src/lib/outlook-contact-matching.ts) returns
+ *      null when the Haven sent the message and no external recipient was
+ *      found — an internal-only forward, most often a founder re-sharing a
+ *      partnership email with the rest of the team. SKIPPED outright
+ *      (logged, checkpointed) rather than naming a page after the sender:
+ *      confirmed for real via the dry-run rehearsal
+ *      (scripts/dry-run-sync-partnerships.mjs, 2026-09-22) that the
+ *      pre-fix fallback silently created pages titled after a founder
+ *      ("Madalena Marques Da Silva") instead of the actual partner. The
+ *      genuine external thread this was forwarded FROM is either already a
+ *      known contact (step 1) or gets classified correctly on its own when
+ *      scanned directly.
+ *   4. Dedup before create. Fuzzy-match the guessed name against
+ *      notion.findPageInDb("partners" / "influencers", nome) — a
+ *      domain-match hint from step 1 is checked here too, as a candidate.
+ *      A match SKIPS creation (logged, never auto-merged — same "needs a
+ *      human to decide which record is authoritative" posture as
+ *      leads-instagram-scan.ts's dedup) rather than being touched.
+ *   5. Create + enrich (src/lib/entity-enrichment.ts) + set Último contacto
  *      + forward/archive the source email (best-effort, mirrors
  *      apply-outlook-findings.mjs's forwardAndArchiveIfConfigured).
  *
@@ -199,7 +210,10 @@ async function updateKnownInfluencer(contact: KnownContact, msg: OutlookMessage,
 }
 
 type ProcessOutcome =
-  | { ok: true; result: "updated_known" | "created_partner" | "created_influencer" | "duplicate_skipped" | "nenhum" }
+  | {
+      ok: true;
+      result: "updated_known" | "created_partner" | "created_influencer" | "duplicate_skipped" | "nenhum" | "no_external_party";
+    }
   | { ok: false };
 
 async function processMessage(
@@ -262,6 +276,26 @@ async function processMessage(
   }
 
   const externalParty = guessExternalParty(msg.from, msg.to, ownDomains);
+  if (!externalParty) {
+    // The Haven sent this message and no external recipient was found —
+    // an internal-only forward, most often a founder re-sharing a
+    // partnership email with the rest of the team. There is no real
+    // external party to name a page after here; guessing the sender's own
+    // name (the pre-2026-09-22 behavior) silently created Partner/
+    // Influencer Pipeline pages titled after a founder — confirmed for
+    // real via the dry-run rehearsal (scripts/dry-run-sync-partnerships.mjs)
+    // before this cron was ever trusted unattended. Skip outright: the
+    // genuine external thread this was forwarded FROM is either already a
+    // known contact (step 1) or will be classified correctly on its own
+    // when scanned directly — see guessExternalParty's own docstring.
+    setMessageCheckpoint(state, msgKey, classification, null, null, null);
+    log.info("sync_partnerships.no_external_party_skipped", {
+      mailbox: msg.mailbox,
+      messageId: msg.id,
+      classification,
+    });
+    return { ok: true, result: "no_external_party" };
+  }
   const domainHintContact = classification === "parceiro" ? partnerMatch?.contact : influencerMatch?.contact;
   const dbKey = classification === "parceiro" ? "partners" : "influencers";
 
@@ -362,6 +396,7 @@ export async function run(): Promise<void> {
   let createdInfluencers = 0;
   let skippedDuplicates = 0;
   let skippedNenhum = 0;
+  let skippedNoExternalParty = 0;
 
   for (const mailbox of mailboxes) {
     let messages: OutlookMessage[];
@@ -391,6 +426,7 @@ export async function run(): Promise<void> {
         else if (outcome.result === "created_influencer") createdInfluencers++;
         else if (outcome.result === "duplicate_skipped") skippedDuplicates++;
         else if (outcome.result === "nenhum") skippedNenhum++;
+        else if (outcome.result === "no_external_party") skippedNoExternalParty++;
       } else if (minUnprocessed === null || msg.receivedDateTime < minUnprocessed) {
         minUnprocessed = msg.receivedDateTime;
       }
@@ -414,5 +450,6 @@ export async function run(): Promise<void> {
     createdInfluencers,
     skippedDuplicates,
     skippedNenhum,
+    skippedNoExternalParty,
   });
 }
