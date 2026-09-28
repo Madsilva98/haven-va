@@ -149,7 +149,7 @@ describe("activeMemberIdsForBirthdays", () => {
   it("unions paying members, live class packs with credits, and live intro holders — as of the data date", () => {
     const ids = activeMemberIdsForBirthdays(
       new Map([
-        ["m1", { memberId: "m1", tier: "4x", plan: "Premium", membershipName: "4x Monthly | Premium", memberSince: "2026-01-01" }],
+        ["m1", { memberId: "m1", tier: "4x", plan: "Premium", membershipName: "4x Monthly | Premium", memberSince: "2026-01-01", currentCycleStartsAt: "2026-01-01" }],
       ]),
       [
         { member_id: "p1", started: "2026-09-01", expires: "2026-12-01", has_credits: true },

@@ -75,6 +75,7 @@ export function activeMembersAsOf(rows, asOf, tenure = new Map()) {
             plan: current.plan ?? "",
             membershipName: `${current.tier ?? "?"} Monthly | ${current.plan ?? "?"}`,
             memberSince: tenure.get(memberId)?.member_since ?? current.cycle_starts_at,
+            currentCycleStartsAt: current.cycle_starts_at,
         });
     }
     return out;

@@ -197,6 +197,7 @@ export interface ActiveMember {
   plan: string;
   membershipName: string; // "4x Monthly | Premium" — the label existing Notion rows carry
   memberSince: string; // v_pulse_member_tenure.member_since — start of the latest continuous run
+  currentCycleStartsAt: string; // start of the CURRENT live paying cycle — a later payment can supersede an earlier failure without resetting memberSince
 }
 
 /**
@@ -236,6 +237,7 @@ export function activeMembersAsOf(
       plan: current.plan ?? "",
       membershipName: `${current.tier ?? "?"} Monthly | ${current.plan ?? "?"}`,
       memberSince: tenure.get(memberId)?.member_since ?? current.cycle_starts_at!,
+      currentCycleStartsAt: current.cycle_starts_at!,
     });
   }
   return out;
