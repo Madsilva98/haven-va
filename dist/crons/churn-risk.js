@@ -11,17 +11,18 @@
  *    date, creates/updates
  *    "Clientes em risco" rows to match exactly (not an additive union —
  *    a signal that's no longer true gets dropped from the row, not just
- *    new ones added), and posts one digest listing who's newly flagged,
- *    gained a signal, or lost one this week — found in production
- *    2026-09-21: without this, a row like "sem reservas 14+ dias" stayed
- *    stuck showing that even after the person booked again. The row is
- *    also re-written whenever just the DETAIL TEXT changed (day count,
- *    date, percentage) even if the signal TYPE set didn't — otherwise a
- *    row showing "20 dias sem reservar" the week it's created never
- *    advances to 24, 30, etc., because nothing was comparing the numbers,
- *    only the type list (also found 2026-09-21, several real rows frozen
- *    at their first-ever computed values). A details-only refresh isn't
- *    posted to the digest, since it's not new information for the founder.
+ *    new ones added). The row is also re-written whenever just the DETAIL
+ *    TEXT changed (day count, date, percentage) even if the signal TYPE
+ *    set didn't — otherwise a row showing "20 dias sem reservar" the week
+ *    it's created never advances to 24, 30, etc., because nothing was
+ *    comparing the numbers, only the type list (found in production
+ *    2026-09-21, several real rows frozen at their first-ever computed
+ *    values).
+ *    The digest (src/messages/churn.ts) is a full current snapshot, not a
+ *    delta — founder's call, 2026-09-28: "Em risco" names EVERYONE
+ *    currently flagged, whether new this week or already on the list, no
+ *    signal detail shown (that stays in Notion); "Resolvidos" is a bare
+ *    count from step 3 below.
  * 3. Reconciles every OTHER still-open row (i.e. not touched by #2 because
  *    the views no longer flag that email at all this week) — the
  *    founder's call (2026-09-21): once a row shows zero current signals
@@ -31,11 +32,11 @@
  *    a churned customer's row was sitting open indefinitely since nothing
  *    ever re-checked it once they dropped off the roster) or because they're still active
  *    but resolved every signal (e.g. booked again — this case only is
- *    mentioned in the digest as a bare count, not by name: also the
- *    founder's call, same day). A row that resolved SOME signals but
- *    still has at least one open one is handled by #2 instead — it stays
- *    open and named in the digest, since that's still worth watching or
- *    contacting about.
+ *    mentioned in the digest as a bare "Resolvidos" count, not by name:
+ *    also the founder's call, same day). A row that resolved SOME signals
+ *    but still has at least one open one is handled by #2 instead — it
+ *    stays open and appears under "Em risco" in the digest, since that's
+ *    still worth watching or contacting about.
  *
  * "A vigiar" is a 4th open status the founder can set by hand (2026-09-21,
  * alongside a "Notas" rich_text property the bot never touches) for a row
@@ -92,7 +93,11 @@ export async function run() {
         log.error("churn_risk.fetch_failed", { message: errMsg(err) });
         return;
     }
-    const changed = [];
+    // Every currently-flagged person is "Em risco" in the digest regardless
+    // of whether anything changed for them this week — a full snapshot, not
+    // a delta (founder's call, 2026-09-28). Collected up front so it's
+    // unaffected by whether the Notion write below succeeds or is skipped.
+    const emRisco = flags.map((flag) => ({ nome: flag.name }));
     const flaggedEmails = new Set(flags.map((f) => f.email.toLowerCase().trim()));
     for (const flag of flags) {
         const signalTypes = flag.signals.map((s) => s.type);
@@ -101,7 +106,6 @@ export async function run() {
             const existing = await notion.getChurnRowByEmail(flag.email);
             if (!existing) {
                 await notion.createChurnFlag(flag.name, flag.email, signalTypes, detalhes, flag.plano, flag.telefone);
-                changed.push({ nome: flag.name, sinais: signalTypes });
                 continue;
             }
             const added = signalTypes.filter((t) => !existing.sinais.includes(t));
@@ -117,11 +121,6 @@ export async function run() {
             // this only used to check the type set, e.g. "20 dias sem reservar"
             // never advancing to 24, or the exact date/percentage never updating.
             await notion.updateChurnFlag(existing.id, signalTypes, detalhes);
-            // Only ping the digest on real news (a signal appearing/clearing) —
-            // a same-signals detail refresh is not worth a Telegram message.
-            if (added.length > 0 || resolved.length > 0) {
-                changed.push({ nome: flag.name, sinais: [...added, ...resolved.map((t) => `${t} (resolvido)`)] });
-            }
         }
         catch (err) {
             log.error("churn_risk.write_failed", { email: flag.email, message: errMsg(err) });
@@ -162,7 +161,7 @@ export async function run() {
     catch (err) {
         log.error("churn_risk.fetch_open_failed", { message: errMsg(err) });
     }
-    const message = formatChurnDigest(changed, archivedResolved);
+    const message = formatChurnDigest(emRisco, archivedResolved);
     if (!message) {
         log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedResolved, archivedChurned });
         return;
@@ -177,7 +176,7 @@ export async function run() {
         ], asOf);
         log.info("churn_risk.posted", {
             messageId,
-            count: changed.length,
+            count: emRisco.length,
             archivedClosed,
             archivedResolved,
             archivedChurned,
