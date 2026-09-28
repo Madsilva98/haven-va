@@ -10,8 +10,13 @@ import type { FailedPaymentsRow, MemberActivityRow, UtilizationMonthRow } from "
 
 const AS_OF = "2026-09-18";
 
-function member(memberId: string, membershipName = "4x Monthly | Premium", memberSince = "2026-01-01"): ActiveSubscriber {
-  return { memberId, email: `${memberId}@x.com`, name: memberId, membershipName, memberSince };
+function member(
+  memberId: string,
+  membershipName = "4x Monthly | Premium",
+  memberSince = "2026-01-01",
+  currentCycleStartsAt = memberSince,
+): ActiveSubscriber {
+  return { memberId, email: `${memberId}@x.com`, name: memberId, membershipName, memberSince, currentCycleStartsAt };
 }
 
 function activity(memberId: string, nextOrLastBooked: string | null, lastVisit: string | null = nextOrLastBooked): MemberActivityRow {
@@ -161,6 +166,40 @@ describe("computeChurnFlags — signal 2, Pagamento falhado", () => {
       }),
     );
     expect(types(flags, "a")).toEqual([]);
+  });
+
+  it("clears the signal when the current paying cycle started after the failure — Maria Murteira, 2026-09-28: paid on the 20th, but the failure was still inside the 45-day window", () => {
+    const flags = computeChurnFlags(
+      inputs({
+        members: [member("a", "4x Monthly | Premium", "2026-01-01", "2026-09-10")],
+        activityByMember: new Map([["a", activity("a", "2026-09-17")]]), // recent, so signal 1 doesn't also fire
+        failedByMember: new Map([failed("a", 1, "2026-08-23")]),
+      }),
+    );
+    expect(types(flags, "a")).toEqual([]);
+  });
+
+  it("clears the signal when the member has an upcoming booked class — Darina Sinegubova, 2026-09-28: only a no-show fee charge, but a class booked ahead", () => {
+    const flags = computeChurnFlags(
+      inputs({
+        members: [member("a")],
+        activityByMember: new Map([["a", activity("a", "2026-09-30")]]), // after AS_OF (2026-09-18)
+        failedByMember: new Map([failed("a", 1, "2026-09-16")]),
+      }),
+    );
+    expect(types(flags, "a")).toEqual([]);
+  });
+
+  it("still flags a failed payment when neither suppression condition holds", () => {
+    const flags = computeChurnFlags(
+      inputs({
+        // current cycle predates the failure, and the last booking is recent but not upcoming
+        members: [member("a", "4x Monthly | Premium", "2026-01-01", "2026-01-01")],
+        activityByMember: new Map([["a", activity("a", "2026-09-17")]]),
+        failedByMember: new Map([failed("a", 1, "2026-09-02")]),
+      }),
+    );
+    expect(types(flags, "a")).toEqual(["Pagamento falhado"]);
   });
 });
 

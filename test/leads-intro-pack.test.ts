@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const findUnconvertedIntroPacks = vi.fn();
 const describePostExpiryVisit = vi.fn().mockReturnValue(null);
 vi.mock("../src/lib/intro-pack-conversion.js", () => ({
+  DEFAULT_CUTOFF_DAYS: 21,
   findUnconvertedIntroPacks: (...args: unknown[]) => findUnconvertedIntroPacks(...args),
   describePostExpiryVisit: (...args: unknown[]) => describePostExpiryVisit(...args),
 }));
@@ -89,5 +90,39 @@ describe("leads-intro-pack", () => {
       expect.any(String),
       expect.objectContaining({ pack: "2 Classes | Premium" }),
     );
+  });
+
+  it("still creates a Notion lead for a long-overdue candidate, but doesn't re-announce it in the digest — founder's call, 2026-09-28, after a data-path change surfaced an 8-month-old backlog all at once", async () => {
+    const oldCandidate = { ...candidate, email: "francisca@x.com", name: "Francisca Rosa", daysSinceExpiry: 242 };
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [oldCandidate], asOf: "2026-09-24" });
+    findLeadByEmailAny.mockResolvedValue(null);
+
+    await run();
+
+    expect(createLead).toHaveBeenCalledWith(
+      "Francisca Rosa",
+      "francisca@x.com",
+      "Intro Pack",
+      expect.any(String),
+      "N/A",
+      expect.any(String),
+      expect.objectContaining({ pack: "2 Classes | Premium" }),
+    );
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("announces a candidate that crossed the threshold within the last week alongside a suppressed backlog one", async () => {
+    const freshCandidate = { ...candidate, email: "fresh@x.com", name: "Fresh Candidate", daysSinceExpiry: 24 };
+    const oldCandidate = { ...candidate, email: "francisca@x.com", name: "Francisca Rosa", daysSinceExpiry: 242 };
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [freshCandidate, oldCandidate], asOf: "2026-09-24" });
+    findLeadByEmailAny.mockResolvedValue(null);
+
+    await run();
+
+    expect(createLead).toHaveBeenCalledTimes(2);
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    const [sentText] = sendGroupMessage.mock.calls[0]!;
+    expect(sentText).toContain("Fresh Candidate");
+    expect(sentText).not.toContain("Francisca Rosa");
   });
 });

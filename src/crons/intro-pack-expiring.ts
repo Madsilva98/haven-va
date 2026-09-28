@@ -2,9 +2,11 @@
  * Daily heads-up for intro packs about to lapse, filtered to the two
  * patterns worth a proactive nudge (see
  * src/lib/intro-pack-conversion.ts's findExpiringIntroPacksToWatch for the
- * exact rule). Plain Telegram digest to the founders' group — no Notion
- * write, unlike leads-intro-pack.ts, since this isn't a "someone to
- * follow up with" backlog item, just a same-day prompt.
+ * exact rule — including why its "next 3 days" window is anchored on the
+ * real calendar date rather than `asOf`, unlike everything else pulse-based).
+ * Plain Telegram digest to the founders' group — no Notion write, unlike
+ * leads-intro-pack.ts, since this isn't a "someone to follow up with"
+ * backlog item, just a same-day prompt.
  *
  * Schedule: 08:15 Europe/Lisbon every day. Registered in src/server.ts.
  */

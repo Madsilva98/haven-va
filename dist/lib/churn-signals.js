@@ -20,7 +20,16 @@
  *   next charge, not the return date (case #2): the person was back by
  *   then at the latest, so the detail says "de volta até dd/mm". A member
  *   whose pause is_current is skipped outright.
- * - Signal 2 "Pagamento falhado": v_pulse_failed_payments.failed_45d > 0.
+ * - Signal 2 "Pagamento falhado": v_pulse_failed_payments.failed_45d > 0,
+ *   suppressed when the failure is no longer a live concern — either the
+ *   member's current paying cycle started AFTER the last failure (a later
+ *   payment succeeded: Maria Murteira, 2026-09-28, paid on the 20th but the
+ *   Aug 23 failure was still inside the 45-day window) or they have an
+ *   upcoming booked class (next_or_last_booked after asOf: Darina
+ *   Sinegubova, same day — her only "failure" was a €15 no-show fee, and a
+ *   member actively booking ahead isn't disengaging regardless of what a
+ *   fee-vs-subscription distinction the view doesn't expose would say).
+ *   Founder's call: either condition alone is enough to clear the signal.
  * - Signal 3 "Baixa utilização": v_pulse_utilization_monthly under 50% in
  *   EACH of the last 3 full calendar months before the data date, reading
  *   only is_full_month rows (case #23) without had_pause (Raquel Saraiva,
@@ -117,10 +126,22 @@ export function computeChurnFlags(inputs) {
                 }
             }
         }
-        // Signal 2 — a failed payment in the last 45 days (the view counts them).
+        // Signal 2 — a failed payment in the last 45 days (the view counts
+        // them), UNLESS it's no longer a live concern: a later successful cycle
+        // (paid since) or an upcoming booking (still actively engaged) each
+        // clear it on their own — see the file header for the two real cases
+        // this fixed, 2026-09-28.
         const failed = failedByMember.get(m.memberId);
         if (failed && failed.failed_45d > 0 && failed.last_failed_on) {
-            signals.push({ type: "Pagamento falhado", detail: `pagamento falhado a ${formatDatePt(failed.last_failed_on)}` });
+            const paidSince = m.currentCycleStartsAt > failed.last_failed_on;
+            const nextBooked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
+            const hasUpcomingBooking = !!nextBooked && nextBooked > asOf;
+            if (!paidSince && !hasUpcomingBooking) {
+                signals.push({
+                    type: "Pagamento falhado",
+                    detail: `pagamento falhado a ${formatDatePt(failed.last_failed_on)}`,
+                });
+            }
         }
         // Signal 3 — under 50% in each of the last 3 full months, all three
         // present and clean: is_full_month (the view's word on "member for the
@@ -199,6 +220,7 @@ export async function fetchChurnFlags() {
             name: id.contact_name?.trim() || id.contact_email,
             membershipName: a.membershipName,
             memberSince: a.memberSince,
+            currentCycleStartsAt: a.currentCycleStartsAt,
         });
     }
     const flags = computeChurnFlags({

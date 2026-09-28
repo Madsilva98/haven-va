@@ -15,7 +15,8 @@
  *   note. Pack use is v_pulse_intro_purchase.visits_in_pack.
  * - v_pulse_member_identity: name and phone, on member_id.
  * - v_pulse_data_as_of: the one "today" every comparison and every
- *   "dados até" line uses.
+ *   "dados até" line uses — EXCEPT findExpiringIntroPacksToWatch's window
+ *   below, see its own comment for why.
  * Only 2-Class and 10-Day packs are tracked here — the ones with real
  * volume, founder's scope; the view also labels 5-Class / Open Day /
  * Intro other, which are left alone.
@@ -30,7 +31,7 @@ import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
 import { fetchDataAsOf, fetchIntroConversion, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonNaiveToUtcIso } from "./tz.js";
+import { lisbonDateString, lisbonNaiveToUtcIso } from "./tz.js";
 /** The view's `pack` labels this bot tracks. */
 export const TRACKED_PACKS = ["2-Class", "10-Day"];
 export const DEFAULT_CUTOFF_DAYS = 21;
@@ -175,16 +176,34 @@ export function isExpiringPackToWatch(pack, visitsInPack) {
     return false;
 }
 /**
+ * Pure — no I/O. Whether `introEnd` ("YYYY-MM-DD") falls within the next
+ * `daysAhead` days of `today` ("YYYY-MM-DD"), inclusive both ends.
+ */
+export function isWithinExpiryWindow(introEnd, today, daysAhead) {
+    return introEnd >= today && introEnd <= addDays(today, daysAhead);
+}
+/**
  * Activated intro packs (is_activated = true) whose intro_end falls within
- * `daysAhead` days (default 3) of the data date, not already converted (a
- * member who bought a plan mid-pack needs no nudge), filtered to the two
- * usage patterns worth a proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
+ * `daysAhead` days (default 3) of the REAL calendar date — deliberately NOT
+ * `asOf` (`v_pulse_data_as_of`), unlike every other date comparison in this
+ * file. `asOf` lags the calendar by design (founder's call, 2026-09-22: the
+ * studio's data "will not be fresh every day, at least for now") and
+ * `intro_end` is a fixed calendar fact set at purchase time, not a rolling
+ * metric that needs `asOf` for internal consistency — so anchoring this
+ * window on `asOf` doesn't make it more correct, it just makes "expiring
+ * soon" silently mean "already expired" once the lag exceeds `daysAhead`
+ * (confirmed in production 2026-09-22: asOf stuck at 2026-09-18, daysAhead=3,
+ * so the digest listed packs that had lapsed up to 4 days earlier). `asOf`
+ * is still returned/shown in the "dados até" line — only the window itself
+ * uses the calendar. Not already converted (a member who bought a plan
+ * mid-pack needs no nudge), filtered to the two usage patterns worth a
+ * proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
  * empirically derived like DEFAULT_CUTOFF_DAYS above:
  * - 2-Class: exactly 1 of the 2 classes taken ON the pack (visits_in_pack).
  * - 10-Day: more than 5 classes taken on the pack.
  * Used by src/crons/intro-pack-expiring.ts.
  */
-export async function findExpiringIntroPacksToWatch(daysAhead = 3) {
+export async function findExpiringIntroPacksToWatch(daysAhead = 3, today = lisbonDateString(new Date())) {
     if (!isStudioDbAvailable()) {
         log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_db_not_configured" });
         return { packs: [], asOf: null };
@@ -197,7 +216,6 @@ export async function findExpiringIntroPacksToWatch(daysAhead = 3) {
     ]);
     if (!asOf)
         return { packs: [], asOf: null };
-    const until = addDays(asOf, daysAhead);
     const converted = new Set(conversions.filter((c) => c.converted || c.converted_pack).map((c) => c.member_id));
     const names = nameByMemberId(customers);
     const packs = [];
@@ -206,7 +224,7 @@ export async function findExpiringIntroPacksToWatch(daysAhead = 3) {
             continue;
         if (r.is_activated !== true)
             continue;
-        if (r.intro_end < asOf || r.intro_end > until)
+        if (!isWithinExpiryWindow(r.intro_end, today, daysAhead))
             continue;
         if (converted.has(r.member_id))
             continue;

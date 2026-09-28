@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   describePostExpiryVisit,
   isExpiringPackToWatch,
+  isWithinExpiryWindow,
   selectFirstTrackedPacks,
 } from "../src/lib/intro-pack-conversion.js";
 import { memberIdFromEmail, type IntroPurchaseRow } from "../src/lib/pulse-views.js";
@@ -122,5 +123,24 @@ describe("isExpiringPackToWatch — founder's spec 2026-09-20, on visits_in_pack
 
   it("no other pack label qualifies", () => {
     expect(isExpiringPackToWatch("5-Class", 3)).toBe(false);
+  });
+});
+
+describe("isWithinExpiryWindow — anchored on the real calendar, not asOf (case 2026-09-22)", () => {
+  it("includes intro_end equal to today", () => {
+    expect(isWithinExpiryWindow("2026-09-22", "2026-09-22", 3)).toBe(true);
+  });
+
+  it("includes intro_end up to daysAhead days from today, inclusive", () => {
+    expect(isWithinExpiryWindow("2026-09-25", "2026-09-22", 3)).toBe(true);
+    expect(isWithinExpiryWindow("2026-09-26", "2026-09-22", 3)).toBe(false);
+  });
+
+  it("excludes intro_end already in the past relative to today, even if a stale asOf would have caught it", () => {
+    // The exact bug found 2026-09-22: asOf stuck at 2026-09-18, so the old
+    // asOf-anchored window [asOf, asOf+3] = [09-18, 09-21] wrongly included
+    // packs that had already lapsed by the real date (09-22).
+    expect(isWithinExpiryWindow("2026-09-18", "2026-09-22", 3)).toBe(false);
+    expect(isWithinExpiryWindow("2026-09-20", "2026-09-22", 3)).toBe(false);
   });
 });

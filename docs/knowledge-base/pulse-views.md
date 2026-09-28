@@ -45,7 +45,7 @@ Gotchas:
 | The ledger of wrong numbers | `v_pulse_known_cases` | Open first. Read it before changing any studio definition. |
 
 Two rules every reader follows:
-- **Data-as-of, never the calendar.** `fetchDataAsOf()` reads `v_pulse_data_as_of`, one row, and every digest carries it as `dados até dd/mm/aaaa`. A renewal after the last Kenko import is not a churn (Tatyana Khvesko, case #6).
+- **Data-as-of, never the calendar.** `fetchDataAsOf()` reads `v_pulse_data_as_of`, one row, and every digest carries it as `dados até dd/mm/aaaa`. A renewal after the last Kenko import is not a churn (Tatyana Khvesko, case #6). **One deliberate exception:** `intro-pack-expiring.ts`'s "next 3 days" window (`isWithinExpiryWindow`, `src/lib/intro-pack-conversion.ts`) is anchored on the real calendar date instead — `intro_end` is a fixed date fact, not a rolling metric, and `asOf` isn't guaranteed to sync daily (founder's call, 2026-09-22), so anchoring a *forward-looking* window on a lagging `asOf` silently turns "expiring soon" into "already expired" once the lag exceeds the window (happened in production 2026-09-22, `asOf` stuck 4 days behind). Don't "fix" this one back to `asOf` without re-reading that comment.
 - **`member_id = md5(lower(email))`, no trim.** The views' join key; `memberIdFromEmail` in `pulse-views.ts`. Trim user-entered emails *before* hashing (Notion, /flag); never trim what the views give back.
 
 ## Fonte, porquê?, /flag, /casos
