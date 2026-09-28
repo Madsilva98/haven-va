@@ -27,7 +27,9 @@ Grouped hypotheses (unconfirmed — nothing below has been verified against the 
 
 ## 2026-09-28 — Same message forwarded to `faturas@` over and over, and it's a contract, not an invoice
 
-Status: **pending review**
+Status: **applied**
+
+Founder approved in chat on 2026-09-28 and added two rules: only supplier invoices (never invoices the studio sends to clients), and never quotes/proposals ("só mesmo faturas"). The offending email was identified as **"Proposta de orçamento" from lipclean.trans@gmail.com**, forwarded more than once. Shipped with a Haiku "supplier bill?" gate (`src/bot/classify-invoice.ts`) on top of the proposals below. See the PR on branch `worktree-tidy-invoice-forward-review`.
 
 Founder report (chat): "está sempre a reencaminhar a mesma mensagem para o faturas, e nem tem faturas, tem tipo contrato." The specific message hasn't been identified: NAS logs only go back to a container restart on 2026-09-28 17:34, and nobody looked it up directly in Graph. The diagnosis below comes from reading the code, not from that email. The *mechanisms* are certain, but which of them hit this particular message is unconfirmed.
 
