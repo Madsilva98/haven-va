@@ -49,10 +49,12 @@
  * accepted trade-off, not a bug — see docs/knowledge-base/tidy-mailboxes.md.
  */
 
+import { classifyInvoice } from "../bot/classify-invoice.js";
 import { classifyMailboxThread } from "../bot/classify-mailbox-thread.js";
+import { invoiceCandidateAttachments } from "../lib/invoice-detection.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
-import type { OutlookAttachment, OutlookMessage } from "../lib/outlook.js";
+import type { OutlookMessage } from "../lib/outlook.js";
 
 // Tags a message once it's been checked and left in the Inbox (needs a
 // reply, or errored and fell back to needs-action) so the next run skips
@@ -71,6 +73,20 @@ const TIDY_CATEGORY = "TidyBot: revisto";
 // classifier prompt against them — see docs/knowledge-base/tidy-mailboxes.md.
 const FEEDBACK_SHOULD_ARCHIVE_CATEGORY = "TidyBot: devia ter arquivado";
 
+// Permanent "invoice check already done" markers — unlike TIDY_CATEGORY
+// they never expire, so a message is forwarded to faturas@ at most once and
+// never re-judged. Before these existed, the only memory was TIDY_CATEGORY,
+// whose 7-day expiry re-ran the whole handleMessage() including the
+// forward: a "Proposta de orçamento" sitting in the Inbox got re-forwarded
+// every recheck (2026-09-28, see tidy-mailboxes-feedback-log.md).
+const INVOICE_FORWARDED_CATEGORY = "TidyBot: fatura enviada";
+const INVOICE_REJECTED_CATEGORY = "TidyBot: não é fatura";
+
+// The comment both this cron and sync-partnerships put on their automatic
+// forwards — used to keep our own forwards out of the "Haven already
+// replied" check, see isOwnAutoForward().
+const AUTO_FORWARD_MARKER = "Reencaminhado automaticamente";
+
 function recheckAfterDays(): number {
   const raw = Number(process.env.TIDY_MAILBOXES_RECHECK_AFTER_DAYS);
   return Number.isFinite(raw) && raw > 0 ? raw : 7;
@@ -82,21 +98,6 @@ function isTagFresh(lastModifiedDateTime: string): boolean {
   if (Number.isNaN(modified.getTime())) return false; // unparseable — treat as stale, re-check rather than skip forever
   const ageDays = (Date.now() - modified.getTime()) / (1000 * 60 * 60 * 24);
   return ageDays < recheckAfterDays();
-}
-
-const INVOICE_WORDS = ["fatura", "invoice", "recibo", "receipt"];
-
-// Plain substring matching, not a \b-bounded regex — filenames commonly use
-// underscores ("fatura_setembro.pdf"), and \b doesn't count "_" as a
-// boundary (it's a word character), so a regex missed exactly the filename
-// shape real invoices show up with. Caught by testing before this shipped.
-function mentionsInvoice(text: string): boolean {
-  const lower = text.toLowerCase();
-  return INVOICE_WORDS.some((w) => lower.includes(w));
-}
-
-function isPdfOrImage(contentType: string): boolean {
-  return /^application\/pdf$/i.test(contentType) || /^image\//i.test(contentType);
 }
 
 // Only a bill someone sent US should go to faturas@ — an invoice the Haven
@@ -112,22 +113,18 @@ function isFromOwnDomain(mailbox: string, fromEmail: string): boolean {
   return fromEmail.toLowerCase().endsWith(`@${ownDomain}`);
 }
 
-/**
- * Returns the attachment(s) that made this look like an invoice, or null.
- * Requires a PDF/image attachment AND (its filename OR the email's
- * subject/body) mentioning fatura/invoice/recibo/receipt — attachment type
- * alone isn't enough, to avoid forwarding every PDF proposal/contract.
- */
-function invoiceAttachments(
-  subject: string,
-  body: string,
-  attachments: OutlookAttachment[],
-): OutlookAttachment[] | null {
-  const candidates = attachments.filter((a) => isPdfOrImage(a.contentType));
-  if (candidates.length === 0) return null;
-  const nameMatch = candidates.some((a) => mentionsInvoice(a.name));
-  const contextMatch = mentionsInvoice(subject) || mentionsInvoice(body.slice(0, 1000));
-  return nameMatch || contextMatch ? candidates : null;
+// A Sent Items message that is one of our own automatic forwards (to
+// faturas@, or sync-partnerships' to partners@) keeps the original's
+// conversationId, so without this it looked like "the Haven replied after
+// this arrived" — and the thread got classified from the forward's text
+// instead of the customer's message, which could archive a contract still
+// awaiting signature just because it had been forwarded to finance.
+function isOwnAutoForward(sent: OutlookMessage, invoicesForwardTo: string): boolean {
+  const target = invoicesForwardTo.toLowerCase();
+  return (
+    sent.body.includes(AUTO_FORWARD_MARKER) ||
+    sent.to.some((r) => r.email.toLowerCase() === target)
+  );
 }
 
 function configuredMailboxes(): string[] {
@@ -282,27 +279,62 @@ async function handleMessage(
     return outcome;
   }
 
-  if (msg.hasAttachments && !isFromOwnDomain(mailbox, msg.from.email)) {
+  // Local copy: Graph's PATCH replaces the whole category list, so a later
+  // TIDY_CATEGORY write must include any invoice marker added just above it.
+  let categories = [...msg.categories];
+
+  const invoiceAlreadyChecked =
+    categories.includes(INVOICE_FORWARDED_CATEGORY) || categories.includes(INVOICE_REJECTED_CATEGORY);
+  if (msg.hasAttachments && !invoiceAlreadyChecked && !isFromOwnDomain(mailbox, msg.from.email)) {
     const attachments = await outlook.getMessageAttachments(mailbox, msg.id);
-    const matched = invoiceAttachments(msg.subject, msg.body, attachments);
+    const matched = invoiceCandidateAttachments(msg.subject, attachments);
     if (matched) {
-      if (!dryRun) {
-        await outlook.forwardMessage(
-          mailbox,
-          msg.id,
-          [forwardTo],
-          "Reencaminhado automaticamente (parece conter uma fatura).",
-        );
-      }
-      log.info(dryRun ? "tidy_mailboxes.would_forward" : "tidy_mailboxes.invoice_forwarded", {
+      // Keywords only narrow it down — only a bill a SUPPLIER sent us goes
+      // to faturas@, never an invoice the studio issued to a client or a
+      // quote/proposal/contract (founder rule, 2026-09-28).
+      const verdict = await classifyInvoice({
+        mailbox,
+        subject: msg.subject,
+        fromName: msg.from.name,
+        fromEmail: msg.from.email,
+        attachmentNames: matched.map((a) => a.name),
+        body: msg.body,
+      });
+      const logData = {
         mailbox,
         messageId: msg.id,
         subject: msg.subject,
         from: msg.from.email,
         attachment: matched.map((a) => a.name).join(", "),
-        forwardedTo: forwardTo,
-      });
-      outcome.forwarded = true;
+        reason: verdict.reason,
+      };
+      if (!verdict.decided) {
+        // No marker: the next time this message is processed it gets another try.
+        log.warn("tidy_mailboxes.invoice_check_failed", logData);
+      } else if (!verdict.isSupplierInvoice) {
+        categories = [...categories, INVOICE_REJECTED_CATEGORY];
+        if (!dryRun) await outlook.setMessageCategories(mailbox, msg.id, categories);
+        log.info(dryRun ? "tidy_mailboxes.would_reject_invoice" : "tidy_mailboxes.invoice_rejected", logData);
+      } else {
+        // Marker first, forward second: if the marker can't be written this
+        // throws before forwarding, so a failure can never turn into the
+        // same email hitting faturas@ on every run.
+        categories = [...categories, INVOICE_FORWARDED_CATEGORY];
+        if (!dryRun) {
+          await outlook.setMessageCategories(mailbox, msg.id, categories);
+          await outlook.forwardMessage(
+            mailbox,
+            msg.id,
+            [forwardTo],
+            `${AUTO_FORWARD_MARKER} (fatura de fornecedor).`,
+          );
+        }
+        log.info(dryRun ? "tidy_mailboxes.would_forward" : "tidy_mailboxes.invoice_forwarded", {
+          ...logData,
+          forwardedTo: forwardTo,
+        });
+        outcome.forwarded = true;
+      }
     }
   }
 
@@ -330,8 +362,8 @@ async function handleMessage(
   });
 
   if (needsAction) {
-    if (!dryRun && !msg.categories.includes(TIDY_CATEGORY)) {
-      await outlook.setMessageCategories(mailbox, msg.id, [...msg.categories, TIDY_CATEGORY]);
+    if (!dryRun && !categories.includes(TIDY_CATEGORY)) {
+      await outlook.setMessageCategories(mailbox, msg.id, [...categories, TIDY_CATEGORY]);
     }
     log.debug("tidy_mailboxes.left_in_inbox", {
       mailbox,
@@ -407,7 +439,7 @@ export async function run(): Promise<void> {
     try {
       const sent = await outlook.listSentMessages(mailbox);
       for (const s of sent) {
-        if (!s.conversationId) continue;
+        if (!s.conversationId || isOwnAutoForward(s, forwardTo)) continue;
         const existing = latestSentByConversation.get(s.conversationId);
         if (!existing || new Date(s.sentDateTime) > new Date(existing.sentDateTime)) {
           latestSentByConversation.set(s.conversationId, s);

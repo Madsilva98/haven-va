@@ -22,3 +22,40 @@ Grouped hypotheses (unconfirmed — nothing below has been verified against the 
 4. **1 example (Mama Baby Walks, 27 março)** — founder says still not archived; logs show it WAS forwarded+archived in the 2026-09-14 backfill. Discrepancy unexplained — needs a direct Graph lookup (like the PUANI case) before assuming either a client-sync-lag issue or a genuine second unarchived message in the same thread.
 
 **Nothing here has been implemented.** Waiting on founder review before touching `classify-mailbox-thread.ts` or `tidy-mailboxes.ts` based on any of the above.
+
+---
+
+## 2026-09-28 — Same message forwarded to `faturas@` over and over, and it's a contract, not an invoice
+
+Status: **applied**
+
+Founder approved in chat on 2026-09-28 and added two rules: only supplier invoices (never invoices the studio sends to clients), and never quotes/proposals ("só mesmo faturas"). The offending email was identified as **"Proposta de orçamento" from lipclean.trans@gmail.com**, forwarded more than once. Shipped with a Haiku "supplier bill?" gate (`src/bot/classify-invoice.ts`) on top of the proposals below. See the PR on branch `worktree-tidy-invoice-forward-review`.
+
+Founder report (chat): "está sempre a reencaminhar a mesma mensagem para o faturas, e nem tem faturas, tem tipo contrato." The specific message hasn't been identified: NAS logs only go back to a container restart on 2026-09-28 17:34, and nobody looked it up directly in Graph. The diagnosis below comes from reading the code, not from that email. The *mechanisms* are certain, but which of them hit this particular message is unconfirmed.
+
+### Why the same message is forwarded again (two causes, both certain from the code)
+
+1. **Nothing remembers that a forward happened.** The only "already handled" marker is `TidyBot: revisto`, and it expires. Once the message's `lastModifiedDateTime` is older than `TIDY_MAILBOXES_RECHECK_AFTER_DAYS` (7), the whole `handleMessage()` runs again, invoice forward included. A contract awaiting signature is exactly the kind of thread that sits in the Inbox as NEEDS_ACTION for weeks, so it gets re-forwarded roughly weekly for as long as it stays there. This was never meant to happen: the tag expiry was added so the *classification* could be revisited, and it re-enables the forward as a side effect.
+2. **The forward happens before the tag is written.** If anything after the forward throws (`setMessageCategories` failing, for example), the message is never tagged and gets forwarded again on *every* daily run. If the founder is seeing daily rather than weekly repeats, this is the likelier cause (unconfirmed).
+
+### Why a contract counts as an invoice (criteria too loose)
+
+`invoiceAttachments()` forwards if there is **any** PDF/image attachment AND the words `fatura`/`invoice`/`recibo`/`receipt` appear **anywhere** in the attachment name, the subject, **or the first 1,000 characters of the body**. That's plain substring matching, so:
+- The body includes quoted thread history. One earlier line like "envio a fatura depois" or "dados de faturação" anywhere in the quoted text is enough.
+- `fatura` matches inside `faturação` / `faturar`; `recibo` matches inside `recibos verdes`. A contract or proposal routinely mentions billing terms.
+- Nothing ever looks at what the PDF is. `Contrato_Haven.pdf` passes as long as the body mentions billing.
+
+### Related bug found while reading (certain from the code)
+
+The bot's own forward lands in Sent Items **with the same `conversationId`**. On the next check, the "Haven already replied" logic (`latestSentByConversation`) treats our own auto-forward as a real reply and classifies *that* text instead of the customer's message. A contract still awaiting signature could therefore be judged resolved and archived just because the bot forwarded it to finance.
+
+### Proposed fix (not yet approved)
+
+1. **Forward at most once per message.** Right after a successful forward, add a second category, `TidyBot: fatura enviada`, and skip the invoice check entirely for any message that already carries it, regardless of whether `revisto` has expired. Write the category **before** forwarding; if that write fails, don't forward. Missing one forward is recoverable; spamming `faturas@` is not.
+2. **Tighten the invoice criteria:**
+   - Look at the **attachment filename and the subject only**. Drop the body, since quoted history is the main source of false positives.
+   - Match whole words, not substrings: `fatura(s)`, `invoice(s)`, `recibo(s)`, `receipt(s)`, and `FT`/`FR` + number patterns if needed. `faturação` no longer matches. `_` and `-` still count as separators, so `fatura_setembro.pdf` keeps working.
+   - **Exclusion list:** if the attachment name or subject contains `contrato`/`contract`/`proposta`/`proposal`/`orçamento`/`quote`/`acordo`/`agreement`, don't forward, even if another criterion matched.
+3. **Ignore our own auto-forwards when looking for "the Haven already replied".** Exclude Sent Items messages addressed to `OUTLOOK_INVOICES_FORWARD_TO` or containing the "Reencaminhado automaticamente" comment.
+
+Tests: unit tests for `invoiceAttachments()` covering the contract case, the `faturação` quoted-history case, `fatura_setembro.pdf` (must still match), and a message already carrying `fatura enviada` (must not forward).
