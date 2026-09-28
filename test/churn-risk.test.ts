@@ -140,7 +140,7 @@ describe("churn-risk", () => {
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes a row when only the detail text changed (same signal type), without pinging the digest", async () => {
+  it("refreshes a row when only the detail text changed (same signal type) — still appears under Em risco, the digest is a full snapshot not a delta", async () => {
     fetchChurnFlags.mockResolvedValue({
       flags: [
         {
@@ -167,10 +167,11 @@ describe("churn-risk", () => {
       ["Sem reservas 14+ dias"],
       "24 dias sem reservar (última reserva: 28/08/2026)",
     );
-    expect(sendGroupMessage).not.toHaveBeenCalled(); // not new news, just a number ticking up
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("Inês");
   });
 
-  it("skips a row entirely when neither the signal types nor the detail text changed", async () => {
+  it("skips the Notion write entirely when neither the signal types nor the detail text changed, but still lists the person under Em risco", async () => {
     fetchChurnFlags.mockResolvedValue({
       flags: [
         {
@@ -193,7 +194,8 @@ describe("churn-risk", () => {
     await run();
 
     expect(updateChurnFlag).not.toHaveBeenCalled();
-    expect(sendGroupMessage).not.toHaveBeenCalled();
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("Nuno");
   });
 
   it("archives a still-active row once it resolves every signal, and reports it as a bare count — not by name", async () => {
@@ -213,7 +215,7 @@ describe("churn-risk", () => {
     expect(updateChurnFlag).not.toHaveBeenCalled();
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
     const [message] = sendGroupMessage.mock.calls[0]!;
-    expect(message).toContain("2 resolvida(s)");
+    expect(message).toContain("Resolvidos: 2");
     expect(message).not.toContain("Diana");
     expect(message).not.toContain("Filipe");
   });
