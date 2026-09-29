@@ -79,6 +79,7 @@ import { enrichInfluencerPageFromText, enrichPartnerPageFromText, enrichSupplier
 import { classifyPartnershipEmailIntent, } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
+import { isKeptInInbox, keptConversationIds } from "../lib/outlook.js";
 import { buildContactLookups, domainOf, guessExternalParty, matchKnownContact, } from "../lib/outlook-contact-matching.js";
 import * as notion from "../notion.js";
 const DATA_DIR = process.env.DATA_DIR ?? ".";
@@ -133,11 +134,20 @@ function formatOrigem(msg) {
 // already-successful Notion create/update into a "retry next run" (which
 // would risk a second create attempt against a dedup check that may not
 // yet see the just-written page). Leaving OUTLOOK_PARTNERSHIP_FORWARD_TO
-// unset disables forwarding entirely (archive still happens).
-async function forwardAndArchiveIfConfigured(msg) {
+// unset disables BOTH the forward and the archive (the early return below)
+// — unset in production as of 2026-09-29.
+//
+// Never ARCHIVES a message a founder hasn't opened yet, or one whose thread
+// carries the "não arquivar" keep tag (the forward, a harmless copy, still
+// happens): partner/supplier threads are exactly the open negotiations that
+// must stay visible — tidy-mailboxes wrongly archived one (Fit4Life/Stages,
+// 2026-09-29), and this path would archive every such thread
+// unconditionally if the env var were ever set.
+async function forwardAndArchiveIfConfigured(msg, keptConversations) {
     const forwardTo = process.env.OUTLOOK_PARTNERSHIP_FORWARD_TO;
     if (!forwardTo)
         return;
+    const archiveBlockedBy = !msg.isRead ? "unread" : isKeptInInbox(msg, keptConversations) ? "keep_tag" : null;
     try {
         // A message already sitting in the forward target's own mailbox never
         // needs forwarding — Exchange delivers a self-forward as two
@@ -146,6 +156,14 @@ async function forwardAndArchiveIfConfigured(msg) {
         const isSelfForward = msg.mailbox.toLowerCase() === forwardTo.toLowerCase();
         if (!isSelfForward) {
             await outlook.forwardMessage(msg.mailbox, msg.id, [forwardTo], "Reencaminhado automaticamente — registado no Partner/Influencer Pipeline ou em Fornecedores.");
+        }
+        if (archiveBlockedBy) {
+            log.info("sync_partnerships.archive_skipped", {
+                mailbox: msg.mailbox,
+                messageId: msg.id,
+                reason: archiveBlockedBy,
+            });
+            return;
         }
         await outlook.archiveMessage(msg.mailbox, msg.id);
     }
@@ -157,21 +175,21 @@ async function forwardAndArchiveIfConfigured(msg) {
         });
     }
 }
-async function updateKnownPartner(contact, msg, text) {
+async function updateKnownPartner(contact, msg, text, keptConversations) {
     await notion.updatePartnerFields(contact.id, { ultimoContacto: msg.receivedDateTime });
     await enrichPartnerPageFromText(contact.id, text);
-    await forwardAndArchiveIfConfigured(msg);
+    await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
-async function updateKnownInfluencer(contact, msg, text) {
+async function updateKnownInfluencer(contact, msg, text, keptConversations) {
     await enrichInfluencerPageFromText(contact.id, text, contact.name, { ultimoContacto: msg.receivedDateTime });
-    await forwardAndArchiveIfConfigured(msg);
+    await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
-async function updateKnownSupplier(contact, msg, text) {
+async function updateKnownSupplier(contact, msg, text, keptConversations) {
     await notion.updateSupplierFields(contact.id, { ultimoContacto: msg.receivedDateTime });
     await enrichSupplierPageFromText(contact.id, text);
-    await forwardAndArchiveIfConfigured(msg);
+    await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
-async function processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state) {
+async function processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state, keptConversations) {
     const msgKey = findingId(msg.mailbox, msg.id);
     const text = `${msg.subject}\n${msg.body}`;
     // Step 1: known-contact check, all three pipelines. Only an exact_email
@@ -181,7 +199,7 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
     const supplierMatch = matchKnownContact(msg.from, msg.to, ownDomains, supplierLookups);
     if (partnerMatch?.matchBasis === "exact_email") {
         try {
-            await updateKnownPartner(partnerMatch.contact, msg, text);
+            await updateKnownPartner(partnerMatch.contact, msg, text, keptConversations);
             setMessageCheckpoint(state, msgKey, "parceiro", "exact_email", "partners", partnerMatch.contact.id);
             return { ok: true, result: "updated_known" };
         }
@@ -196,7 +214,7 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
     }
     if (influencerMatch?.matchBasis === "exact_email") {
         try {
-            await updateKnownInfluencer(influencerMatch.contact, msg, text);
+            await updateKnownInfluencer(influencerMatch.contact, msg, text, keptConversations);
             setMessageCheckpoint(state, msgKey, "influencer", "exact_email", "influencers", influencerMatch.contact.id);
             return { ok: true, result: "updated_known" };
         }
@@ -211,7 +229,7 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
     }
     if (supplierMatch?.matchBasis === "exact_email") {
         try {
-            await updateKnownSupplier(supplierMatch.contact, msg, text);
+            await updateKnownSupplier(supplierMatch.contact, msg, text, keptConversations);
             setMessageCheckpoint(state, msgKey, "fornecedor", "exact_email", "suppliers", supplierMatch.contact.id);
             return { ok: true, result: "updated_known" };
         }
@@ -295,7 +313,7 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
             if (externalParty.email)
                 await notion.updatePartnerFields(pageId, { email: externalParty.email });
             await enrichPartnerPageFromText(pageId, text);
-            await forwardAndArchiveIfConfigured(msg);
+            await forwardAndArchiveIfConfigured(msg, keptConversations);
             setMessageCheckpoint(state, msgKey, classification, null, "partners", pageId);
             return { ok: true, result: "created_partner" };
         }
@@ -304,14 +322,14 @@ async function processMessage(msg, ownDomains, partnerLookups, influencerLookups
             await enrichInfluencerPageFromText(pageId, text, externalParty.name, {
                 volunteeredEmail: externalParty.email || null,
             });
-            await forwardAndArchiveIfConfigured(msg);
+            await forwardAndArchiveIfConfigured(msg, keptConversations);
             setMessageCheckpoint(state, msgKey, classification, null, "influencers", pageId);
             return { ok: true, result: "created_influencer" };
         }
         // classification === "fornecedor"
         const pageId = await notion.createSupplier(externalParty.name, "Unassigned", formatOrigem(msg), "Email", msg.receivedDateTime, "A avaliar", externalParty.email || null);
         await enrichSupplierPageFromText(pageId, text);
-        await forwardAndArchiveIfConfigured(msg);
+        await forwardAndArchiveIfConfigured(msg, keptConversations);
         setMessageCheckpoint(state, msgKey, classification, null, "suppliers", pageId);
         return { ok: true, result: "created_supplier" };
     }
@@ -377,6 +395,11 @@ export async function run() {
             log.error("sync_partnerships.mailbox_fetch_failed", { mailbox, message: errMsg(err) });
             continue;
         }
+        // Built from this run's batch only (messages since the watermark), so a
+        // keep tag on an OLDER message of a thread isn't seen here — only on a
+        // message in the batch. Still covers the message itself, which is the
+        // one that would be archived. tidy-mailboxes sees the whole Inbox.
+        const keptConversations = keptConversationIds(messages);
         let minUnprocessed = null;
         let maxSeen = null;
         for (const msg of messages) {
@@ -385,7 +408,7 @@ export async function run() {
             const msgKey = findingId(mailbox, msg.id);
             if (state.messages[msgKey])
                 continue; // already decided — a watermark rewind can re-include this
-            const outcome = await processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state);
+            const outcome = await processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state, keptConversations);
             if (outcome.ok) {
                 saveState(state);
                 if (outcome.result === "updated_known")

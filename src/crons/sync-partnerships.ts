@@ -88,6 +88,7 @@ import {
 } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
+import { isKeptInInbox, keptConversationIds } from "../lib/outlook.js";
 import type { OutlookMessage } from "../lib/outlook.js";
 import {
   buildContactLookups,
@@ -177,10 +178,22 @@ function formatOrigem(msg: OutlookMessage): string {
 // already-successful Notion create/update into a "retry next run" (which
 // would risk a second create attempt against a dedup check that may not
 // yet see the just-written page). Leaving OUTLOOK_PARTNERSHIP_FORWARD_TO
-// unset disables forwarding entirely (archive still happens).
-async function forwardAndArchiveIfConfigured(msg: OutlookMessage): Promise<void> {
+// unset disables BOTH the forward and the archive (the early return below)
+// — unset in production as of 2026-09-29.
+//
+// Never ARCHIVES a message a founder hasn't opened yet, or one whose thread
+// carries the "não arquivar" keep tag (the forward, a harmless copy, still
+// happens): partner/supplier threads are exactly the open negotiations that
+// must stay visible — tidy-mailboxes wrongly archived one (Fit4Life/Stages,
+// 2026-09-29), and this path would archive every such thread
+// unconditionally if the env var were ever set.
+async function forwardAndArchiveIfConfigured(
+  msg: OutlookMessage,
+  keptConversations: Set<string>,
+): Promise<void> {
   const forwardTo = process.env.OUTLOOK_PARTNERSHIP_FORWARD_TO;
   if (!forwardTo) return;
+  const archiveBlockedBy = !msg.isRead ? "unread" : isKeptInInbox(msg, keptConversations) ? "keep_tag" : null;
   try {
     // A message already sitting in the forward target's own mailbox never
     // needs forwarding — Exchange delivers a self-forward as two
@@ -195,6 +208,14 @@ async function forwardAndArchiveIfConfigured(msg: OutlookMessage): Promise<void>
         "Reencaminhado automaticamente — registado no Partner/Influencer Pipeline ou em Fornecedores.",
       );
     }
+    if (archiveBlockedBy) {
+      log.info("sync_partnerships.archive_skipped", {
+        mailbox: msg.mailbox,
+        messageId: msg.id,
+        reason: archiveBlockedBy,
+      });
+      return;
+    }
     await outlook.archiveMessage(msg.mailbox, msg.id);
   } catch (err) {
     log.warn("sync_partnerships.forward_archive_failed", {
@@ -205,21 +226,36 @@ async function forwardAndArchiveIfConfigured(msg: OutlookMessage): Promise<void>
   }
 }
 
-async function updateKnownPartner(contact: KnownContact, msg: OutlookMessage, text: string): Promise<void> {
+async function updateKnownPartner(
+  contact: KnownContact,
+  msg: OutlookMessage,
+  text: string,
+  keptConversations: Set<string>,
+): Promise<void> {
   await notion.updatePartnerFields(contact.id, { ultimoContacto: msg.receivedDateTime });
   await enrichPartnerPageFromText(contact.id, text);
-  await forwardAndArchiveIfConfigured(msg);
+  await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
 
-async function updateKnownInfluencer(contact: KnownContact, msg: OutlookMessage, text: string): Promise<void> {
+async function updateKnownInfluencer(
+  contact: KnownContact,
+  msg: OutlookMessage,
+  text: string,
+  keptConversations: Set<string>,
+): Promise<void> {
   await enrichInfluencerPageFromText(contact.id, text, contact.name, { ultimoContacto: msg.receivedDateTime });
-  await forwardAndArchiveIfConfigured(msg);
+  await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
 
-async function updateKnownSupplier(contact: KnownContact, msg: OutlookMessage, text: string): Promise<void> {
+async function updateKnownSupplier(
+  contact: KnownContact,
+  msg: OutlookMessage,
+  text: string,
+  keptConversations: Set<string>,
+): Promise<void> {
   await notion.updateSupplierFields(contact.id, { ultimoContacto: msg.receivedDateTime });
   await enrichSupplierPageFromText(contact.id, text);
-  await forwardAndArchiveIfConfigured(msg);
+  await forwardAndArchiveIfConfigured(msg, keptConversations);
 }
 
 type ProcessOutcome =
@@ -244,6 +280,7 @@ async function processMessage(
   influencerLookups: ContactLookups,
   supplierLookups: ContactLookups,
   state: SyncState,
+  keptConversations: Set<string>,
 ): Promise<ProcessOutcome> {
   const msgKey = findingId(msg.mailbox, msg.id);
   const text = `${msg.subject}\n${msg.body}`;
@@ -256,7 +293,7 @@ async function processMessage(
 
   if (partnerMatch?.matchBasis === "exact_email") {
     try {
-      await updateKnownPartner(partnerMatch.contact, msg, text);
+      await updateKnownPartner(partnerMatch.contact, msg, text, keptConversations);
       setMessageCheckpoint(state, msgKey, "parceiro", "exact_email", "partners", partnerMatch.contact.id);
       return { ok: true, result: "updated_known" };
     } catch (err) {
@@ -270,7 +307,7 @@ async function processMessage(
   }
   if (influencerMatch?.matchBasis === "exact_email") {
     try {
-      await updateKnownInfluencer(influencerMatch.contact, msg, text);
+      await updateKnownInfluencer(influencerMatch.contact, msg, text, keptConversations);
       setMessageCheckpoint(state, msgKey, "influencer", "exact_email", "influencers", influencerMatch.contact.id);
       return { ok: true, result: "updated_known" };
     } catch (err) {
@@ -284,7 +321,7 @@ async function processMessage(
   }
   if (supplierMatch?.matchBasis === "exact_email") {
     try {
-      await updateKnownSupplier(supplierMatch.contact, msg, text);
+      await updateKnownSupplier(supplierMatch.contact, msg, text, keptConversations);
       setMessageCheckpoint(state, msgKey, "fornecedor", "exact_email", "suppliers", supplierMatch.contact.id);
       return { ok: true, result: "updated_known" };
     } catch (err) {
@@ -380,7 +417,7 @@ async function processMessage(
       );
       if (externalParty.email) await notion.updatePartnerFields(pageId, { email: externalParty.email });
       await enrichPartnerPageFromText(pageId, text);
-      await forwardAndArchiveIfConfigured(msg);
+      await forwardAndArchiveIfConfigured(msg, keptConversations);
       setMessageCheckpoint(state, msgKey, classification, null, "partners", pageId);
       return { ok: true, result: "created_partner" };
     }
@@ -398,7 +435,7 @@ async function processMessage(
       await enrichInfluencerPageFromText(pageId, text, externalParty.name, {
         volunteeredEmail: externalParty.email || null,
       });
-      await forwardAndArchiveIfConfigured(msg);
+      await forwardAndArchiveIfConfigured(msg, keptConversations);
       setMessageCheckpoint(state, msgKey, classification, null, "influencers", pageId);
       return { ok: true, result: "created_influencer" };
     }
@@ -414,7 +451,7 @@ async function processMessage(
       externalParty.email || null,
     );
     await enrichSupplierPageFromText(pageId, text);
-    await forwardAndArchiveIfConfigured(msg);
+    await forwardAndArchiveIfConfigured(msg, keptConversations);
     setMessageCheckpoint(state, msgKey, classification, null, "suppliers", pageId);
     return { ok: true, result: "created_supplier" };
   } catch (err) {
@@ -486,6 +523,12 @@ export async function run(): Promise<void> {
       continue;
     }
 
+    // Built from this run's batch only (messages since the watermark), so a
+    // keep tag on an OLDER message of a thread isn't seen here — only on a
+    // message in the batch. Still covers the message itself, which is the
+    // one that would be archived. tidy-mailboxes sees the whole Inbox.
+    const keptConversations = keptConversationIds(messages);
+
     let minUnprocessed: string | null = null;
     let maxSeen: string | null = null;
 
@@ -495,7 +538,15 @@ export async function run(): Promise<void> {
       const msgKey = findingId(mailbox, msg.id);
       if (state.messages[msgKey]) continue; // already decided — a watermark rewind can re-include this
 
-      const outcome = await processMessage(msg, ownDomains, partnerLookups, influencerLookups, supplierLookups, state);
+      const outcome = await processMessage(
+        msg,
+        ownDomains,
+        partnerLookups,
+        influencerLookups,
+        supplierLookups,
+        state,
+        keptConversations,
+      );
       if (outcome.ok) {
         saveState(state);
         if (outcome.result === "updated_known") updatedKnown++;
