@@ -36,7 +36,6 @@ function meetingEvent(iso: string, title = "Recurring Founders Meeting"): FakeEv
 const MONDAY = new Date("2026-09-14T07:00:00.000Z"); // 08:00 Lisbon
 const TUESDAY = new Date("2026-09-15T07:00:00.000Z"); // 08:00 Lisbon
 const WEDNESDAY = new Date("2026-09-16T07:00:00.000Z"); // 08:00 Lisbon
-const SUNDAY_BEFORE_MONDAY = new Date("2026-09-13T07:00:00.000Z"); // yesterday relative to MONDAY
 
 describe("founder-meeting-balance-check", () => {
   const originalTz = process.env.TZ;
@@ -55,14 +54,15 @@ describe("founder-meeting-balance-check", () => {
     runFocusCumpridoAsk.mockClear();
   });
 
-  it("sends when the meeting is scheduled for today, even on a non-Monday", async () => {
+  it("detects the meeting is scheduled for today, even on a non-Monday, but week-balance stays disabled — the focus ask still fires", async () => {
     listEventsInRange.mockResolvedValueOnce([meetingEvent("2026-09-15T13:30:00.000Z")]);
     await run(TUESDAY);
-    expect(sendWeekBalance).toHaveBeenCalledTimes(1);
-    expect(sendWeekBalance).toHaveBeenCalledWith(TUESDAY);
+    // Disabled 2026-09-29, founder's call — see the file header.
+    expect(sendWeekBalance).not.toHaveBeenCalled();
     // Early return: never bothers checking "scheduled last week".
     expect(listEventsInRange).toHaveBeenCalledTimes(1);
-    // Focus ask fires together with the team message, same `now`.
+    // Focus ask fires together with the team message's trigger, same `now`
+    // — disabling week-balance must not silently disable this too.
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
     expect(runFocusCumpridoAsk).toHaveBeenCalledWith(TUESDAY);
   });
@@ -74,13 +74,12 @@ describe("founder-meeting-balance-check", () => {
     expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
-  it("sends the Monday fallback, recapping the week that just ended, when no meeting happened today and none was scheduled last week", async () => {
+  it("detects the Monday-fallback case (no meeting today, none scheduled last week) but week-balance stays disabled — the focus ask still fires", async () => {
     listEventsInRange
       .mockResolvedValueOnce([]) // not scheduled today
       .mockResolvedValueOnce([]); // nothing scheduled last week
     await run(MONDAY);
-    expect(sendWeekBalance).toHaveBeenCalledTimes(1);
-    expect(sendWeekBalance).toHaveBeenCalledWith(SUNDAY_BEFORE_MONDAY);
+    expect(sendWeekBalance).not.toHaveBeenCalled();
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
     expect(runFocusCumpridoAsk).toHaveBeenCalledWith(MONDAY);
   });
@@ -101,13 +100,12 @@ describe("founder-meeting-balance-check", () => {
     expect(runFocusCumpridoAsk).not.toHaveBeenCalled();
   });
 
-  it("sends anyway on Monday if the 'scheduled last week' lookup fails (fail-safe)", async () => {
+  it("still runs the focus ask on Monday if the 'scheduled last week' lookup fails (fail-safe), week-balance stays disabled either way", async () => {
     listEventsInRange
       .mockResolvedValueOnce([]) // not scheduled today
       .mockRejectedValueOnce(new Error("calendar API down"));
     await run(MONDAY);
-    expect(sendWeekBalance).toHaveBeenCalledTimes(1);
-    expect(sendWeekBalance).toHaveBeenCalledWith(SUNDAY_BEFORE_MONDAY);
+    expect(sendWeekBalance).not.toHaveBeenCalled();
     expect(runFocusCumpridoAsk).toHaveBeenCalledTimes(1);
   });
 });
