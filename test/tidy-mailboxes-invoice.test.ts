@@ -138,6 +138,21 @@ describe("tidy-mailboxes invoice forwarding", () => {
     expect(outlookMock.forwardMessage).not.toHaveBeenCalled();
   });
 
+  it("never touches a message the founder tagged 'não arquivar' (Fit4Life case)", async () => {
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ categories: ["TidyBot: não arquivar"], subject: "Re: Stages Cycling - Fit4Life" }),
+    ]);
+    classifyMailboxThread.mockResolvedValue({ needsAction: false, reason: "resolvido" });
+
+    await run();
+
+    expect(classifyMailboxThread).not.toHaveBeenCalled();
+    expect(classifyInvoice).not.toHaveBeenCalled();
+    expect(outlookMock.archiveMessage).not.toHaveBeenCalled();
+    expect(outlookMock.forwardMessage).not.toHaveBeenCalled();
+    expect(outlookMock.setMessageCategories).not.toHaveBeenCalled();
+  });
+
   it("does not treat our own auto-forward as the Haven having replied", async () => {
     outlookMock.listInboxMessages.mockResolvedValue([msg({ hasAttachments: false })]);
     outlookMock.listSentMessages.mockResolvedValue([

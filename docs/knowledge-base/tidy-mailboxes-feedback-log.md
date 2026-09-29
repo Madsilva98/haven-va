@@ -64,7 +64,7 @@ Tests: unit tests for `invoiceAttachments()` covering the contract case, the `fa
 
 ## 2026-09-29 — Ongoing supplier negotiation archived ("Re: Stages Cycling - Madalena Marques Da Silva - Fit4Life Portugal/España")
 
-Status: **pending review**
+Status: **applied** (founder approved 1 and 2 in chat, 2026-09-29: "sim implementa as duas coisas"). The prompt rule is in `classify-mailbox-thread.ts`, and `KEEP_IN_INBOX_CATEGORY` is in `tidy-mailboxes.ts`. One deviation from the proposal: `feedback_keep_in_inbox` logs at debug, not info, because it fires on every run while the tag is on. The summary's `keptByFounder` count is the signal. The prompt rule has NOT been re-run against this exact email (no production mailbox read access from the dev session). Verify on the next dry run.
 
 Archived on the 2026-09-29 07:00 run (`geral@`). Classifier reason: "Madalena respondeu ao formulário da Fit4Life com as informações solicitadas; a negociação prossegue com o fornecedor externo… e não há ação pendente da equipa." Founder: negotiations are still going, so it should NOT have been archived.
 

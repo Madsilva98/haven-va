@@ -73,6 +73,14 @@ const TIDY_CATEGORY = "TidyBot: revisto";
 // classifier prompt against them — see docs/knowledge-base/tidy-mailboxes.md.
 const FEEDBACK_SHOULD_ARCHIVE_CATEGORY = "TidyBot: devia ter arquivado";
 
+// The mirror of the above: a founder applies this to a message the bot must
+// never touch (an ongoing negotiation it wrongly archived once, e.g. the
+// Fit4Life/Stages thread, 2026-09-29). Without it, moving a wrongly
+// archived message back to the Inbox did nothing — it was read and
+// untagged, so the next run reclassified it and archived it again.
+// Permanent: never classified, archived, forwarded or re-tagged.
+const KEEP_IN_INBOX_CATEGORY = "TidyBot: não arquivar";
+
 // Permanent "invoice check already done" markers — unlike TIDY_CATEGORY
 // they never expire, so a message is forwarded to faturas@ at most once and
 // never re-judged. Before these existed, the only memory was TIDY_CATEGORY,
@@ -416,6 +424,7 @@ export async function run(): Promise<void> {
     unread: 0,
     rechecked: 0,
     feedbackArchived: 0,
+    keptByFounder: 0,
     errors: 0,
   };
 
@@ -481,6 +490,19 @@ export async function run(): Promise<void> {
           });
           counts.errors++;
         }
+        continue;
+      }
+
+      // Founder said "keep this" — no classification, no archive, no forward.
+      // Debug-level on purpose: it fires every run for as long as the tag is
+      // on, so the daily summary's keptByFounder count is the useful signal.
+      if (msg.categories.includes(KEEP_IN_INBOX_CATEGORY)) {
+        log.debug("tidy_mailboxes.feedback_keep_in_inbox", {
+          mailbox,
+          messageId: msg.id,
+          subject: msg.subject,
+        });
+        counts.keptByFounder++;
         continue;
       }
 
