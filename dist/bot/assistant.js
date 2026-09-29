@@ -529,13 +529,18 @@ async function execCancelReminder(input, ctx, collector) {
     const text = typeof input.text === "string" ? input.text.trim() : "";
     if (!text)
         return "texto em falta";
-    const title = await notion.cancelReminder(text);
-    if (!title) {
+    const pick = await notion.cancelReminder(text);
+    if (pick.kind === "none") {
         const msg = `não encontrei nenhum lembrete pendente com "${text}"`;
         await ctx.reply(msg);
         return msg;
     }
-    const reply = `🗑️ lembrete cancelado: "${title}"`;
+    if (pick.kind === "ambiguous") {
+        const msg = `há mais do que um lembrete pendente com "${text}" — qual cancelo?\n${pick.titles.map((t) => `• ${t}`).join("\n")}`;
+        await ctx.reply(msg);
+        return `ambíguo, perguntei qual: ${pick.titles.join(" | ")}`;
+    }
+    const reply = `🗑️ lembrete cancelado: "${pick.title}"`;
     collector.push(reply);
     await ctx.reply(reply);
     return "ok";
@@ -686,12 +691,17 @@ async function execDeleteListItem(input, ctx, collector) {
     const lista = typeof input.lista === "string" ? input.lista.trim() : "";
     if (!item || !lista)
         return "parâmetros em falta";
-    const pageId = await notion.deleteListItem(item, lista);
-    if (!pageId) {
+    const pick = await notion.deleteListItem(item, lista);
+    if (pick.kind === "none") {
         await ctx.reply(`não encontrei "${item}" na lista *${lista}*`);
         return `não encontrado: ${item}`;
     }
-    const reply = `🗑️ "${item}" removido da lista`;
+    if (pick.kind === "ambiguous") {
+        await ctx.reply(`não tenho a certeza de qual é "${item}" na lista *${lista}* — qual removo?\n${pick.titles.map((t) => `• ${t}`).join("\n")}`);
+        return `ambíguo, perguntei qual: ${pick.titles.join(" | ")}`;
+    }
+    // The real title, not the founder's phrasing — so a wrong match is visible.
+    const reply = `🗑️ "${pick.title}" removido da lista`;
     collector.push(reply);
     await ctx.reply(reply);
     return "ok";

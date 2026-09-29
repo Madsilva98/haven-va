@@ -222,6 +222,17 @@ interface MessageOutcome {
   forwarded: boolean;
   archived: boolean;
   autoArchived: boolean;
+  /** LLM said archive, but the per-run cap was reached — left for next run. */
+  capped: boolean;
+}
+
+// Max LLM-judged archives per mailbox per run (TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN,
+// default 30 — founder-approved 2026-09-29, see failsafe-audit-2026-09-29.md).
+// Deliberately excludes the exact-sender/rule auto-archives and the founder's
+// "devia ter arquivado" tag: those aren't a model's judgment.
+function maxArchivesPerRun(): number {
+  const raw = Number(process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30;
 }
 
 /**
@@ -245,9 +256,10 @@ async function handleMessage(
   msg: OutlookMessage,
   forwardTo: string,
   latestSentByConversation: Map<string, OutlookMessage>,
+  archiveBudget: { remaining: number },
 ): Promise<MessageOutcome> {
   const dryRun = isDryRun();
-  const outcome: MessageOutcome = { forwarded: false, archived: false, autoArchived: false };
+  const outcome: MessageOutcome = { forwarded: false, archived: false, autoArchived: false, capped: false };
 
   if (autoArchiveSenders().has(msg.from.email.toLowerCase())) {
     if (!dryRun) {
@@ -378,6 +390,23 @@ async function handleMessage(
     return outcome;
   }
 
+  // Blast-radius cap: normal daily volume is ~10 LLM-judged archives, so
+  // hitting the cap means something unusual (a backlog, or a prompt/model
+  // regression archiving everything). Over it, leave the message untouched
+  // and UNTAGGED so the next run reconsiders it — never tagged revisto,
+  // since it wasn't judged as needing action.
+  if (archiveBudget.remaining <= 0) {
+    log.warn("tidy_mailboxes.archive_capped", {
+      mailbox,
+      messageId: msg.id,
+      subject: msg.subject,
+      cap: maxArchivesPerRun(),
+    });
+    outcome.capped = true;
+    return outcome;
+  }
+  archiveBudget.remaining--;
+
   if (!dryRun) {
     await outlook.archiveMessage(mailbox, msg.id);
   }
@@ -420,6 +449,7 @@ export async function run(): Promise<void> {
     rechecked: 0,
     feedbackArchived: 0,
     keptByFounder: 0,
+    capped: 0,
     errors: 0,
   };
 
@@ -457,6 +487,7 @@ export async function run(): Promise<void> {
     }
 
     const keptConversations = keptConversationIds(messages);
+    const archiveBudget = { remaining: maxArchivesPerRun() };
 
     for (const msg of messages) {
       // Founder said "keep this" (KEEP_IN_INBOX_CATEGORY in outlook.ts) —
@@ -529,11 +560,18 @@ export async function run(): Promise<void> {
         counts.rechecked++;
       }
       try {
-        const outcome = await handleMessage(mailbox, msg, forwardTo, latestSentByConversation);
+        const outcome = await handleMessage(
+          mailbox,
+          msg,
+          forwardTo,
+          latestSentByConversation,
+          archiveBudget,
+        );
         if (outcome.forwarded) counts.forwarded++;
         if (outcome.autoArchived) counts.autoArchived++;
         else if (outcome.archived) counts.archived++;
-        if (!outcome.archived) counts.left++;
+        if (outcome.capped) counts.capped++;
+        else if (!outcome.archived) counts.left++;
       } catch (err) {
         log.error("tidy_mailboxes.message_failed", {
           mailbox,

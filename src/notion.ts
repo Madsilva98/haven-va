@@ -48,6 +48,7 @@ import type {
 } from "./types.js";
 import { normalizeText, scoreMatch, significantWords } from "./lib/fuzzy-match.js";
 import { log } from "./lib/log.js";
+import { pickMatch, type PickResult } from "./lib/pick-match.js";
 import { formatLisbonDateTime } from "./lib/tz.js";
 
 // ----- env -----
@@ -1755,8 +1756,11 @@ async function markReminderSent(id: string): Promise<void> {
   log.info("notion.reminder_marked_sent", { id });
 }
 
-async function cancelReminder(text: string): Promise<string | null> {
-  if (!NOTION_REMINDERS_DB_ID) return null;
+// Cancels only when the text clearly means one reminder — with several
+// pending reminders containing it, returns them so the assistant asks which
+// (it used to take page_size: 1, i.e. whichever Notion returned first).
+async function cancelReminder(text: string): Promise<PickResult> {
+  if (!NOTION_REMINDERS_DB_ID) return { kind: "none" };
   const res = await withRetry("cancelReminder", () =>
     client.dataSources.query({
       data_source_id: dsId(NOTION_REMINDERS_DB_ID),
@@ -1767,18 +1771,20 @@ async function cancelReminder(text: string): Promise<string | null> {
           { property: "Feito",    checkbox: { equals: false } },
         ],
       },
-      page_size: 1,
+      page_size: 10,
     }),
   );
-  const row = res.results[0];
-  if (!row || !("properties" in row)) return null;
-  const props = row.properties as Record<string, unknown>;
-  const title = readPlainText(props["Reminder"]);
+  const candidates = res.results
+    .filter((row): row is typeof row & { properties: Record<string, unknown> } => "properties" in row)
+    .map((row) => ({ id: row.id, title: readPlainText(row.properties["Reminder"]) }));
+  const pick = pickMatch(text, candidates);
+  if (pick.kind !== "match") return pick;
+
   await withRetry("cancelReminder.archive", () =>
-    client.pages.update({ page_id: row.id, archived: true }),
+    client.pages.update({ page_id: pick.id, archived: true }),
   );
-  log.info("notion.reminder_cancelled", { id: row.id, text: title });
-  return title;
+  log.info("notion.reminder_cancelled", { id: pick.id, text: pick.title });
+  return pick;
 }
 
 // ============================================================
@@ -2933,7 +2939,7 @@ async function checkListItem(itemTitle: string, lista: string): Promise<string |
   return bestId;
 }
 
-async function deleteListItem(itemTitle: string, lista: string): Promise<string | null> {
+async function deleteListItem(itemTitle: string, lista: string): Promise<PickResult> {
   if (!NOTION_LISTS_DB_ID) throw new Error("NOTION_LISTS_DB_ID not set");
 
   type Row = { id: string; properties: Record<string, unknown> };
@@ -2966,32 +2972,20 @@ async function deleteListItem(itemTitle: string, lista: string): Promise<string 
     });
   }
 
-  let bestId: string | null = null;
-  let bestScore = 0;
-  const q = itemTitle.toLowerCase();
-  for (const row of rows) {
-    const props = row.properties;
-    const title = readPlainText(props["Item"]).toLowerCase();
-    const exact = title === q ? 1 : 0;
-    const includes = title.includes(q) || q.includes(title) ? 0.8 : 0;
-    const wa = (() => {
-      const wa2 = new Set(q.split(/\s+/).filter(Boolean));
-      const wb = new Set(title.split(/\s+/).filter(Boolean));
-      if (!wa2.size || !wb.size) return 0;
-      let overlap = 0;
-      for (const w of wa2) if (wb.has(w)) overlap++;
-      return overlap / Math.max(wa2.size, wb.size);
-    })();
-    const score = exact || includes || wa;
-    if (score > bestScore) { bestScore = score; bestId = row.id; }
-  }
-  if (!bestId || bestScore === 0) return null;
+  // Only deletes when it's clearly one item — otherwise hands the options
+  // back so the assistant asks (src/lib/pick-match.ts; it used to delete the
+  // best match at ANY score, one shared word was enough).
+  const pick = pickMatch(
+    itemTitle,
+    rows.map((row) => ({ id: row.id, title: readPlainText(row.properties["Item"]) })),
+  );
+  if (pick.kind !== "match") return pick;
 
   await withRetry("deleteListItem.archive", () =>
-    client.pages.update({ page_id: bestId!, archived: true }),
+    client.pages.update({ page_id: pick.id, archived: true }),
   );
-  log.info("notion.list_item_deleted", { itemTitle, lista, pageId: bestId });
-  return bestId;
+  log.info("notion.list_item_deleted", { itemTitle, lista, pageId: pick.id, title: pick.title });
+  return pick;
 }
 
 async function getList(lista?: string): Promise<ListItem[]> {

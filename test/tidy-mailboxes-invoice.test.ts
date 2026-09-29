@@ -185,6 +185,27 @@ describe("tidy-mailboxes invoice forwarding", () => {
     expect(outlookMock.archiveMessage).toHaveBeenCalledWith(MAILBOX, "other");
   });
 
+  it("caps LLM-judged archives per run and leaves the rest untagged for next time", async () => {
+    process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN = "2";
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ id: "a", conversationId: "ca", hasAttachments: false }),
+      msg({ id: "b", conversationId: "cb", hasAttachments: false }),
+      msg({ id: "c", conversationId: "cc", hasAttachments: false }),
+    ]);
+    classifyMailboxThread.mockResolvedValue({ needsAction: false, reason: "resolvido" });
+
+    try {
+      await run();
+    } finally {
+      delete process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN;
+    }
+
+    expect(outlookMock.archiveMessage).toHaveBeenCalledTimes(2);
+    // Over the cap: not archived, and NOT tagged revisto either — so the
+    // next run reconsiders it instead of skipping it for a week.
+    expect(outlookMock.setMessageCategories).not.toHaveBeenCalled();
+  });
+
   it("does not treat our own auto-forward as the Haven having replied", async () => {
     outlookMock.listInboxMessages.mockResolvedValue([msg({ hasAttachments: false })]);
     outlookMock.listSentMessages.mockResolvedValue([
