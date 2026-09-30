@@ -39,10 +39,9 @@ export const PULSE_VIEW = {
     failedPayments: "v_pulse_failed_payments",
     firstPaid: "v_pulse_first_paid",
     knownCases: "v_pulse_known_cases",
-    // haven-va's own derived business-rule views, added 2026-09-30 — see
-    // scripts/studio-db-views-2026-09-30.sql for the definitions and the
-    // note on why they share the v_pulse_ prefix despite not being
-    // Studio Pulse's own raw/curated facts.
+    // The bot's three lists (2026-09-30). Their rules live in haven-studio's canonical views
+    // (public.v_pulse_intro_outcome, public.v_pulse_churn_risk); these va names are column copies
+    // (haven-studio packages/dashboard/supabase/va-schema-and-role-migration.sql, section 2d).
     introPackWatch: "v_pulse_intro_pack_watch",
     introPackLeads: "v_pulse_intro_pack_leads",
     churnRiskSignals: "v_pulse_churn_risk_signals",
@@ -106,8 +105,24 @@ export const fetchMemberIdentity = () => fetchView(PULSE_VIEW.memberIdentity);
 export const fetchMemberActivity = () => fetchView(PULSE_VIEW.memberActivity);
 export const fetchUtilizationMonthly = () => fetchView(PULSE_VIEW.utilizationMonthly);
 export const fetchFailedPayments = () => fetchView(PULSE_VIEW.failedPayments);
-export const fetchIntroPackWatch = () => fetchView(PULSE_VIEW.introPackWatch);
-export const fetchIntroPackLeads = () => fetchView(PULSE_VIEW.introPackLeads);
+export async function fetchIntroPackWatch() {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackWatch, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return query(`select * from ${PULSE_VIEW.introPackWatch}
+     where (nudge_window = 'this_week'
+            and intro_end >= date_trunc('week', current_date)::date
+            and intro_end < date_trunc('week', current_date)::date + 7)
+        or (nudge_window = 'next_3_days' and intro_end between current_date and current_date + 3)`);
+}
+export async function fetchIntroPackLeads() {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackLeads, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return query(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
+}
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
 /**
  * The last date the studio data covers — the one "today" for every roster,
