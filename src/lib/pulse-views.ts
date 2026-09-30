@@ -44,6 +44,13 @@ export const PULSE_VIEW = {
   failedPayments: "v_pulse_failed_payments",
   firstPaid: "v_pulse_first_paid",
   knownCases: "v_pulse_known_cases",
+  // haven-va's own derived business-rule views, added 2026-09-30 — see
+  // scripts/studio-db-views-2026-09-30.sql for the definitions and the
+  // note on why they share the v_pulse_ prefix despite not being
+  // Studio Pulse's own raw/curated facts.
+  introPackWatch: "v_pulse_intro_pack_watch",
+  introPackLeads: "v_pulse_intro_pack_leads",
+  churnRiskSignals: "v_pulse_churn_risk_signals",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -274,6 +281,53 @@ export const fetchUtilizationMonthly = (): Promise<UtilizationMonthRow[]> =>
   fetchView<UtilizationMonthRow>(PULSE_VIEW.utilizationMonthly);
 export const fetchFailedPayments = (): Promise<FailedPaymentsRow[]> =>
   fetchView<FailedPaymentsRow>(PULSE_VIEW.failedPayments);
+
+/** v_pulse_intro_pack_watch — see scripts/studio-db-views-2026-09-30.sql. */
+export interface IntroPackWatchRow {
+  member_id: string;
+  email: string;
+  pack: string;
+  item_name: string;
+  intro_end: string;
+  visits_in_pack: number;
+}
+export const fetchIntroPackWatch = (): Promise<IntroPackWatchRow[]> =>
+  fetchView<IntroPackWatchRow>(PULSE_VIEW.introPackWatch);
+
+/** v_pulse_intro_pack_leads — see scripts/studio-db-views-2026-09-30.sql. */
+export interface IntroPackLeadRow {
+  member_id: string;
+  email: string;
+  pack: string;
+  item_name: string;
+  intro_end: string;
+  visits_in_pack: number;
+  days_since_expiry: number;
+  is_recent: boolean;
+  post_expiry_last_visit: string | null;
+  lifetime_visit_count: number;
+}
+export const fetchIntroPackLeads = (): Promise<IntroPackLeadRow[]> =>
+  fetchView<IntroPackLeadRow>(PULSE_VIEW.introPackLeads);
+
+/** v_pulse_churn_risk_signals — see scripts/studio-db-views-2026-09-30.sql. */
+export interface ChurnRiskSignalRow {
+  member_id: string;
+  current_tier: string | null;
+  current_plan: string | null;
+  has_no_booking: boolean;
+  no_booking_gap_days: number | null;
+  no_booking_last_date: string | null;
+  no_booking_stretch_start: string | null;
+  no_booking_resumed_from_pause: boolean | null;
+  has_failed_payment: boolean;
+  failed_payment_date: string | null;
+  has_low_utilization: boolean;
+  low_util_avg_pct: number | null;
+  low_util_months: { month: string; pct: number }[] | null;
+}
+export const fetchChurnRiskSignals = (): Promise<ChurnRiskSignalRow[]> =>
+  fetchView<ChurnRiskSignalRow>(PULSE_VIEW.churnRiskSignals);
 
 /**
  * The last date the studio data covers — the one "today" for every roster,

@@ -33,6 +33,8 @@ import { log } from "./log.js";
 import {
   fetchDataAsOf,
   fetchIntroConversion,
+  fetchIntroPackLeads,
+  fetchIntroPackWatch,
   fetchIntroPurchases,
   fetchMemberActivity,
   memberIdFromEmail,
@@ -40,7 +42,7 @@ import {
   type MemberActivityRow,
 } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-import { lisbonDateString, lisbonNaiveToUtcIso } from "./tz.js";
+import { lisbonNaiveToUtcIso } from "./tz.js";
 
 /** The view's `pack` labels this bot tracks. */
 export const TRACKED_PACKS = ["2-Class", "10-Day"] as const;
@@ -56,6 +58,7 @@ export interface UnconvertedIntroPack {
   packName: string; // the item as sold, e.g. "2 Classes | Premium"
   expiresAt: Date;
   daysSinceExpiry: number;
+  isRecent: boolean; // crossed the 21-day mark within roughly the last week — see v_pulse_intro_pack_leads
   lastVisit: Date | null; // last checked-in class, any time
   visitCount: number; // checked-in classes, any time
 }
@@ -196,37 +199,59 @@ function toUnconverted(
     packName: row.packName,
     expiresAt: row.expiresAt,
     daysSinceExpiry: Math.round((now.getTime() - row.expiresAt.getTime()) / 86_400_000),
+    isRecent: true, // unused by this one-off range backfill (scripts/backfill-intro-pack-summer-2026.mjs never reads it) — every row is announced regardless
     lastVisit: visits?.lastVisit ?? null,
     visitCount: visits?.count ?? 0,
   };
 }
 
 /**
- * Standing weekly signal: intro pack finished at least `cutoffDays` ago
- * (default 21) as of the data date, and the person never converted since.
+ * Standing weekly signal: intro pack finished 21+ days ago (empirically
+ * validated threshold, encoded in `va.v_pulse_intro_pack_leads` itself now
+ * — see scripts/studio-db-views-2026-09-30.sql) and the person never
+ * converted since.
  *
- * Only packs the view marks is_activated = true. A pack bought and never
- * activated (ledger alive, no expiry, full credits, 0 visits — 32 people on
- * 2026-09-21) has a modeled intro_end that must not read as "terminou há
- * N dias, sem converter" (case #25). Those are "comprou e nunca veio", a
- * segment of its own if Madalena wants one — not leads here.
+ * As of 2026-09-30, the "who qualifies" decision (first tracked pack per
+ * person, activation check, the day-21 threshold, the conversion check)
+ * lives entirely in that view — founder's call: "quero que uses views e
+ * que não estejas sempre computing do 0". This function only shapes the
+ * view's rows into `UnconvertedIntroPack` and fills in name/phone/lifetime
+ * visit stats, which still come from this file's own lookups since they're
+ * simple joins, not business-rule decisions.
  */
-export async function findUnconvertedIntroPacks(
-  cutoffDays: number = DEFAULT_CUTOFF_DAYS,
-): Promise<{ candidates: UnconvertedIntroPack[]; asOf: string | null }> {
+export async function findUnconvertedIntroPacks(): Promise<{
+  candidates: UnconvertedIntroPack[];
+  asOf: string | null;
+}> {
   if (!isStudioDbAvailable()) {
     log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
     return { candidates: [], asOf: null };
   }
-  const { asOf, firstPackByEmail, convertedMemberIds, visitsByMember, customers } = await loadConversionCheckData();
+  const [asOf, leadRows, activity, customers] = await Promise.all([
+    fetchDataAsOf(),
+    fetchIntroPackLeads(),
+    fetchMemberActivity(),
+    fetchAllCustomerNames(),
+  ]);
   if (!asOf) return { candidates: [], asOf: null };
-  const now = asOfInstant(asOf);
-  const candidates: UnconvertedIntroPack[] = [];
-  for (const row of firstPackByEmail.values()) {
-    if (!row.activated || convertedMemberIds.has(row.memberId)) continue;
-    const daysSinceExpiry = (now.getTime() - row.expiresAt.getTime()) / 86_400_000;
-    if (daysSinceExpiry >= cutoffDays) candidates.push(toUnconverted(row, now, visitsByMember, customers));
-  }
+  const visits = visitStats(activity);
+  const names = nameByMemberId(customers);
+  const candidates: UnconvertedIntroPack[] = leadRows.map((r) => {
+    const email = r.email.toLowerCase();
+    const v = visits.get(r.member_id);
+    return {
+      email,
+      name: names.get(r.member_id) ?? email,
+      phone: findPhoneByEmail(email, customers),
+      pack: r.pack as TrackedPack,
+      packName: r.item_name,
+      expiresAt: lisbonEndOfDay(r.intro_end),
+      daysSinceExpiry: r.days_since_expiry,
+      isRecent: r.is_recent,
+      lastVisit: v?.lastVisit ?? null,
+      visitCount: v?.count ?? 0,
+    };
+  });
   return { candidates, asOf };
 }
 
@@ -240,86 +265,46 @@ export interface ExpiringIntroPackToWatch {
   visitCount: number; // visits_in_pack — check-ins booked on this pack, not lifetime
 }
 
-/** Pure — no I/O. The two usage patterns worth a same-day nudge. */
-export function isExpiringPackToWatch(pack: string, visitsInPack: number): boolean {
-  if (pack === "2-Class") return visitsInPack === 1;
-  if (pack === "10-Day") return visitsInPack > 5;
-  return false;
-}
-
 /**
- * Pure — no I/O. Whether `introEnd` ("YYYY-MM-DD") falls within the next
- * `daysAhead` days of `today` ("YYYY-MM-DD"), inclusive both ends.
- */
-export function isWithinExpiryWindow(introEnd: string, today: string, daysAhead: number): boolean {
-  return introEnd >= today && introEnd <= addDays(today, daysAhead);
-}
-
-/**
- * Activated intro packs (is_activated = true) whose intro_end falls within
- * `daysAhead` days (default 3) of the REAL calendar date — deliberately NOT
- * `asOf` (`v_pulse_data_as_of`), unlike every other date comparison in this
- * file. `asOf` lags the calendar by design (founder's call, 2026-09-22: the
- * studio's data "will not be fresh every day, at least for now") and
- * `intro_end` is a fixed calendar fact set at purchase time, not a rolling
- * metric that needs `asOf` for internal consistency — so anchoring this
- * window on `asOf` doesn't make it more correct, it just makes "expiring
- * soon" silently mean "already expired" once the lag exceeds `daysAhead`
- * (confirmed in production 2026-09-22: asOf stuck at 2026-09-18, daysAhead=3,
- * so the digest listed packs that had lapsed up to 4 days earlier). `asOf`
- * is still returned/shown in the "dados até" line — only the window itself
- * uses the calendar. Not already converted (a member who bought a plan
- * mid-pack needs no nudge), filtered to the two usage patterns worth a
- * proactive nudge before the pack lapses — founder's spec, 2026-09-20, not
- * empirically derived like DEFAULT_CUTOFF_DAYS above:
- * - 2-Class: exactly 1 of the 2 classes taken ON the pack (visits_in_pack).
- * - 10-Day: more than 5 classes taken on the pack.
+ * Activated intro packs worth a same-day nudge before they lapse — the
+ * "which pack, which window, which usage pattern" decision lives entirely
+ * in `va.v_pulse_intro_pack_watch` now (2026-09-30, see
+ * scripts/studio-db-views-2026-09-30.sql), including the real-calendar
+ * anchoring (not `asOf`) this window has always needed and the 2-Class
+ * (this week) vs 10-Day (3 days) split the founder asked for the same day.
+ * This function only shapes the view's rows and fills in name/phone.
  * Used by src/crons/intro-pack-expiring.ts.
  */
-export async function findExpiringIntroPacksToWatch(
-  daysAhead = 3,
-  today: string = lisbonDateString(new Date()),
-): Promise<{ packs: ExpiringIntroPackToWatch[]; asOf: string | null }> {
+export async function findExpiringIntroPacksToWatch(): Promise<{
+  packs: ExpiringIntroPackToWatch[];
+  asOf: string | null;
+}> {
   if (!isStudioDbAvailable()) {
     log.warn("intro_pack_expiring.fetch_skipped", { reason: "studio_db_not_configured" });
     return { packs: [], asOf: null };
   }
-  const [asOf, purchases, conversions, customers] = await Promise.all([
+  const [asOf, watchRows, customers] = await Promise.all([
     fetchDataAsOf(),
-    fetchIntroPurchases(),
-    fetchIntroConversion(),
+    fetchIntroPackWatch(),
     fetchAllCustomerNames(),
   ]);
   if (!asOf) return { packs: [], asOf: null };
-  const converted = new Set(conversions.filter((c) => c.converted || c.converted_pack).map((c) => c.member_id));
   const names = nameByMemberId(customers);
 
-  const packs: ExpiringIntroPackToWatch[] = [];
-  for (const r of purchases) {
-    if (!isTracked(r.pack) || r.is_open_day || r.is_valentine || r.is_for_members) continue;
-    if (r.is_activated !== true) continue;
-    if (!isWithinExpiryWindow(r.intro_end, today, daysAhead)) continue;
-    if (converted.has(r.member_id)) continue;
-    if (!isExpiringPackToWatch(r.pack, r.visits_in_pack)) continue;
+  const packs: ExpiringIntroPackToWatch[] = watchRows.map((r) => {
     const email = r.email.toLowerCase();
-    packs.push({
+    return {
       email,
       name: names.get(r.member_id) ?? email,
       phone: findPhoneByEmail(email, customers),
-      pack: r.pack,
+      pack: r.pack as TrackedPack,
       packName: r.item_name,
       expiresAt: lisbonEndOfDay(r.intro_end),
       visitCount: r.visits_in_pack,
-    });
-  }
+    };
+  });
   packs.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
   return { packs, asOf };
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 /**
