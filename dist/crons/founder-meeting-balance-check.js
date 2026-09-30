@@ -3,6 +3,13 @@
  * whether to send the week-balance message (src/crons/week-balance.ts)
  * — replacing the old fixed Friday-17:00 schedule.
  *
+ * **Week-balance disabled, 2026-09-29 (founder's call) — WEEK_BALANCE_ENABLED
+ * below.** Left in code deliberately (not deleted, not unregistered from
+ * server.ts) since this cron still does real work besides that message: the
+ * personal Founder Focus "cumpriste?" check-in (below) still needs the same
+ * meeting-detection logic to know when to fire. Flip the flag to re-enable
+ * week-balance without touching anything else.
+ *
  * The balance is meant to land the morning OF the "Founders Meeting" /
  * "Recurring Founders Meeting" — a recap of the week that's about to
  * close, right before the meeting where the next cycle's priorities get
@@ -19,15 +26,17 @@
  *    fallback day with founder-meeting-check.ts.
  * 3. Otherwise, do nothing today.
  *
- * Whenever week-balance actually sends (either branch above), the
- * personal Founder Focus "cumpriste?" check-in (`founder-focus-cycle.ts`)
- * fires right after, same `now` — that used to be its own fixed Sunday
- * 18:00 cron; merged here so both the team recap and the personal
- * check-in land on the same day, whichever day the meeting actually is.
+ * Whenever the meeting-detection above fires (either branch), the personal
+ * Founder Focus "cumpriste?" check-in (`founder-focus-cycle.ts`) still runs
+ * right after, same `now`, REGARDLESS of WEEK_BALANCE_ENABLED — that used to
+ * be its own fixed Sunday 18:00 cron; merged here so both the team recap and
+ * the personal check-in land on the same day, whichever day the meeting
+ * actually is. Disabling week-balance must not silently disable this too.
  */
 import { listEventsInRange } from "../lib/calendar.js";
 import { runFocusCumpridoAsk } from "./founder-focus-cycle.js";
 import { log } from "../lib/log.js";
+const WEEK_BALANCE_ENABLED = false;
 import { mondayOf, sundayOf } from "../lib/week.js";
 import { run as sendWeekBalance } from "./week-balance.js";
 const MEETING_KEYWORD = "founders meeting"; // matches both "Founders Meeting" and "Recurring Founders Meeting"
@@ -65,7 +74,12 @@ export async function run(now = new Date()) {
     }
     if (today) {
         log.info("founder_meeting_balance_check.meeting_today");
-        await sendWeekBalance(now);
+        if (WEEK_BALANCE_ENABLED) {
+            await sendWeekBalance(now);
+        }
+        else {
+            log.debug("founder_meeting_balance_check.week_balance_disabled");
+        }
         await runFocusCumpridoAsk(now);
         return;
     }
@@ -93,7 +107,12 @@ export async function run(now = new Date()) {
         log.info("founder_meeting_balance_check.monday_skipped_meeting_scheduled");
         return;
     }
-    log.info("founder_meeting_balance_check.monday_fallback_sent");
-    await sendWeekBalance(lastWeekReference);
+    if (WEEK_BALANCE_ENABLED) {
+        log.info("founder_meeting_balance_check.monday_fallback_sent");
+        await sendWeekBalance(lastWeekReference);
+    }
+    else {
+        log.debug("founder_meeting_balance_check.week_balance_disabled");
+    }
     await runFocusCumpridoAsk(now);
 }
