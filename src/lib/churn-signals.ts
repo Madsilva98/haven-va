@@ -1,93 +1,38 @@
 /**
- * Churn-risk signal computation for src/crons/churn-risk.ts — since
- * 2026-09-21 entirely on the studio's v_pulse_* views (spec:
- * docs/plans/2026-09-21-pulse-views-spec.md). The bot no longer defines
- * "active", "attended", "paused" or "utilization"; it reads them:
+ * Churn-risk signal rendering for src/crons/churn-risk.ts.
  *
- * - Roster: paying cycles in v_pulse_membership_state overlapping the
- *   DATA date (v_pulse_data_as_of), never the calendar — a renewal after
- *   the last import is not a churn (Tatyana Khvesko, case #6); Cancelation
- *   scheduled and pause-scheduled (NULL) are paying (Andreia taboleiros,
- *   case #5); a stale Active row in kenko_subscriptions is not (Esen
- *   Sekerkarar, case #1). Tenure (member_since) from v_pulse_member_tenure;
- *   names, emails and phones from v_pulse_member_identity on member_id.
- * - Signal 1 "Sem reservas 14+ dias": v_pulse_member_activity's
- *   next_or_last_booked (Booked/Waitlist class days; a future booking is
- *   engagement), measured from the later of member_since or the end of
- *   the member's most recent stretched (paused) cycle in
- *   v_pulse_pause_history — Sofia Barata, paused 27/07-27/08, must not
- *   read as "64 dias sem reservar" (2026-09-21). That cycle_end is the
- *   next charge, not the return date (case #2): the person was back by
- *   then at the latest, so the detail says "de volta até dd/mm". A member
- *   whose pause is_current is skipped outright.
- * - Signal 2 "Pagamento falhado": v_pulse_failed_payments.failed_45d > 0,
- *   suppressed when the failure is no longer a live concern — either the
- *   member's current paying cycle started AFTER the last failure (a later
- *   payment succeeded: Maria Murteira, 2026-09-28, paid on the 20th but the
- *   Aug 23 failure was still inside the 45-day window) or they have an
- *   upcoming booked class (next_or_last_booked after asOf: Darina
- *   Sinegubova, same day — her only "failure" was a €15 no-show fee, and a
- *   member actively booking ahead isn't disengaging regardless of what a
- *   fee-vs-subscription distinction the view doesn't expose would say).
- *   Founder's call: either condition alone is enough to clear the signal.
- * - Signal 3 "Baixa utilização": v_pulse_utilization_monthly under 50% in
- *   EACH of the last 3 full calendar months before the data date, reading
- *   only is_full_month rows (case #23) without had_pause (Raquel Saraiva,
- *   Francesca Buoncristiani, 2026-09-21), and never Unlimited (allowance
- *   NULL).
+ * As of 2026-09-30, the 3 empirically-validated signals (roster, pause
+ * handling, the day/month thresholds, the failed-payment suppression) are
+ * computed entirely in `va.v_pulse_churn_risk_signals`
+ * (scripts/studio-db-views-2026-09-30.sql) — founder's call: "quero que
+ * uses views e que não estejas sempre computing do 0". This file only
+ * turns that view's facts into the pt-PT message text (day counts, month
+ * labels, percentages), which stays here deliberately — it's the fiddly,
+ * easy-to-typo part, and it's unit-tested.
  *
- * The thresholds themselves (14 days, 45 days, 50% × 3 months) were
- * empirically validated in session against churned-vs-active members —
- * see the git history of this file for the derivation tables. No staff
- * list lives here: the views exclude staff.
+ * See the view's own SQL comments for the exact signal definitions (the
+ * Sofia Barata pause case, the Maria Murteira/Darina Sinegubova
+ * suppression cases, the Raquel Saraiva/Francesca Buoncristiani
+ * utilization exclusions, etc.) — this file no longer re-derives any of
+ * that, so those stories live at the SQL layer now, not here.
  */
 
 import type { ChurnSignalType } from "../types.js";
 import { log } from "./log.js";
 import {
-  activeMembersAsOf,
+  fetchChurnRiskSignals,
   fetchDataAsOf,
-  fetchFailedPayments,
-  fetchMemberActivity,
   fetchMemberIdentity,
-  fetchMembershipState,
-  fetchMemberTenure,
-  fetchPauseHistory,
-  fetchUtilizationMonthly,
-  type FailedPaymentsRow,
-  type MemberActivityRow,
-  type PauseHistoryRow,
-  type UtilizationMonthRow,
+  type ChurnRiskSignalRow,
+  type MemberIdentityRow,
 } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
-
-const NO_BOOKING_GAP_DAYS = 14;
-const UNDERUSE_PCT = 50;
-const UNDERUSE_MONTHS = 3;
-
-export interface ActiveSubscriber {
-  memberId: string;
-  email: string;
-  name: string;
-  membershipName: string; // "4x Monthly | Premium"
-  memberSince: string; // YYYY-MM-DD — v_pulse_member_tenure.member_since
-  currentCycleStartsAt: string; // YYYY-MM-DD — start of the current live paying cycle
-}
-
-export interface ChurnInputs {
-  asOf: string; // YYYY-MM-DD, the data date
-  members: ActiveSubscriber[];
-  activityByMember: Map<string, MemberActivityRow>;
-  failedByMember: Map<string, FailedPaymentsRow>;
-  utilization: UtilizationMonthRow[];
-  pauseHistory: Pick<PauseHistoryRow, "member_id" | "cycle_end" | "is_current">[];
-}
 
 export interface ChurnFlag {
   email: string;
   name: string;
   plano: string;
-  telefone: string | null; // filled in by fetchChurnFlags (I/O); null from computeChurnFlags alone
+  telefone: string | null;
   signals: { type: ChurnSignalType; detail: string }[];
 }
 
@@ -103,135 +48,44 @@ function monthLabelPt(monthIso: string): string {
   });
 }
 
-function daysBetween(a: string, b: string): number {
-  return (Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000;
-}
-
 /**
- * First days of the `monthsBack` full calendar months before the month
- * `asOf` falls in, most recent first. asOf 2026-09-18, 3 → [2026-08-01,
- * 2026-07-01, 2026-06-01].
+ * Pure — no I/O. Renders one view row's facts into the pt-PT signal list,
+ * or null if the row has none (still active, nothing currently wrong).
  */
-export function fullMonthsBefore(asOf: string, monthsBack: number): string[] {
-  const [y, m] = asOf.slice(0, 10).split("-").map(Number) as [number, number];
-  const out: string[] = [];
-  for (let i = 1; i <= monthsBack; i++) {
-    const d = new Date(Date.UTC(y, m - 1 - i, 1));
-    out.push(d.toISOString().slice(0, 10));
+export function renderChurnSignals(row: ChurnRiskSignalRow): ChurnFlag["signals"] {
+  const signals: ChurnFlag["signals"] = [];
+
+  if (row.has_no_booking) {
+    const gapDays = Math.round(row.no_booking_gap_days ?? 0);
+    const detail = row.no_booking_last_date
+      ? `${gapDays} dias sem reservar (última aula marcada: ${formatDatePt(row.no_booking_last_date)})`
+      : row.no_booking_resumed_from_pause
+        ? `${gapDays} dias sem reservar desde a pausa (de volta até ${formatDatePt(row.no_booking_stretch_start!)})`
+        : `${gapDays} dias sem nenhuma reserva desde a inscrição`;
+    signals.push({ type: "Sem reservas 14+ dias", detail });
   }
-  return out;
+
+  if (row.has_failed_payment && row.failed_payment_date) {
+    signals.push({
+      type: "Pagamento falhado",
+      detail: `pagamento falhado a ${formatDatePt(row.failed_payment_date)}`,
+    });
+  }
+
+  if (row.has_low_utilization && row.low_util_months) {
+    const parts = row.low_util_months.map((m) => `${monthLabelPt(m.month)}: ${Math.round(m.pct)}%`);
+    signals.push({
+      type: "Baixa utilização",
+      detail: `${Math.round(row.low_util_avg_pct ?? 0)}% de utilização média nos últimos 3 meses (${parts.join(", ")})`,
+    });
+  }
+
+  return signals;
 }
 
 /**
- * Pure — no I/O. Applies the three signals to already-fetched view rows.
- */
-export function computeChurnFlags(inputs: ChurnInputs): ChurnFlag[] {
-  const { asOf, members, activityByMember, failedByMember, utilization, pauseHistory } = inputs;
-  const flags: ChurnFlag[] = [];
-
-  const utilByMember = new Map<string, Map<string, UtilizationMonthRow>>();
-  for (const u of utilization) {
-    const byMonth = utilByMember.get(u.member_id) ?? new Map<string, UtilizationMonthRow>();
-    byMonth.set(u.month.slice(0, 10), u);
-    utilByMember.set(u.member_id, byMonth);
-  }
-  const lastPauseEndByMember = new Map<string, string>();
-  const pausedNow = new Set<string>();
-  for (const p of pauseHistory) {
-    if (p.is_current) pausedNow.add(p.member_id);
-    const end = p.cycle_end?.slice(0, 10);
-    if (!end || end > asOf) continue;
-    const prev = lastPauseEndByMember.get(p.member_id);
-    if (!prev || end > prev) lastPauseEndByMember.set(p.member_id, end);
-  }
-  const months = fullMonthsBefore(asOf, UNDERUSE_MONTHS);
-
-  for (const m of members) {
-    const signals: ChurnFlag["signals"] = [];
-
-    // Signal 1 — the stretch to judge starts at the later of member_since
-    // and the most recent past pause's cycle_end (the next charge: they were
-    // back by then at the latest, the exact return date is not in the
-    // export — case #2). A pause that reads Paused right now is skipped:
-    // nothing to judge yet. The view's next_or_last_booked is the latest
-    // Booked/Waitlist class day, future included.
-    if (!pausedNow.has(m.memberId)) {
-      const pauseEnd = lastPauseEndByMember.get(m.memberId);
-      const stretchStart = pauseEnd && pauseEnd > m.memberSince ? pauseEnd : m.memberSince;
-      const resumedFromPause = stretchStart === pauseEnd;
-      const tenureDays = daysBetween(stretchStart, asOf);
-      if (tenureDays >= NO_BOOKING_GAP_DAYS) {
-        const booked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
-        const lastInStretch = booked && booked >= stretchStart ? booked : null;
-        const gapDays = lastInStretch ? daysBetween(lastInStretch, asOf) : tenureDays;
-        if (gapDays > NO_BOOKING_GAP_DAYS) {
-          const detail = lastInStretch
-            ? `${Math.round(gapDays)} dias sem reservar (última aula marcada: ${formatDatePt(lastInStretch)})`
-            : resumedFromPause
-              ? `${Math.round(gapDays)} dias sem reservar desde a pausa (de volta até ${formatDatePt(stretchStart)})`
-              : `${Math.round(gapDays)} dias sem nenhuma reserva desde a inscrição`;
-          signals.push({ type: "Sem reservas 14+ dias", detail });
-        }
-      }
-    }
-
-    // Signal 2 — a failed payment in the last 45 days (the view counts
-    // them), UNLESS it's no longer a live concern: a later successful cycle
-    // (paid since) or an upcoming booking (still actively engaged) each
-    // clear it on their own — see the file header for the two real cases
-    // this fixed, 2026-09-28.
-    const failed = failedByMember.get(m.memberId);
-    if (failed && failed.failed_45d > 0 && failed.last_failed_on) {
-      const paidSince = m.currentCycleStartsAt > failed.last_failed_on;
-      const nextBooked = activityByMember.get(m.memberId)?.next_or_last_booked?.slice(0, 10) ?? null;
-      const hasUpcomingBooking = !!nextBooked && nextBooked > asOf;
-      if (!paidSince && !hasUpcomingBooking) {
-        signals.push({
-          type: "Pagamento falhado",
-          detail: `pagamento falhado a ${formatDatePt(failed.last_failed_on)}`,
-        });
-      }
-    }
-
-    // Signal 3 — under 50% in each of the last 3 full months, all three
-    // present and clean: is_full_month (the view's word on "member for the
-    // whole month"), no pause overlap, plan with an allowance.
-    const byMonth = utilByMember.get(m.memberId);
-    if (byMonth) {
-      const stats = months.map((month) => {
-        const u = byMonth.get(month);
-        if (!u || !u.is_full_month || u.had_pause || u.allowance === null || u.utilization_pct === null) return null;
-        // Number(): utilization_pct is NUMERIC, which a Postgres driver may
-        // hand over as a string. src/lib/studio-db.ts registers a parser so
-        // it arrives as a number, but the average below silently prints
-        // nonsense (0 + "25" + "0" + "0" = "02500" / 3 = 833%) if that ever
-        // stops being true — caught against real rows, 2026-09-21.
-        return { month, pct: Number(u.utilization_pct) };
-      });
-      if (stats.every((s) => s !== null) && stats.every((s) => s!.pct < UNDERUSE_PCT)) {
-        const parts = stats
-          .map((s) => s!)
-          .reverse()
-          .map((s) => `${monthLabelPt(s.month)}: ${Math.round(s.pct)}%`);
-        const avgPct = Math.round(stats.reduce((sum, s) => sum + s!.pct, 0) / stats.length);
-        signals.push({
-          type: "Baixa utilização",
-          detail: `${avgPct}% de utilização média nos últimos ${UNDERUSE_MONTHS} meses (${parts.join(", ")})`,
-        });
-      }
-    }
-
-    if (signals.length > 0) {
-      flags.push({ email: m.email, name: m.name, plano: m.membershipName, telefone: null, signals });
-    }
-  }
-
-  return flags;
-}
-
-/**
- * Reads the views and computes flags. Also returns every email currently
- * a paying member (flagged or not) — src/crons/churn-risk.ts uses this to
+ * Reads the view and renders flags. Also returns every email currently a
+ * paying member (flagged or not) — src/crons/churn-risk.ts uses this to
  * tell "still active, just no current signal" apart from "no longer a
  * member" — and the data date the digest should quote.
  *
@@ -248,55 +102,41 @@ export async function fetchChurnFlags(): Promise<{
     return { flags: [], activeEmails: new Set(), asOf: null };
   }
 
-  const [asOf, stateRows, tenureRows, pauseHistory, activityRows, failedRows, utilization, identity] =
-    await Promise.all([
-      fetchDataAsOf(),
-      fetchMembershipState(),
-      fetchMemberTenure(),
-      fetchPauseHistory(),
-      fetchMemberActivity(),
-      fetchFailedPayments(),
-      fetchUtilizationMonthly(),
-      fetchMemberIdentity(),
-    ]);
-
+  const [asOf, signalRows, identity] = await Promise.all([
+    fetchDataAsOf(),
+    fetchChurnRiskSignals(),
+    fetchMemberIdentity(),
+  ]);
   if (!asOf) {
-    log.warn("churn_signals.no_data_as_of", { rows: stateRows.length });
+    log.warn("churn_signals.no_data_as_of");
     return { flags: [], activeEmails: new Set(), asOf: null };
   }
-  const active = activeMembersAsOf(stateRows, asOf, new Map(tenureRows.map((t) => [t.member_id, t])));
 
-  const identityByMember = new Map(identity.map((r) => [r.member_id, r]));
-  const members: ActiveSubscriber[] = [];
-  for (const a of active.values()) {
-    const id = identityByMember.get(a.memberId);
+  const identityByMember = new Map<string, MemberIdentityRow>(identity.map((r) => [r.member_id, r]));
+  const activeEmails = new Set<string>();
+  const flags: ChurnFlag[] = [];
+
+  for (const row of signalRows) {
+    const id = identityByMember.get(row.member_id);
     if (!id?.contact_email) {
-      log.warn("churn_signals.member_without_identity", { memberId: a.memberId });
+      log.warn("churn_signals.member_without_identity", { memberId: row.member_id });
       continue;
     }
-    members.push({
-      memberId: a.memberId,
-      email: id.contact_email.toLowerCase(),
+    const email = id.contact_email.toLowerCase();
+    activeEmails.add(email);
+
+    const signals = renderChurnSignals(row);
+    if (signals.length === 0) continue;
+
+    flags.push({
+      email,
       name: id.contact_name?.trim() || id.contact_email,
-      membershipName: a.membershipName,
-      memberSince: a.memberSince,
-      currentCycleStartsAt: a.currentCycleStartsAt,
+      plano: `${row.current_tier ?? "?"} Monthly | ${row.current_plan ?? "?"}`,
+      telefone: id.contact_phone ?? null,
+      signals,
     });
   }
 
-  const flags = computeChurnFlags({
-    asOf,
-    members,
-    activityByMember: new Map(activityRows.map((r) => [r.member_id, r])),
-    failedByMember: new Map(failedRows.map((r) => [r.member_id, r])),
-    utilization,
-    pauseHistory,
-  });
-  for (const flag of flags) {
-    const id = identityByMember.get(members.find((m) => m.email === flag.email)!.memberId);
-    flag.telefone = id?.contact_phone ?? null;
-  }
-
-  log.debug("churn_signals.computed", { asOf, members: members.length, flagged: flags.length });
-  return { flags, activeEmails: new Set(members.map((m) => m.email)), asOf };
+  log.debug("churn_signals.computed", { asOf, members: signalRows.length, flagged: flags.length });
+  return { flags, activeEmails, asOf };
 }
