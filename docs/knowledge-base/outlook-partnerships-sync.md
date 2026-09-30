@@ -1,5 +1,7 @@
 # Outlook → Notion Partner Pipeline sync
 
+> **The live cron is superseded 2026-09-30 by [mail-triage.md](mail-triage.md).** `src/crons/sync-partnerships.ts` no longer exists; its recording rules moved unchanged into `src/lib/mail-record.ts`, run daily by `src/crons/mail-triage.ts`. The manual scan/apply scripts described here still exist as audit tools.
+
 Scans configured Outlook mailboxes for partnership mentions and, after human review, writes them into the Notion Partner Pipeline database that `haven-va` already manages (`src/notion.ts`'s `createPartner`/`RECORD_DB_CONFIGS.partners`).
 
 **This is not part of the live bot.** It doesn't touch `src/bot/`, `src/crons/`, or the Telegram message pipeline documented in [`bot-architecture.md`](bot-architecture.md). It's a set of local scripts plus a Claude Code skill (`.claude/skills/sync-partnerships/SKILL.md`) that a founder runs on demand, always with a human-review step before any Notion write — there is no unattended/auto-write path.

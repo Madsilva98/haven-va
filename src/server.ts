@@ -9,10 +9,9 @@ import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
+import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
-import { run as runSyncPartnerships } from "./crons/sync-partnerships.js";
-import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
 import * as notion from "./notion.js";
@@ -55,11 +54,14 @@ const tasks = [
       ),
     { timezone: TZ },
   ),
+  // One daily email pass: record in Notion → forward → clean geral@/hello@.
+  // Replaced tidy-mailboxes (07:00 daily) + sync-partnerships (08:14 Mon)
+  // on 2026-09-30 — see src/crons/mail-triage.ts.
   cron.schedule(
     "0 7 * * *",
     () =>
-      runTidyMailboxes().catch((e) =>
-        log.error("cron.tidy_mailboxes", { e: String(e) }),
+      runMailTriage().catch((e) =>
+        log.error("cron.mail_triage", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
@@ -100,14 +102,6 @@ const tasks = [
     () =>
       runIntroPackExpiring().catch((e) =>
         log.error("cron.intro_pack_expiring", { e: String(e) }),
-      ),
-    { timezone: TZ },
-  ),
-  cron.schedule(
-    "14 8 * * 1",
-    () =>
-      runSyncPartnerships().catch((e) =>
-        log.error("cron.sync_partnerships", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
