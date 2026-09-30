@@ -10,6 +10,26 @@ const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 // scripts/outlook-auth.mjs after this scope list changes, see
 // docs/knowledge-base/outlook-partnerships-sync.md.
 const SCOPES = "offline_access Mail.Read Mail.Read.Shared Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared";
+/**
+ * Founder-applied Outlook category meaning "no automation may move this
+ * thread out of the Inbox". Honoured by every cron that archives mail
+ * (tidy-mailboxes, sync-partnerships) and applied per conversation, not
+ * just per message — tagging one message protects the whole thread,
+ * including replies that arrive later untagged. Added 2026-09-29 after an
+ * ongoing Fit4Life/Stages negotiation was auto-archived.
+ */
+export const KEEP_IN_INBOX_CATEGORY = "TidyBot: não arquivar";
+/** conversationIds with at least one message carrying KEEP_IN_INBOX_CATEGORY. */
+export function keptConversationIds(messages) {
+    return new Set(messages
+        .filter((m) => m.conversationId && m.categories.includes(KEEP_IN_INBOX_CATEGORY))
+        .map((m) => m.conversationId));
+}
+/** True if the founder asked for this message, or its thread, to stay put. */
+export function isKeptInInbox(msg, keptConversations) {
+    return (msg.categories.includes(KEEP_IN_INBOX_CATEGORY) ||
+        (Boolean(msg.conversationId) && keptConversations.has(msg.conversationId)));
+}
 let _cached = null;
 function tenantId() {
     const id = process.env.MICROSOFT_TENANT_ID;

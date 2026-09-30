@@ -25,6 +25,10 @@ const SYSTEM_INSTRUCTION =
   "(c) a ÚLTIMA mensagem é da OUTRA parte a confirmar que executou algo que lhe foi pedido, sem nova pergunta em aberto; " +
   "(d) agradecimentos finais, newsletters/notificações automáticas sem pedido, spam/marketing. " +
   "Considera que precisa de ação (NEEDS_ACTION): uma pergunta ou pedido do cliente que a nossa última mensagem NÃO respondeu ou não resolveu completamente, ou uma mensagem da outra parte que levanta algo novo ainda sem resposta nossa. " +
+  // Founder rule, 2026-09-29: a negotiation thread was archived because our
+  // last reply "answered what was asked" — (b) above is for support
+  // questions, not for open deals. See tidy-mailboxes-feedback-log.md.
+  "Também é SEMPRE NEEDS_ACTION uma conversa comercial em aberto — negociação, orçamento, proposta, contrato, parceria ou acordo com um fornecedor/parceiro — enquanto o negócio não estiver fechado nem recusado, MESMO que a nossa última mensagem tenha respondido ao que foi pedido: estamos à espera da proposta, preço ou decisão da outra parte e a thread tem de continuar visível. A regra (b) aplica-se a pedidos de clientes, não a negócios em curso. Ex: fornecedor de equipamento (Fit4Life/Stages Cycling) pediu dados por formulário, a equipa respondeu com a informação, a negociação continua — NEEDS_ACTION. " +
   "O cliente não ter respondido à nossa resposta NÃO é, por si só, motivo de dúvida nem de NEEDS_ACTION — só conta se a nossa resposta deixou algo por responder ou por fazer. " +
   'Na dúvida genuína (não está claro se a nossa resposta resolveu o pedido), escolhe NEEDS_ACTION — o custo de deixar algo na Inbox por engano é muito menor do que arquivar algo que precisava de resposta. ' +
   "Responde EXATAMENTE neste formato, nada mais:\nDECISÃO: NEEDS_ACTION ou NO_ACTION_NEEDED\nRAZÃO: uma frase curta em pt-PT";

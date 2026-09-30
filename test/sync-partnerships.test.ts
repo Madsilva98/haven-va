@@ -40,7 +40,10 @@ const getMyEmail = vi.fn().mockResolvedValue("madalena@thehavenpilates.pt");
 const searchMailboxMessages = vi.fn();
 const forwardMessage = vi.fn().mockResolvedValue(undefined);
 const archiveMessage = vi.fn().mockResolvedValue(undefined);
-vi.mock("../src/lib/outlook.js", () => ({
+vi.mock("../src/lib/outlook.js", async (importOriginal) => ({
+  // Real keep-tag helpers (pure functions), mocked Graph calls.
+  isKeptInInbox: (await importOriginal<typeof import("../src/lib/outlook.js")>()).isKeptInInbox,
+  keptConversationIds: (await importOriginal<typeof import("../src/lib/outlook.js")>()).keptConversationIds,
   isAuthenticated: () => isAuthenticated(),
   getMyEmail: (...args: unknown[]) => getMyEmail(...args),
   searchMailboxMessages: (...args: unknown[]) => searchMailboxMessages(...args),
@@ -81,6 +84,9 @@ function makeMessage(overrides: Partial<{
   to: { name: string; email: string }[];
   receivedDateTime: string;
   body: string;
+  categories: string[];
+  isRead: boolean;
+  conversationId: string;
 }> = {}) {
   return {
     id: overrides.id ?? "msg-1",
@@ -93,10 +99,10 @@ function makeMessage(overrides: Partial<{
     body: overrides.body ?? "Gostávamos de propor um workshop conjunto.",
     webLink: "https://outlook.office.com/mail/msg-1",
     hasAttachments: false,
-    categories: [],
-    isRead: true,
+    categories: overrides.categories ?? [],
+    isRead: overrides.isRead ?? true,
     lastModifiedDateTime: overrides.receivedDateTime ?? "2026-09-20T10:00:00.000Z",
-    conversationId: "conv-1",
+    conversationId: overrides.conversationId ?? "conv-1",
     sentDateTime: overrides.receivedDateTime ?? "2026-09-20T10:00:00.000Z",
     parentFolderId: "inbox",
   };
@@ -331,6 +337,34 @@ describe("sync-partnerships", () => {
       expect.any(String),
     );
     expect(archiveMessage).toHaveBeenCalledWith("me", "msg-1");
+  });
+
+  it("forwards but never archives an unread message (open negotiations must stay visible)", async () => {
+    process.env.OUTLOOK_PARTNERSHIP_FORWARD_TO = "parcerias@thehavenpilates.pt";
+    searchMailboxMessages.mockResolvedValue([makeMessage({ isRead: false })]);
+    classifyPartnershipEmailIntent.mockResolvedValue("parceiro");
+
+    await run();
+
+    expect(forwardMessage).toHaveBeenCalledTimes(1);
+    expect(archiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("never archives a thread a founder tagged 'não arquivar', even an untagged message in it", async () => {
+    process.env.OUTLOOK_PARTNERSHIP_FORWARD_TO = "parcerias@thehavenpilates.pt";
+    searchMailboxMessages.mockResolvedValue([
+      makeMessage({ id: "msg-1", conversationId: "fit4life", categories: ["TidyBot: não arquivar"] }),
+      makeMessage({ id: "msg-2", conversationId: "fit4life", receivedDateTime: "2026-09-21T10:00:00.000Z" }),
+    ]);
+    classifyPartnershipEmailIntent.mockResolvedValue("fornecedor");
+    process.env.NOTION_SUPPLIER_DB_ID = "test-supplier-db";
+
+    await run();
+
+    // Both reached the forward/archive step (a copy still goes out) — so the
+    // missing archive is the keep tag at work, not the messages being skipped.
+    expect(forwardMessage).toHaveBeenCalledTimes(2);
+    expect(archiveMessage).not.toHaveBeenCalled();
   });
 
   it("never forwards/archives when OUTLOOK_PARTNERSHIP_FORWARD_TO isn't set", async () => {

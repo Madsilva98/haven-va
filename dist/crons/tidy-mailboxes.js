@@ -53,6 +53,7 @@ import { classifyMailboxThread } from "../bot/classify-mailbox-thread.js";
 import { invoiceCandidateAttachments } from "../lib/invoice-detection.js";
 import { log } from "../lib/log.js";
 import * as outlook from "../lib/outlook.js";
+import { isKeptInInbox, keptConversationIds } from "../lib/outlook.js";
 // Tags a message once it's been checked and left in the Inbox (needs a
 // reply, or errored and fell back to needs-action) so the next run skips
 // it entirely — no re-classification, and critically, no re-forwarding an
@@ -63,10 +64,12 @@ import * as outlook from "../lib/outlook.js";
 const TIDY_CATEGORY = "TidyBot: revisto";
 // A founder applies this Outlook category directly to a message (no Claude
 // Code, no Telegram) when they spot one the classifier should have archived
-// but didn't. Checked before anything else in the loop: archives the
-// message right away (the founder already made the call) and logs the full
-// content so a future session can review real misses and refine the
-// classifier prompt against them — see docs/knowledge-base/tidy-mailboxes.md.
+// but didn't. Checked before everything except the "não arquivar" keep tag
+// (outlook.ts KEEP_IN_INBOX_CATEGORY, which wins if both are present):
+// archives the message right away (the founder already made the call) and
+// logs the full content so a future session can review real misses and
+// refine the classifier prompt against them — see
+// docs/knowledge-base/tidy-mailboxes.md.
 const FEEDBACK_SHOULD_ARCHIVE_CATEGORY = "TidyBot: devia ter arquivado";
 // Permanent "invoice check already done" markers — unlike TIDY_CATEGORY
 // they never expire, so a message is forwarded to faturas@ at most once and
@@ -193,6 +196,14 @@ function matchingAutoArchiveRule(fromEmail, subject) {
 function isDryRun() {
     return process.env.TIDY_MAILBOXES_DRY_RUN === "true";
 }
+// Max LLM-judged archives per mailbox per run (TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN,
+// default 30 — founder-approved 2026-09-29, see failsafe-audit-2026-09-29.md).
+// Deliberately excludes the exact-sender/rule auto-archives and the founder's
+// "devia ter arquivado" tag: those aren't a model's judgment.
+function maxArchivesPerRun() {
+    const raw = Number(process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN);
+    return Number.isFinite(raw) && raw > 0 ? raw : 30;
+}
 /**
  * Classification ALWAYS runs, and is the only thing that decides whether
  * the original stays in the Inbox — an invoice-looking attachment never
@@ -209,9 +220,9 @@ function isDryRun() {
  * attached. Fixed 2026-09-14 before this ever ran for real — see
  * docs/knowledge-base/tidy-mailboxes.md.
  */
-async function handleMessage(mailbox, msg, forwardTo, latestSentByConversation) {
+async function handleMessage(mailbox, msg, forwardTo, latestSentByConversation, archiveBudget) {
     const dryRun = isDryRun();
-    const outcome = { forwarded: false, archived: false, autoArchived: false };
+    const outcome = { forwarded: false, archived: false, autoArchived: false, capped: false };
     if (autoArchiveSenders().has(msg.from.email.toLowerCase())) {
         if (!dryRun) {
             await outlook.archiveMessage(mailbox, msg.id);
@@ -329,6 +340,22 @@ async function handleMessage(mailbox, msg, forwardTo, latestSentByConversation) 
         });
         return outcome;
     }
+    // Blast-radius cap: normal daily volume is ~10 LLM-judged archives, so
+    // hitting the cap means something unusual (a backlog, or a prompt/model
+    // regression archiving everything). Over it, leave the message untouched
+    // and UNTAGGED so the next run reconsiders it — never tagged revisto,
+    // since it wasn't judged as needing action.
+    if (archiveBudget.remaining <= 0) {
+        log.warn("tidy_mailboxes.archive_capped", {
+            mailbox,
+            messageId: msg.id,
+            subject: msg.subject,
+            cap: maxArchivesPerRun(),
+        });
+        outcome.capped = true;
+        return outcome;
+    }
+    archiveBudget.remaining--;
     if (!dryRun) {
         await outlook.archiveMessage(mailbox, msg.id);
     }
@@ -367,6 +394,8 @@ export async function run() {
         unread: 0,
         rechecked: 0,
         feedbackArchived: 0,
+        keptByFounder: 0,
+        capped: 0,
         errors: 0,
     };
     for (const mailbox of mailboxes) {
@@ -403,7 +432,24 @@ export async function run() {
                 message: err instanceof Error ? err.message : String(err),
             });
         }
+        const keptConversations = keptConversationIds(messages);
+        const archiveBudget = { remaining: maxArchivesPerRun() };
         for (const msg of messages) {
+            // Founder said "keep this" (KEEP_IN_INBOX_CATEGORY in outlook.ts) —
+            // checked FIRST, before even "devia ter arquivado": if both are on a
+            // thread, doing nothing is the safe side. Applies to the whole
+            // conversation, so a later untagged reply in a kept negotiation isn't
+            // archived either. Debug-level on purpose: it fires every run while the
+            // tag is on; the summary's keptByFounder count is the useful signal.
+            if (isKeptInInbox(msg, keptConversations)) {
+                log.debug("tidy_mailboxes.feedback_keep_in_inbox", {
+                    mailbox,
+                    messageId: msg.id,
+                    subject: msg.subject,
+                });
+                counts.keptByFounder++;
+                continue;
+            }
             // A founder's explicit "this should have archived" override — checked
             // before anything else, including the unread-skip, since applying the
             // category IS a human having looked at it. Archives immediately and
@@ -458,14 +504,16 @@ export async function run() {
                 counts.rechecked++;
             }
             try {
-                const outcome = await handleMessage(mailbox, msg, forwardTo, latestSentByConversation);
+                const outcome = await handleMessage(mailbox, msg, forwardTo, latestSentByConversation, archiveBudget);
                 if (outcome.forwarded)
                     counts.forwarded++;
                 if (outcome.autoArchived)
                     counts.autoArchived++;
                 else if (outcome.archived)
                     counts.archived++;
-                if (!outcome.archived)
+                if (outcome.capped)
+                    counts.capped++;
+                else if (!outcome.archived)
                     counts.left++;
             }
             catch (err) {

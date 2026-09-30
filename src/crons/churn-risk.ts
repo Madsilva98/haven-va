@@ -52,10 +52,15 @@
 import { fetchChurnFlags } from "../lib/churn-signals.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
+import { isSuspiciousBatch } from "../lib/circuit-breaker.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
 import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatChurnDigest, type ChurnDigestEntry } from "../messages/churn.js";
 import * as notion from "../notion.js";
+
+export function isSuspiciousChurnSweep(wouldArchive: number, open: number): boolean {
+  return isSuspiciousBatch(wouldArchive, open, { share: 0.7, minRows: 4 });
+}
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -137,31 +142,46 @@ export async function run(): Promise<void> {
   // churned, same as Aberto/Contactado. Still-active resolutions get a
   // bare count in the digest (not each name); churned ones are logged
   // only, same as the Resolvido/Arquivado sweep above.
+  //
+  // Circuit breaker (founder's call, 2026-09-29): archiving a row drops the
+  // founder's hand-set Status and Notas with it, and a re-run can't bring
+  // those back (only Notion's trash can, page by page). If an implausible
+  // share of the open list would go in one run — typically the views coming
+  // back empty/partial — archive none and say so in the digest. 70%, not the
+  // leads cron's 30%: this list is short, so over half legitimately
+  // resolving in one week happens.
   let archivedResolved = 0;
   let archivedChurned = 0;
+  let brake: { wouldArchive: number; open: number } | null = null;
   try {
     const open = await notion.getChurnRowsByStatus(["Aberto", "Contactado", "A vigiar"]);
-    for (const row of open) {
-      if (!row.email) continue;
-      const email = row.email.toLowerCase().trim();
-      if (flaggedEmails.has(email)) continue; // already handled above
+    const toArchive = open.filter(
+      (row) => row.email && !flaggedEmails.has(row.email.toLowerCase().trim()),
+    );
 
-      try {
-        await notion.archivePage(row.id);
-        if (activeEmails.has(email)) {
-          archivedResolved++; // still active, just resolved every signal
-        } else {
-          archivedChurned++; // no longer an active subscriber at all
+    if (isSuspiciousChurnSweep(toArchive.length, open.length)) {
+      brake = { wouldArchive: toArchive.length, open: open.length };
+      log.warn("churn_risk.reconcile_brake_tripped", brake);
+    } else {
+      for (const row of toArchive) {
+        const email = row.email!.toLowerCase().trim();
+        try {
+          await notion.archivePage(row.id);
+          if (activeEmails.has(email)) {
+            archivedResolved++; // still active, just resolved every signal
+          } else {
+            archivedChurned++; // no longer an active subscriber at all
+          }
+        } catch (err) {
+          log.error("churn_risk.reconcile_open_failed", { pageId: row.id, message: errMsg(err) });
         }
-      } catch (err) {
-        log.error("churn_risk.reconcile_open_failed", { pageId: row.id, message: errMsg(err) });
       }
     }
   } catch (err) {
     log.error("churn_risk.fetch_open_failed", { message: errMsg(err) });
   }
 
-  const message = formatChurnDigest(emRisco, archivedResolved);
+  const message = formatChurnDigest(emRisco, archivedResolved, brake);
   if (!message) {
     log.info("churn_risk.no_changes", { totalFlagged: flags.length, archivedClosed, archivedResolved, archivedChurned });
     return;

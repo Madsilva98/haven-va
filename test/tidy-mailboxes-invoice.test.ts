@@ -11,7 +11,15 @@ const outlookMock = vi.hoisted(() => ({
   forwardMessage: vi.fn().mockResolvedValue(undefined),
   archiveMessage: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("../src/lib/outlook.js", () => outlookMock);
+vi.mock("../src/lib/outlook.js", async (importOriginal) => {
+  // Real keep-tag helpers (pure functions), mocked Graph calls.
+  const actual = await importOriginal<typeof import("../src/lib/outlook.js")>();
+  return {
+    ...outlookMock,
+    isKeptInInbox: actual.isKeptInInbox,
+    keptConversationIds: actual.keptConversationIds,
+  };
+});
 
 const classifyInvoice = vi.fn();
 vi.mock("../src/bot/classify-invoice.js", () => ({
@@ -136,6 +144,66 @@ describe("tidy-mailboxes invoice forwarding", () => {
 
     expect(classifyInvoice).not.toHaveBeenCalled();
     expect(outlookMock.forwardMessage).not.toHaveBeenCalled();
+  });
+
+  it("never touches a message the founder tagged 'não arquivar' (Fit4Life case)", async () => {
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ categories: ["TidyBot: não arquivar"], subject: "Re: Stages Cycling - Fit4Life" }),
+    ]);
+    classifyMailboxThread.mockResolvedValue({ needsAction: false, reason: "resolvido" });
+
+    await run();
+
+    expect(classifyMailboxThread).not.toHaveBeenCalled();
+    expect(classifyInvoice).not.toHaveBeenCalled();
+    expect(outlookMock.archiveMessage).not.toHaveBeenCalled();
+    expect(outlookMock.forwardMessage).not.toHaveBeenCalled();
+    expect(outlookMock.setMessageCategories).not.toHaveBeenCalled();
+  });
+
+  it("'não arquivar' wins over 'devia ter arquivado' when both are on a message", async () => {
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ categories: ["TidyBot: devia ter arquivado", "TidyBot: não arquivar"] }),
+    ]);
+
+    await run();
+
+    expect(outlookMock.archiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("'não arquivar' protects the whole thread, including a later untagged reply", async () => {
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ id: "reply", conversationId: "fit4life", hasAttachments: false, receivedDateTime: "2026-09-25T10:00:00Z" }),
+      msg({ id: "original", conversationId: "fit4life", hasAttachments: false, categories: ["TidyBot: não arquivar"] }),
+      msg({ id: "other", conversationId: "newsletter", hasAttachments: false }),
+    ]);
+    classifyMailboxThread.mockResolvedValue({ needsAction: false, reason: "resolvido" });
+
+    await run();
+
+    expect(outlookMock.archiveMessage).toHaveBeenCalledTimes(1);
+    expect(outlookMock.archiveMessage).toHaveBeenCalledWith(MAILBOX, "other");
+  });
+
+  it("caps LLM-judged archives per run and leaves the rest untagged for next time", async () => {
+    process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN = "2";
+    outlookMock.listInboxMessages.mockResolvedValue([
+      msg({ id: "a", conversationId: "ca", hasAttachments: false }),
+      msg({ id: "b", conversationId: "cb", hasAttachments: false }),
+      msg({ id: "c", conversationId: "cc", hasAttachments: false }),
+    ]);
+    classifyMailboxThread.mockResolvedValue({ needsAction: false, reason: "resolvido" });
+
+    try {
+      await run();
+    } finally {
+      delete process.env.TIDY_MAILBOXES_MAX_ARCHIVES_PER_RUN;
+    }
+
+    expect(outlookMock.archiveMessage).toHaveBeenCalledTimes(2);
+    // Over the cap: not archived, and NOT tagged revisto either — so the
+    // next run reconsiders it instead of skipping it for a week.
+    expect(outlookMock.setMessageCategories).not.toHaveBeenCalled();
   });
 
   it("does not treat our own auto-forward as the Haven having replied", async () => {

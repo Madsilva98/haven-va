@@ -16,6 +16,7 @@ import { dsId, initializeDataSources } from "./lib/data-source-resolver.js";
 import { isValidRecurrence } from "./types.js";
 import { scoreMatch, significantWords } from "./lib/fuzzy-match.js";
 import { log } from "./lib/log.js";
+import { pickMatch } from "./lib/pick-match.js";
 import { formatLisbonDateTime } from "./lib/tz.js";
 // ----- env -----
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
@@ -1492,9 +1493,12 @@ async function markReminderSent(id) {
     }));
     log.info("notion.reminder_marked_sent", { id });
 }
+// Cancels only when the text clearly means one reminder — with several
+// pending reminders containing it, returns them so the assistant asks which
+// (it used to take page_size: 1, i.e. whichever Notion returned first).
 async function cancelReminder(text) {
     if (!NOTION_REMINDERS_DB_ID)
-        return null;
+        return { kind: "none" };
     const res = await withRetry("cancelReminder", () => client.dataSources.query({
         data_source_id: dsId(NOTION_REMINDERS_DB_ID),
         filter: {
@@ -1504,16 +1508,17 @@ async function cancelReminder(text) {
                 { property: "Feito", checkbox: { equals: false } },
             ],
         },
-        page_size: 1,
+        page_size: 10,
     }));
-    const row = res.results[0];
-    if (!row || !("properties" in row))
-        return null;
-    const props = row.properties;
-    const title = readPlainText(props["Reminder"]);
-    await withRetry("cancelReminder.archive", () => client.pages.update({ page_id: row.id, archived: true }));
-    log.info("notion.reminder_cancelled", { id: row.id, text: title });
-    return title;
+    const candidates = res.results
+        .filter((row) => "properties" in row)
+        .map((row) => ({ id: row.id, title: readPlainText(row.properties["Reminder"]) }));
+    const pick = pickMatch(text, candidates);
+    if (pick.kind !== "match")
+        return pick;
+    await withRetry("cancelReminder.archive", () => client.pages.update({ page_id: pick.id, archived: true }));
+    log.info("notion.reminder_cancelled", { id: pick.id, text: pick.title });
+    return pick;
 }
 // ============================================================
 // Phase 5 — To Discuss / Decisions
@@ -2479,36 +2484,15 @@ async function deleteListItem(itemTitle, lista) {
             return matchesListName(val, listaQ);
         });
     }
-    let bestId = null;
-    let bestScore = 0;
-    const q = itemTitle.toLowerCase();
-    for (const row of rows) {
-        const props = row.properties;
-        const title = readPlainText(props["Item"]).toLowerCase();
-        const exact = title === q ? 1 : 0;
-        const includes = title.includes(q) || q.includes(title) ? 0.8 : 0;
-        const wa = (() => {
-            const wa2 = new Set(q.split(/\s+/).filter(Boolean));
-            const wb = new Set(title.split(/\s+/).filter(Boolean));
-            if (!wa2.size || !wb.size)
-                return 0;
-            let overlap = 0;
-            for (const w of wa2)
-                if (wb.has(w))
-                    overlap++;
-            return overlap / Math.max(wa2.size, wb.size);
-        })();
-        const score = exact || includes || wa;
-        if (score > bestScore) {
-            bestScore = score;
-            bestId = row.id;
-        }
-    }
-    if (!bestId || bestScore === 0)
-        return null;
-    await withRetry("deleteListItem.archive", () => client.pages.update({ page_id: bestId, archived: true }));
-    log.info("notion.list_item_deleted", { itemTitle, lista, pageId: bestId });
-    return bestId;
+    // Only deletes when it's clearly one item — otherwise hands the options
+    // back so the assistant asks (src/lib/pick-match.ts; it used to delete the
+    // best match at ANY score, one shared word was enough).
+    const pick = pickMatch(itemTitle, rows.map((row) => ({ id: row.id, title: readPlainText(row.properties["Item"]) })));
+    if (pick.kind !== "match")
+        return pick;
+    await withRetry("deleteListItem.archive", () => client.pages.update({ page_id: pick.id, archived: true }));
+    log.info("notion.list_item_deleted", { itemTitle, lista, pageId: pick.id, title: pick.title });
+    return pick;
 }
 async function getList(lista) {
     if (!NOTION_LISTS_DB_ID)

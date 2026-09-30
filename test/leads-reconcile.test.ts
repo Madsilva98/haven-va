@@ -22,7 +22,12 @@ vi.mock("../src/lib/intro-pack-conversion.js", () => ({
   loadConversionCheckData: (...args: unknown[]) => loadConversionCheckData(...args),
 }));
 
-import { run } from "../src/crons/leads-reconcile.js";
+const sendGroupMessage = vi.fn().mockResolvedValue(1);
+vi.mock("../src/lib/telegram.js", () => ({
+  sendGroupMessage: (...args: unknown[]) => sendGroupMessage(...args),
+}));
+
+import { isSuspiciousConversionBatch, run } from "../src/crons/leads-reconcile.js";
 
 describe("leads-reconcile", () => {
   beforeEach(() => {
@@ -36,6 +41,7 @@ describe("leads-reconcile", () => {
     hasRealPurchase.mockReset();
     isStudioDbAvailable.mockReturnValue(true);
     loadConversionCheckData.mockReset();
+    sendGroupMessage.mockClear();
   });
 
   it("archives Perdido, Convertido, and Inconclusivo rows unconditionally — the list must stay 'viva'", async () => {
@@ -158,5 +164,45 @@ describe("leads-reconcile", () => {
     await run();
 
     expect(archivePage).not.toHaveBeenCalledWith("ip3");
+  });
+  it("circuit breaker: archives none and warns the group when >30% of open leads suddenly look converted", async () => {
+    const open = Array.from({ length: 10 }, (_, i) => ({
+      id: `o${i}`,
+      email: `lead${i}@x.com`,
+      estado: "Novo",
+      canal: "Email",
+    }));
+    getLeadsByEstado.mockImplementation(async (estados: string[]) => (estados.includes("Novo") ? open : []));
+    // 5 of 10 "converted" — e.g. a studio-data glitch
+    hasRealPurchase.mockImplementation(async (email: string) => /lead[0-4]@/.test(email));
+
+    await run();
+
+    expect(archivePage).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(sendGroupMessage.mock.calls[0]![0]).toContain("5 de 10");
+  });
+
+  it("circuit breaker: a normal week (under 30%) still archives the converted leads", async () => {
+    const open = Array.from({ length: 10 }, (_, i) => ({
+      id: `o${i}`,
+      email: `lead${i}@x.com`,
+      estado: "Novo",
+      canal: "Email",
+    }));
+    getLeadsByEstado.mockImplementation(async (estados: string[]) => (estados.includes("Novo") ? open : []));
+    hasRealPurchase.mockImplementation(async (email: string) => /lead[0-1]@/.test(email));
+
+    await run();
+
+    expect(archivePage).toHaveBeenCalledTimes(2);
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("circuit breaker: a tiny list doesn't trip it on a couple of conversions", () => {
+    expect(isSuspiciousConversionBatch(2, 3)).toBe(false);
+    expect(isSuspiciousConversionBatch(4, 10)).toBe(true);
+    expect(isSuspiciousConversionBatch(3, 100)).toBe(false);
+    expect(isSuspiciousConversionBatch(0, 0)).toBe(false);
   });
 });

@@ -59,3 +59,22 @@ The bot's own forward lands in Sent Items **with the same `conversationId`**. On
 3. **Ignore our own auto-forwards when looking for "the Haven already replied".** Exclude Sent Items messages addressed to `OUTLOOK_INVOICES_FORWARD_TO` or containing the "Reencaminhado automaticamente" comment.
 
 Tests: unit tests for `invoiceAttachments()` covering the contract case, the `faturação` quoted-history case, `fatura_setembro.pdf` (must still match), and a message already carrying `fatura enviada` (must not forward).
+
+---
+
+## 2026-09-29 — Ongoing supplier negotiation archived ("Re: Stages Cycling - Madalena Marques Da Silva - Fit4Life Portugal/España")
+
+Status: **applied** (founder approved 1 and 2 in chat, 2026-09-29: "sim implementa as duas coisas"). The prompt rule is in `classify-mailbox-thread.ts`, and `KEEP_IN_INBOX_CATEGORY` is in `tidy-mailboxes.ts`. One deviation from the proposal: `feedback_keep_in_inbox` logs at debug, not info, because it fires on every run while the tag is on. The summary's `keptByFounder` count is the signal. The prompt rule has NOT been re-run against this exact email (no production mailbox read access from the dev session). Verify on the next dry run.
+
+Archived on the 2026-09-29 07:00 run (`geral@`). Classifier reason: "Madalena respondeu ao formulário da Fit4Life com as informações solicitadas; a negociação prossegue com o fornecedor externo… e não há ação pendente da equipa." Founder: negotiations are still going, so it should NOT have been archived.
+
+**Why it happened (certain from the prompt):** rule (b) in `classify-mailbox-thread.ts` treats "our last message answered what was asked" as resolved. That's right for a customer support question, but wrong for an open commercial conversation (supplier, partner, contract) where we're waiting on the other side's proposal or price. The classifier even *said* the negotiation continues, and still archived it.
+
+**Knock-on effect (certain from the code):** `sync-partnerships` excludes the Archive folder, so this thread will never update the existing Fornecedores row "Stages Cycling" (created 2026-09-22 from the website form-confirmation email, Status "A avaliar", no mention of Fit4Life). This is the "known, flagged-not-fixed risk" in `tidy-mailboxes.md`, now confirmed in production.
+
+**Second gap:** if a founder moves it back to the Inbox by hand, the next run reclassifies it from scratch (it's read and untagged) and will most likely archive it again. There is no "keep this" signal, only the opposite `TidyBot: devia ter arquivado`.
+
+### Proposed fix (not yet approved)
+1. **Prompt:** add an explicit NEEDS_ACTION rule. An open commercial conversation (negotiation, quote, proposal, contract, partnership, or supplier deal) where the deal isn't closed or declined yet stays in the Inbox, even if our last message answered their question. Include this exact case as the example.
+2. **"Não arquivar" override:** a founder-applied Outlook category `TidyBot: não arquivar`, checked right after the `devia ter arquivado` check. Any message carrying it is never classified, archived, or forwarded, permanently. It's the mirror of the existing feedback loop, and logs `tidy_mailboxes.feedback_keep_in_inbox` so misses accumulate as data.
+3. **Not proposed now:** making `sync-partnerships` read the Archive. That was a deliberate choice (see `outlook-partnerships-sync.md`), and 1+2 fix the actual failure.

@@ -53,11 +53,31 @@
  *     never chase as a lead; a drop-in is not a conversion).
  */
 
+import { isSuspiciousBatch } from "../lib/circuit-breaker.js";
 import { loadConversionCheckData } from "../lib/intro-pack-conversion.js";
 import { hasRealPurchase } from "../lib/leads.js";
 import { log } from "../lib/log.js";
+import { sendGroupMessage } from "../lib/telegram.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import * as notion from "../notion.js";
+
+// Founder's call (2026-09-29, failsafe-audit-2026-09-29.md): if more than
+// 30% of the open leads suddenly look converted in one run, that's far more
+// likely a data problem than a great week — archive none and say so.
+// Recovering from a wrong mass-archive here is real work (restore each page
+// from Notion's trash by hand), unlike churn-risk, which just recreates its
+// rows. The minimum stops a tiny list (e.g. 1 of 3) from tripping it.
+export function isSuspiciousConversionBatch(wouldArchive: number, open: number): boolean {
+  return isSuspiciousBatch(wouldArchive, open, { share: 0.3, minRows: 4 });
+}
+
+function formatConversionBrakeMessage(wouldArchive: number, open: number): string {
+  return (
+    `⚠️ Leads a contactar: ${wouldArchive} de ${open} leads em aberto pareciam ter convertido esta semana — ` +
+    `bem mais do que o normal, por isso não arquivei nenhum. ` +
+    `Pode ser um problema nos dados do estúdio; vale a pena ver antes da próxima segunda.`
+  );
+}
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -94,20 +114,24 @@ export async function run(): Promise<void> {
     log.error("leads_reconcile.fetch_closed_failed", { message: errMsg(err) });
   }
 
+  // Converted-lead detection is the one automated guess in this cron, and
+  // the one that has gone wrong at scale before (2026-09-16: every open
+  // Intro Pack lead archived at once). So it's two-phase: collect the rows
+  // that LOOK converted, then archive only if that's a plausible share of
+  // the open list — see isSuspiciousConversionBatch above.
   let archivedConverted = 0;
+  let brakeTripped = false;
   if (isStudioDbAvailable()) {
     try {
       const open = await notion.getLeadsByEstado(["Novo", "Contactado"]);
       const introPackRows = open.filter((r) => r.canal === "Intro Pack");
       const otherRows = open.filter((r) => r.canal !== "Intro Pack");
+      const toArchive: string[] = [];
 
       for (const row of otherRows) {
         if (!row.email) continue;
         try {
-          if (await hasRealPurchase(row.email)) {
-            await notion.archivePage(row.id);
-            archivedConverted++;
-          }
+          if (await hasRealPurchase(row.email)) toArchive.push(row.id);
         } catch (err) {
           log.error("leads_reconcile.check_converted_failed", { pageId: row.id, message: errMsg(err) });
         }
@@ -124,13 +148,32 @@ export async function run(): Promise<void> {
             // email, or data since changed) — leave it alone rather than
             // guess.
             if (!pack) continue;
-            if (convertedMemberIds.has(pack.memberId)) {
-              await notion.archivePage(row.id);
-              archivedConverted++;
-            }
+            if (convertedMemberIds.has(pack.memberId)) toArchive.push(row.id);
           }
         } catch (err) {
           log.error("leads_reconcile.check_intro_pack_converted_failed", { message: errMsg(err) });
+        }
+      }
+
+      if (isSuspiciousConversionBatch(toArchive.length, open.length)) {
+        brakeTripped = true;
+        log.warn("leads_reconcile.conversion_brake_tripped", {
+          wouldArchive: toArchive.length,
+          open: open.length,
+        });
+        try {
+          await sendGroupMessage(formatConversionBrakeMessage(toArchive.length, open.length));
+        } catch (err) {
+          log.error("leads_reconcile.brake_notify_failed", { message: errMsg(err) });
+        }
+      } else {
+        for (const id of toArchive) {
+          try {
+            await notion.archivePage(id);
+            archivedConverted++;
+          } catch (err) {
+            log.error("leads_reconcile.archive_converted_failed", { pageId: id, message: errMsg(err) });
+          }
         }
       }
     } catch (err) {
@@ -138,5 +181,5 @@ export async function run(): Promise<void> {
     }
   }
 
-  log.info("leads_reconcile.done", { archivedClosed, archivedConverted, keptClosedIntroPack });
+  log.info("leads_reconcile.done", { archivedClosed, archivedConverted, keptClosedIntroPack, brakeTripped });
 }

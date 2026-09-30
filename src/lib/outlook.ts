@@ -20,6 +20,33 @@ interface StoredTokens {
   expires_at: number; // epoch ms
 }
 
+/**
+ * Founder-applied Outlook category meaning "no automation may move this
+ * thread out of the Inbox". Honoured by every cron that archives mail
+ * (tidy-mailboxes, sync-partnerships) and applied per conversation, not
+ * just per message — tagging one message protects the whole thread,
+ * including replies that arrive later untagged. Added 2026-09-29 after an
+ * ongoing Fit4Life/Stages negotiation was auto-archived.
+ */
+export const KEEP_IN_INBOX_CATEGORY = "TidyBot: não arquivar";
+
+/** conversationIds with at least one message carrying KEEP_IN_INBOX_CATEGORY. */
+export function keptConversationIds(messages: OutlookMessage[]): Set<string> {
+  return new Set(
+    messages
+      .filter((m) => m.conversationId && m.categories.includes(KEEP_IN_INBOX_CATEGORY))
+      .map((m) => m.conversationId),
+  );
+}
+
+/** True if the founder asked for this message, or its thread, to stay put. */
+export function isKeptInInbox(msg: OutlookMessage, keptConversations: Set<string>): boolean {
+  return (
+    msg.categories.includes(KEEP_IN_INBOX_CATEGORY) ||
+    (Boolean(msg.conversationId) && keptConversations.has(msg.conversationId))
+  );
+}
+
 export interface OutlookMessage {
   id: string;
   mailbox: string;
