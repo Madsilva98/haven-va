@@ -64,6 +64,7 @@ const backlogProperties = {
   "Criado em": { created_time: {} },
   Semana: { formula: { expression: 'concat("Semana ", formatDate(prop("Criado em"), "W"))' } },
   "Prioridade semanal": { checkbox: {} },
+  "Concluído em": { date: {} },
 };
 
 // ── Reminders ───────────────────────────────────────────────────────────────
