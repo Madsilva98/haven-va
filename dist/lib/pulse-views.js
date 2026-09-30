@@ -28,6 +28,7 @@ export const PULSE_VIEW = {
     pausedDetail: "v_pulse_paused_detail",
     introPurchase: "v_pulse_intro_purchase",
     introConversion: "v_pulse_intro_conversion",
+    introClassVisits: "v_pulse_intro_class_visits",
     classpackState: "v_pulse_classpack_state",
     introHolderState: "v_pulse_intro_holder_state",
     dataAsOf: "v_pulse_data_as_of",
@@ -110,11 +111,39 @@ export async function fetchIntroPackWatch() {
         log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackWatch, reason: "studio_db_not_configured" });
         return [];
     }
-    return query(`select * from ${PULSE_VIEW.introPackWatch}
-     where (nudge_window = 'this_week'
-            and intro_end >= date_trunc('week', current_date)::date
-            and intro_end < date_trunc('week', current_date)::date + 7)
-        or (nudge_window = 'next_3_days' and intro_end between current_date and current_date + 3)`);
+    return query(`with pack_visit_dates as (
+       select member_id, ended_on, pack_group, min(day) as first_pack_visit, max(day) as last_pack_visit
+       from ${PULSE_VIEW.introClassVisits}
+       where on_pack
+       group by member_id, ended_on, pack_group
+     )
+     select
+       w.*,
+       v.first_pack_visit,
+       v.last_pack_visit,
+       case
+         when w.pack = '2-Class' and w.visits_in_pack = 1 then 'unused_ending'
+         when w.pack = '2-Class' and w.visits_in_pack = 2 then 'completed_followup'
+         when w.pack = '10-Day' and w.intro_end between current_date and current_date + 5 then 'ending'
+         when w.pack = '10-Day' then 'underused'
+       end as reason
+     from ${PULSE_VIEW.introPackWatch} w
+     left join pack_visit_dates v
+       on v.member_id = w.member_id and v.ended_on = w.intro_end and v.pack_group = w.pack
+     where w.pack in ('2-Class', '10-Day')
+       and (
+         (w.pack = '2-Class' and w.visits_in_pack = 1
+            and w.intro_end between current_date and current_date + 5
+            and not exists (
+              select 1 from ${PULSE_VIEW.memberActivity} ma
+              where ma.member_id = w.member_id and ma.next_or_last_booked >= current_date
+            ))
+         or (w.pack = '2-Class' and w.visits_in_pack = 2
+            and v.last_pack_visit is not null and current_date - v.last_pack_visit between 0 and 3)
+         or (w.pack = '10-Day' and w.intro_end between current_date and current_date + 5)
+         or (w.pack = '10-Day' and w.visits_in_pack in (1, 2)
+            and v.first_pack_visit is not null and current_date - v.first_pack_visit = 5)
+       )`);
 }
 export async function fetchIntroPackLeads() {
     if (!isStudioDbAvailable()) {
