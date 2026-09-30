@@ -44,10 +44,9 @@ export const PULSE_VIEW = {
   failedPayments: "v_pulse_failed_payments",
   firstPaid: "v_pulse_first_paid",
   knownCases: "v_pulse_known_cases",
-  // haven-va's own derived business-rule views, added 2026-09-30 — see
-  // scripts/studio-db-views-2026-09-30.sql for the definitions and the
-  // note on why they share the v_pulse_ prefix despite not being
-  // Studio Pulse's own raw/curated facts.
+  // The bot's three lists (2026-09-30). Their rules live in haven-studio's canonical views
+  // (public.v_pulse_intro_outcome, public.v_pulse_churn_risk); these va names are column copies
+  // (haven-studio packages/dashboard/supabase/va-schema-and-role-migration.sql, section 2d).
   introPackWatch: "v_pulse_intro_pack_watch",
   introPackLeads: "v_pulse_intro_pack_leads",
   churnRiskSignals: "v_pulse_churn_risk_signals",
@@ -282,7 +281,13 @@ export const fetchUtilizationMonthly = (): Promise<UtilizationMonthRow[]> =>
 export const fetchFailedPayments = (): Promise<FailedPaymentsRow[]> =>
   fetchView<FailedPaymentsRow>(PULSE_VIEW.failedPayments);
 
-/** v_pulse_intro_pack_watch — see scripts/studio-db-views-2026-09-30.sql. */
+/**
+ * v_pulse_intro_pack_watch: one row per intro buyer, a column copy of haven-studio's
+ * public.v_pulse_intro_outcome (2026-09-30: the rule lives there, data-model C6). nudge_window says
+ * which pack is worth a nudge (this_week: 2-Class with 1 of 2 used; next_3_days: 10-Day with more than
+ * 5 used); the calendar window is applied here, on the database's CURRENT_DATE, because the studio
+ * view is materialized and cannot read the clock. Same rows as the old view.
+ */
 export interface IntroPackWatchRow {
   member_id: string;
   email: string;
@@ -290,11 +295,27 @@ export interface IntroPackWatchRow {
   item_name: string;
   intro_end: string;
   visits_in_pack: number;
+  nudge_window: "this_week" | "next_3_days" | null;
 }
-export const fetchIntroPackWatch = (): Promise<IntroPackWatchRow[]> =>
-  fetchView<IntroPackWatchRow>(PULSE_VIEW.introPackWatch);
+export async function fetchIntroPackWatch(): Promise<IntroPackWatchRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackWatch, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return query<IntroPackWatchRow>(
+    `select * from ${PULSE_VIEW.introPackWatch}
+     where (nudge_window = 'this_week'
+            and intro_end >= date_trunc('week', current_date)::date
+            and intro_end < date_trunc('week', current_date)::date + 7)
+        or (nudge_window = 'next_3_days' and intro_end between current_date and current_date + 3)`,
+  );
+}
 
-/** v_pulse_intro_pack_leads — see scripts/studio-db-views-2026-09-30.sql. */
+/**
+ * v_pulse_intro_pack_leads: one row per intro buyer, a column copy of haven-studio's
+ * public.v_pulse_intro_outcome (2026-09-30). is_lead = tracked 2-Class/10-Day intro, no membership or
+ * class pack since, ended 21+ days before the last data day; only those rows are read.
+ */
 export interface IntroPackLeadRow {
   member_id: string;
   email: string;
@@ -306,11 +327,20 @@ export interface IntroPackLeadRow {
   is_recent: boolean;
   post_expiry_last_visit: string | null;
   lifetime_visit_count: number;
+  is_lead: boolean;
 }
-export const fetchIntroPackLeads = (): Promise<IntroPackLeadRow[]> =>
-  fetchView<IntroPackLeadRow>(PULSE_VIEW.introPackLeads);
+export async function fetchIntroPackLeads(): Promise<IntroPackLeadRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackLeads, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return query<IntroPackLeadRow>(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
+}
 
-/** v_pulse_churn_risk_signals — see scripts/studio-db-views-2026-09-30.sql. */
+/**
+ * v_pulse_churn_risk_signals: one row per active member, a column copy of haven-studio's
+ * public.v_pulse_churn_risk (2026-09-30), the same rules the dashboard's Members page shows.
+ */
 export interface ChurnRiskSignalRow {
   member_id: string;
   current_tier: string | null;

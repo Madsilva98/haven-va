@@ -1,3 +1,11 @@
+-- SUPERSEDED 2026-09-30, DO NOT APPLY. These three views broke haven-studio's data-model check C6
+-- (a va view must be a plain column copy of one public view) and blocked every dashboard release.
+-- Their rules now live in haven-studio's canonical views: public.v_pulse_churn_risk (churn signals,
+-- same rows) and public.v_pulse_intro_outcome (is_lead, nudge_window). The va names are column copies,
+-- defined in haven-studio packages/dashboard/supabase/va-schema-and-role-migration.sql (section 2d);
+-- src/lib/pulse-views.ts keeps the flagged rows (and applies the calendar window for the watch list).
+-- Kept below as history.
+--
 -- Three new views in the `va` schema, alongside the existing `v_pulse_*`
 -- views, encoding business-rule logic that used to live in haven-va's own
 -- TypeScript. Founder's call, 2026-09-30: "quero que uses views e que não
