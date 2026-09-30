@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatFridayBalance } from "../src/messages/cycle.js";
+import { formatFridayBalance, formatMondayPriorities } from "../src/messages/cycle.js";
 import type { FounderName, OpenTask, Status } from "../src/types.js";
 
 function task(title: string, status: Status, overrides: Partial<OpenTask> = {}): OpenTask {
@@ -135,5 +135,34 @@ describe("formatFridayBalance", () => {
     });
 
     expect(out).not.toContain("misc");
+  });
+});
+
+describe("formatMondayPriorities — foco only, no task list (founder's call, 2026-09-30)", () => {
+  it("shows each founder's own foco, and nothing else", () => {
+    const out = formatMondayPriorities({
+      weekLabel: "Semana 40",
+      focus: [
+        { founder: "Madalena", weekNumber: 40, focoOperacional: "fechar o relatório trimestral" },
+        { founder: "Mafalda", weekNumber: 40, focoOperacional: "confirmar horário da nova instrutora" },
+      ],
+    });
+
+    expect(out).toContain("*Madalena*");
+    expect(out).toContain("fechar o relatório trimestral");
+    expect(out).toContain("*Mafalda*");
+    expect(out).toContain("confirmar horário da nova instrutora");
+  });
+
+  it("omits a founder entirely when they have no foco set — no task list, no placeholder text", () => {
+    const out = formatMondayPriorities({
+      weekLabel: "Semana 40",
+      focus: [{ founder: "Madalena", weekNumber: 40, focoOperacional: "fechar o relatório trimestral" }],
+    });
+
+    expect(out).toContain("*Madalena*");
+    expect(out).not.toContain("*Mafalda*");
+    expect(out).not.toContain("*Beatriz*");
+    expect(out).not.toContain("sem prioridades marcadas");
   });
 });

@@ -106,15 +106,18 @@ export function formatFridayBalance(args: FridayBalanceArgs): string {
 
 export interface MondayPrioritiesArgs {
   weekLabel: string;
-  prioritiesByFounder: Record<FounderName, OpenTask[]>;
   focus: FounderFocusEntry[];
 }
 
+// Foco only, no task list — founder's call, 2026-09-30: the per-founder DM
+// (formatDailyMadalenaPlaceholder below) already carries the task list;
+// this group message is just the week's foco per founder. A founder with
+// no foco set is skipped entirely — nothing to say.
 export function formatMondayPriorities(args: MondayPrioritiesArgs): string {
   const lines: string[] = [];
   lines.push(`*segunda — ${escapeMd(args.weekLabel)}*`);
   lines.push("");
-  lines.push(escapeMd("aqui vai o plano da semana:"));
+  lines.push(escapeMd("aqui vai o foco da semana:"));
   lines.push("");
 
   const founders: FounderName[] = ["Madalena", "Mafalda", "Beatriz"];
@@ -122,19 +125,10 @@ export function formatMondayPriorities(args: MondayPrioritiesArgs): string {
   for (const f of args.focus) focusMap.set(f.founder, f.focoOperacional);
 
   for (const founder of founders) {
-    const tasks = args.prioritiesByFounder[founder] ?? [];
     const focus = focusMap.get(founder);
-    if (tasks.length === 0 && !focus) continue;
-
+    if (!focus) continue;
     lines.push(`*${escapeMd(founder)}*`);
-    if (focus) {
-      lines.push(`_foco_: ${escapeMd(focus)}`);
-    }
-    if (tasks.length === 0) {
-      lines.push(escapeMd("(sem prioridades marcadas — usa /week)"));
-    } else {
-      for (const t of tasks) lines.push(fmtTaskNoOwner(t));
-    }
+    lines.push(escapeMd(focus));
     lines.push("");
   }
 

@@ -32,7 +32,7 @@ export async function run() {
             prioritiesByFounder[t.owner].push(t);
         }
     }
-    const groupText = formatMondayPriorities({ weekLabel, prioritiesByFounder, focus });
+    const groupText = formatMondayPriorities({ weekLabel, focus });
     const groupMsgId = await sendGroupMessage(groupText, "MarkdownV2");
     let dmsSent = 0;
     for (const founder of FOUNDERS) {

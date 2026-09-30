@@ -42,7 +42,7 @@ export async function run(): Promise<void> {
     }
   }
 
-  const groupText = formatMondayPriorities({ weekLabel, prioritiesByFounder, focus });
+  const groupText = formatMondayPriorities({ weekLabel, focus });
   const groupMsgId = await sendGroupMessage(groupText, "MarkdownV2");
 
   let dmsSent = 0;
