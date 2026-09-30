@@ -8,30 +8,24 @@
  *
  * Every unconverted candidate still gets a Notion lead row created,
  * however overdue — nobody drops off the follow-up list. But the Telegram
- * digest only announces whoever crossed the 21-day mark recently
- * (DIGEST_WINDOW_DAYS): founder's call, 2026-09-28, after this cron's
- * first run under the pulse-views data path surfaced an 8-month-old
- * backlog (24-242 days unconverted) all at once, since none of them had a
- * Notion lead row yet. That backlog only existed because this was
- * effectively this cron's first real pass at that data — going forward,
- * each person is only ever a genuinely new Notion row once, so this
- * window mainly guards against a repeat: a future multi-week data gap
- * (asOf jumping forward all at once, same root cause as
- * src/lib/intro-pack-conversion.ts's isWithinExpiryWindow fix) shouldn't
- * flood the digest with long-overdue names again.
+ * digest only announces whoever the view (`va.v_pulse_intro_pack_leads`,
+ * `is_recent`) says crossed the 21-day mark within roughly the last week:
+ * founder's call, 2026-09-28, after this cron's first run under the
+ * pulse-views data path surfaced an 8-month-old backlog (24-242 days
+ * unconverted) all at once, since none of them had a Notion lead row yet.
+ * That backlog only existed because this was effectively this cron's
+ * first real pass at that data — going forward, each person is only ever
+ * a genuinely new Notion row once, so this mainly guards against a
+ * repeat: a future multi-week data gap (asOf jumping forward all at once)
+ * shouldn't flood the digest with long-overdue names again.
  */
 import { log } from "../lib/log.js";
-import { DEFAULT_CUTOFF_DAYS, describePostExpiryVisit, findUnconvertedIntroPacks, } from "../lib/intro-pack-conversion.js";
+import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
 import { PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatLeadsDigest } from "../messages/leads.js";
 import * as notion from "../notion.js";
-// One cron cycle's worth of slack past the day-21 threshold — a candidate
-// this fresh past the cutoff is worth announcing; one from months ago is
-// backlog, not news (see the file header for why the backlog can exist at
-// all despite the create-once-per-email dedup below).
-const DIGEST_WINDOW_DAYS = 7;
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
 }
@@ -84,7 +78,7 @@ export async function run() {
                 nVisitas: c.visitCount,
             });
             created.push({ nome: c.name, canal: "Intro Pack" });
-            if (c.daysSinceExpiry < DEFAULT_CUTOFF_DAYS + DIGEST_WINDOW_DAYS) {
+            if (c.isRecent) {
                 digestWorthy.push({ nome: c.name, canal: "Intro Pack" });
             }
             else {
@@ -106,7 +100,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion, PULSE_VIEW.memberActivity], asOf);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPackLeads], asOf);
         log.info("leads_intro_pack.posted", {
             messageId,
             count: digestWorthy.length,

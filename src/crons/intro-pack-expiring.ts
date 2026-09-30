@@ -1,12 +1,12 @@
 /**
- * Daily heads-up for intro packs about to lapse, filtered to the two
- * patterns worth a proactive nudge (see
- * src/lib/intro-pack-conversion.ts's findExpiringIntroPacksToWatch for the
- * exact rule — including why its "next 3 days" window is anchored on the
- * real calendar date rather than `asOf`, unlike everything else pulse-based).
- * Plain Telegram digest to the founders' group — no Notion write, unlike
- * leads-intro-pack.ts, since this isn't a "someone to follow up with"
- * backlog item, just a same-day prompt.
+ * Daily heads-up for intro packs about to lapse. The "which pack, which
+ * window, which usage pattern" decision lives entirely in
+ * `va.v_pulse_intro_pack_watch` (see scripts/studio-db-views-2026-09-30.sql
+ * — including why its window is anchored on the real calendar date rather
+ * than `asOf`, and the 2-Class-this-week vs 10-Day-3-days split). This
+ * cron just shapes and sends it. Plain Telegram digest to the founders'
+ * group — no Notion write, unlike leads-intro-pack.ts, since this isn't a
+ * "someone to follow up with" backlog item, just a same-day prompt.
  *
  * Schedule: 08:15 Europe/Lisbon every day. Registered in src/server.ts.
  */
@@ -44,11 +44,7 @@ export async function run(): Promise<void> {
   }
 
   try {
-    const messageId = await sendGroupMessageWithSource(
-      message,
-      [PULSE_VIEW.introPurchase, PULSE_VIEW.introConversion],
-      asOf,
-    );
+    const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPackWatch], asOf);
     log.info("intro_pack_expiring.posted", { messageId, count: packs.length });
   } catch (err) {
     log.error("intro_pack_expiring.send_failed", { message: errMsg(err) });

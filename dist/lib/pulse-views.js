@@ -39,6 +39,13 @@ export const PULSE_VIEW = {
     failedPayments: "v_pulse_failed_payments",
     firstPaid: "v_pulse_first_paid",
     knownCases: "v_pulse_known_cases",
+    // haven-va's own derived business-rule views, added 2026-09-30 — see
+    // scripts/studio-db-views-2026-09-30.sql for the definitions and the
+    // note on why they share the v_pulse_ prefix despite not being
+    // Studio Pulse's own raw/curated facts.
+    introPackWatch: "v_pulse_intro_pack_watch",
+    introPackLeads: "v_pulse_intro_pack_leads",
+    churnRiskSignals: "v_pulse_churn_risk_signals",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -99,6 +106,9 @@ export const fetchMemberIdentity = () => fetchView(PULSE_VIEW.memberIdentity);
 export const fetchMemberActivity = () => fetchView(PULSE_VIEW.memberActivity);
 export const fetchUtilizationMonthly = () => fetchView(PULSE_VIEW.utilizationMonthly);
 export const fetchFailedPayments = () => fetchView(PULSE_VIEW.failedPayments);
+export const fetchIntroPackWatch = () => fetchView(PULSE_VIEW.introPackWatch);
+export const fetchIntroPackLeads = () => fetchView(PULSE_VIEW.introPackLeads);
+export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
 /**
  * The last date the studio data covers — the one "today" for every roster,
  * every signal and every "dados até" line. Null only when the view is
