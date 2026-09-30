@@ -26,6 +26,10 @@ export async function run(now: Date = new Date()): Promise<void> {
   const weekLabel = currentWeekLabel(now);
   const mondayIso = mondayOf(now).toISOString();
 
+  // Stamp anything marked Feito since the last hourly sweep, so a task
+  // closed at 07:55 still counts in an 08:00 balance.
+  await notion.syncCompletionDates();
+
   const [priorities, completed, overdue, focus] = await Promise.all([
     notion.getWeeklyPriorities(weekLabel),
     notion.getWeeklyCompletedSince(mondayIso),

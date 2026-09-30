@@ -3,6 +3,7 @@ import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
+import { run as runCompletionDates } from "./crons/completion-dates.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
@@ -28,6 +29,11 @@ const tasks = [
   cron.schedule(
     "*/5 * * * *",
     () => runReminders().catch((e) => log.error("cron.reminders", { e: String(e) })),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "0 * * * *",
+    () => runCompletionDates(),
     { timezone: TZ },
   ),
   cron.schedule(

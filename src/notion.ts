@@ -1037,10 +1037,10 @@ async function getWeeklyCompletedSince(date: string): Promise<OpenTask[]> {
           and: [
             { property: "Prioridade semanal", checkbox: { equals: true } },
             { property: "Status", select: { equals: "Feito" } },
-            {
-              timestamp: "last_edited_time",
-              last_edited_time: { on_or_after: date },
-            },
+            // "Concluído em", not last_edited_time: any later edit to an old
+            // finished task (typo fix, note) used to make it reappear as
+            // "done this week". Stamped by syncCompletionDates below.
+            { property: "Concluído em", date: { on_or_after: date } },
           ],
         },
         start_cursor: cursor,
@@ -1059,6 +1059,81 @@ async function getWeeklyCompletedSince(date: string): Promise<OpenTask[]> {
   } while (cursor);
   log.debug("notion.weekly_completed_since_fetched", { since: date, count: tasks.length });
   return tasks;
+}
+
+/**
+ * Keeps the Backlog's "Concluído em" date in step with Status:
+ * - Status = Feito and no date → stamp it with the page's last_edited_time,
+ *   which is when it was marked Feito as long as this runs before anyone
+ *   edits it again (hourly cron + right before the week balance).
+ * - A date but Status no longer Feito (task reopened) → clear it, so the
+ *   next Feito gets a fresh stamp.
+ * Status is edited by hand in Notion as often as through the bot, so this
+ * sweep is the one place the date gets written — no per-write-path hooks.
+ */
+async function syncCompletionDates(): Promise<{ stamped: number; cleared: number }> {
+  let stamped = 0;
+  let cleared = 0;
+
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("syncCompletionDates.stamp", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
+        filter: {
+          and: [
+            { property: "Status", select: { equals: "Feito" } },
+            { property: "Concluído em", date: { is_empty: true } },
+          ],
+        },
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("last_edited_time" in row)) continue;
+      await withRetry("syncCompletionDates.stamp.update", () =>
+        client.pages.update({
+          page_id: row.id,
+          properties: {
+            "Concluído em": { date: { start: row.last_edited_time } },
+          } as Parameters<typeof client.pages.update>[0]["properties"],
+        }),
+      );
+      stamped++;
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+
+  cursor = undefined;
+  do {
+    const res = await withRetry("syncCompletionDates.clear", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_BACKLOG_DB_ID!),
+        filter: {
+          and: [
+            { property: "Concluído em", date: { is_not_empty: true } },
+            { property: "Status", select: { does_not_equal: "Feito" } },
+          ],
+        },
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      await withRetry("syncCompletionDates.clear.update", () =>
+        client.pages.update({
+          page_id: row.id,
+          properties: {
+            "Concluído em": { date: null },
+          } as Parameters<typeof client.pages.update>[0]["properties"],
+        }),
+      );
+      cleared++;
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+
+  if (stamped || cleared) log.info("notion.completion_dates_synced", { stamped, cleared });
+  return { stamped, cleared };
 }
 
 async function getWeeklyOverdueTasks(): Promise<OpenTask[]> {
@@ -3152,6 +3227,7 @@ export {
   getWeeklyPriorities,
   setWeeklyPriority,
   getWeeklyCompletedSince,
+  syncCompletionDates,
   getWeeklyOverdueTasks,
   setFounderFocus,
   getFounderFocusForWeek,
@@ -3234,6 +3310,7 @@ export const notion = {
   getWeeklyPriorities,
   setWeeklyPriority,
   getWeeklyCompletedSince,
+  syncCompletionDates,
   getWeeklyOverdueTasks,
   setFounderFocus,
   getFounderFocusForWeek,
