@@ -28,7 +28,7 @@ vi.mock("../src/lib/telegram.js", () => ({
   sendGroupMessage: (...args: unknown[]) => sendGroupMessage(...args),
 }));
 
-import { run } from "../src/crons/churn-risk.js";
+import { isSuspiciousChurnSweep, run } from "../src/crons/churn-risk.js";
 
 // getChurnRowsByStatus is called twice per run — once for the
 // Resolvido/Arquivado sweep, once for the open-row reconciliation — so
@@ -270,5 +270,56 @@ describe("churn-risk", () => {
     expect(archivePage).toHaveBeenCalledWith("row-e");
     expect(updateChurnFlag).not.toHaveBeenCalled();
     expect(sendGroupMessage).not.toHaveBeenCalled(); // churn (not resolution) stays log-only, no digest noise
+  });
+  it("circuit breaker: archives nobody and warns in the digest when >70% of the list would go at once (notes preserved)", async () => {
+    const open = ["a", "b", "c", "d", "e"].map((k) => ({
+      id: `row-${k}`,
+      nome: k.toUpperCase(),
+      email: `${k}@x.com`,
+      status: "Contactado",
+    }));
+    mockOpenAndClosedRows([], open);
+    // Views came back empty — e.g. a Kenko import glitch
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
+
+    await run();
+
+    expect(archivePage).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    const [message] = sendGroupMessage.mock.calls[0]!;
+    expect(message).toContain("5 de 5");
+    expect(message).toContain("não arquivei ninguém");
+  });
+
+  it("circuit breaker: over half resolving is still normal on a short list (under 70%)", async () => {
+    const open = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((k) => ({
+      id: `row-${k}`,
+      nome: k.toUpperCase(),
+      email: `${k}@x.com`,
+      status: "Aberto",
+    }));
+    mockOpenAndClosedRows([], open);
+    // 4 still flagged, 6 of 10 (60%) resolved
+    fetchChurnFlags.mockResolvedValue({
+      flags: ["a", "b", "c", "d"].map((k) => ({
+        name: k.toUpperCase(),
+        email: `${k}@x.com`,
+        signals: [{ type: "sem_reservas", detail: "14 dias" }],
+        plano: null,
+        telefone: null,
+      })),
+      activeEmails: new Set(open.map((r) => r.email)),
+      asOf: "2026-09-18",
+    });
+
+    await run();
+
+    expect(archivePage).toHaveBeenCalledTimes(6);
+  });
+
+  it("circuit breaker thresholds", () => {
+    expect(isSuspiciousChurnSweep(3, 3)).toBe(false); // tiny list
+    expect(isSuspiciousChurnSweep(7, 10)).toBe(false); // exactly 70% is allowed
+    expect(isSuspiciousChurnSweep(8, 10)).toBe(true);
   });
 });

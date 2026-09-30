@@ -9,10 +9,18 @@
  * — founder's call, 2026-09-21: no need to name each one individually.
  * Returns null (silent) when nothing happened at all this week.
  */
-export function formatChurnDigest(atRisco, resolvedCount = 0) {
-    if (atRisco.length === 0 && resolvedCount === 0)
+export function formatChurnDigest(atRisco, resolvedCount = 0, 
+// Set when the cron's circuit breaker stopped the weekly cleanup — see
+// isSuspiciousChurnSweep in src/crons/churn-risk.ts.
+brake = null) {
+    if (atRisco.length === 0 && resolvedCount === 0 && !brake)
         return null;
     const lines = ["*Clientes em risco de churn*"];
+    if (brake) {
+        lines.push("", `⚠️ Esta semana ${brake.wouldArchive} de ${brake.open} clientes da lista deixaram de aparecer como em risco — ` +
+            `é mais do que o normal, por isso não arquivei ninguém (as notas ficam intactas). ` +
+            `Pode ser um problema nos dados do estúdio. Se estiverem mesmo resolvidos, marca-os como Resolvido e saem na próxima segunda.`);
+    }
     if (atRisco.length > 0) {
         lines.push("", "Em risco:");
         for (const entry of atRisco)

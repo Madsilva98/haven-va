@@ -52,6 +52,7 @@
  *     purchase — mid-pack counts) OR converted_pack (a real 5x/10x pack;
  *     never chase as a lead; a drop-in is not a conversion).
  */
+import { isSuspiciousBatch } from "../lib/circuit-breaker.js";
 import { loadConversionCheckData } from "../lib/intro-pack-conversion.js";
 import { hasRealPurchase } from "../lib/leads.js";
 import { log } from "../lib/log.js";
@@ -64,12 +65,8 @@ import * as notion from "../notion.js";
 // Recovering from a wrong mass-archive here is real work (restore each page
 // from Notion's trash by hand), unlike churn-risk, which just recreates its
 // rows. The minimum stops a tiny list (e.g. 1 of 3) from tripping it.
-const CONVERSION_BRAKE_SHARE = 0.3;
-const CONVERSION_BRAKE_MIN_ROWS = 4;
 export function isSuspiciousConversionBatch(wouldArchive, open) {
-    if (open === 0)
-        return false;
-    return wouldArchive >= CONVERSION_BRAKE_MIN_ROWS && wouldArchive / open > CONVERSION_BRAKE_SHARE;
+    return isSuspiciousBatch(wouldArchive, open, { share: 0.3, minRows: 4 });
 }
 function formatConversionBrakeMessage(wouldArchive, open) {
     return (`⚠️ Leads a contactar: ${wouldArchive} de ${open} leads em aberto pareciam ter convertido esta semana — ` +
@@ -114,7 +111,7 @@ export async function run() {
     // the one that has gone wrong at scale before (2026-09-16: every open
     // Intro Pack lead archived at once). So it's two-phase: collect the rows
     // that LOOK converted, then archive only if that's a plausible share of
-    // the open list — see CONVERSION_BRAKE_* above.
+    // the open list — see isSuspiciousConversionBatch above.
     let archivedConverted = 0;
     let brakeTripped = false;
     if (isStudioDbAvailable()) {
