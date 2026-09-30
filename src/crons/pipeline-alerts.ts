@@ -1,15 +1,9 @@
 import { alertKey, pruneStaleKeys } from "../lib/alert-dedup.js";
-import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
-import { sendDM } from "../lib/telegram.js";
+import { sendGroupMessage } from "../lib/telegram.js";
 import { weekOfYear } from "../lib/week.js";
 import { formatContentAlert } from "../messages/pipeline.js";
 import * as notion from "../notion.js";
-import type { FounderName } from "../types.js";
-
-// Content-calendar alerts go to Madalena and Mafalda only — Beatriz opted out
-// 2026-09-15.
-const CONTENT_CALENDAR_RECIPIENTS: FounderName[] = ["Madalena", "Mafalda"];
 
 // In-process dedup: resets on restart but acceptable — same alert won't fire
 // twice on the same day under normal operation.
@@ -17,35 +11,6 @@ const seen = new Set<string>();
 
 function todayLabel(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function isFounder(value: string): value is FounderName {
-  return value === "Madalena" || value === "Mafalda" || value === "Beatriz";
-}
-
-async function notifyOwner(
-  owner: string,
-  text: string,
-  context: Record<string, unknown>,
-): Promise<void> {
-  if (!isFounder(owner)) {
-    log.debug("pipeline_alerts.skip_unassigned", context);
-    return;
-  }
-  const tgId = getTelegramId(owner);
-  if (tgId === null) {
-    log.warn("pipeline_alerts.no_telegram_id", { owner, ...context });
-    return;
-  }
-  try {
-    await sendDM(tgId, text);
-  } catch (err) {
-    log.error("pipeline_alerts.dm_failed", {
-      owner,
-      message: err instanceof Error ? err.message : String(err),
-      ...context,
-    });
-  }
 }
 
 async function processContentCalendar(today: string): Promise<number> {
@@ -64,8 +29,13 @@ async function processContentCalendar(today: string): Promise<number> {
   if (unseen.length === 0) return 0;
 
   const text = formatContentAlert(unseen);
-  for (const founder of CONTENT_CALENDAR_RECIPIENTS) {
-    await notifyOwner(founder, text, { type: "content_calendar" });
+  try {
+    await sendGroupMessage(text);
+  } catch (err) {
+    log.error("pipeline_alerts.group_send_failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
   }
   for (const row of unseen) {
     seen.add(alertKey(row.id, "content_calendar", today));
