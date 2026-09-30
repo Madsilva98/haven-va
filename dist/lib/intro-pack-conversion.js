@@ -187,14 +187,14 @@ export async function findUnconvertedIntroPacks() {
     return { candidates, asOf };
 }
 /**
- * Activated intro packs worth a same-day nudge before they lapse — the
- * "which pack, which window, which usage pattern" decision lives entirely
- * in `va.v_pulse_intro_pack_watch` now (2026-09-30, see
- * scripts/studio-db-views-2026-09-30.sql), including the real-calendar
- * anchoring (not `asOf`) this window has always needed and the 2-Class
- * (this week) vs 10-Day (3 days) split the founder asked for the same day.
- * This function only shapes the view's rows and fills in name/phone.
- * Used by src/crons/intro-pack-expiring.ts.
+ * Activated intro packs worth a same-day nudge before they lapse. Four
+ * reasons now (founder's call, 2026-09-30, revised the same day the
+ * original 2-reason version shipped, after she pointed out it only ever
+ * caught people who HADN'T used their 2nd class yet): 2-Class
+ * unused_ending/completed_followup and 10-Day ending/underused — see
+ * pulse-views.ts's fetchIntroPackWatch for the exact SQL and the reasoning
+ * behind each one. This function only shapes the view's rows and fills in
+ * name/phone. Used by src/crons/intro-pack-expiring.ts.
  */
 export async function findExpiringIntroPacksToWatch() {
     if (!isStudioDbAvailable()) {
@@ -209,7 +209,9 @@ export async function findExpiringIntroPacksToWatch() {
     if (!asOf)
         return { packs: [], asOf: null };
     const names = nameByMemberId(customers);
-    const packs = watchRows.map((r) => {
+    const packs = watchRows
+        .filter((r) => r.reason !== null)
+        .map((r) => {
         const email = r.email.toLowerCase();
         return {
             email,
@@ -219,6 +221,9 @@ export async function findExpiringIntroPacksToWatch() {
             packName: r.item_name,
             expiresAt: lisbonEndOfDay(r.intro_end),
             visitCount: r.visits_in_pack,
+            reason: r.reason,
+            firstVisitOn: r.first_pack_visit,
+            lastVisitOn: r.last_pack_visit,
         };
     });
     packs.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());

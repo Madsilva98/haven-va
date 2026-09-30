@@ -33,6 +33,7 @@ export const PULSE_VIEW = {
   pausedDetail: "v_pulse_paused_detail",
   introPurchase: "v_pulse_intro_purchase",
   introConversion: "v_pulse_intro_conversion",
+  introClassVisits: "v_pulse_intro_class_visits",
   classpackState: "v_pulse_classpack_state",
   introHolderState: "v_pulse_intro_holder_state",
   dataAsOf: "v_pulse_data_as_of",
@@ -282,11 +283,36 @@ export const fetchFailedPayments = (): Promise<FailedPaymentsRow[]> =>
   fetchView<FailedPaymentsRow>(PULSE_VIEW.failedPayments);
 
 /**
- * v_pulse_intro_pack_watch: one row per intro buyer, a column copy of haven-studio's
- * public.v_pulse_intro_outcome (2026-09-30: the rule lives there, data-model C6). nudge_window says
- * which pack is worth a nudge (this_week: 2-Class with 1 of 2 used; next_3_days: 10-Day with more than
- * 5 used); the calendar window is applied here, on the database's CURRENT_DATE, because the studio
- * view is materialized and cannot read the clock. Same rows as the old view.
+ * v_pulse_intro_pack_watch: one row per intro buyer, a column copy of haven-studio's canonical
+ * v_pulse_intro_outcome (2026-09-30: the rule lives there, data-model C6) — returns every 2-Class/
+ * 10-Day/other intro buyer, not just the ones worth a nudge. `nudge_window` is a leftover flag from
+ * the ORIGINAL 2-bucket rule (2-Class 1-of-2-used -> this_week, 10-Day >5-used -> next_3_days) and is
+ * deliberately NOT used below — the founder revised the rule the same day (still 2026-09-30) to 4
+ * buckets, one of which (10-Day "ending") explicitly drops the old >5-visits requirement, so trusting
+ * `nudge_window` would silently keep excluding people it shouldn't anymore. Every bucket is computed
+ * fresh here instead, straight off `pack`/`visits_in_pack`/`intro_end`, on the database's own
+ * CURRENT_DATE (never `v_pulse_data_as_of` — see the crons/intro-pack-expiring.ts row in CLAUDE.md for
+ * why a forward-looking window can't anchor on a lagging data date).
+ *
+ * first_pack_visit/last_pack_visit (the real first/last check-in date on THIS SPECIFIC pack — not
+ * v_pulse_intro_purchase.kenko_start, which is ~= the Kenko ledger start close to the purchase date,
+ * and not v_pulse_member_activity.first_visit, which is a LIFETIME first-ever visit that can predate
+ * this pack entirely) come from a join against v_pulse_intro_class_visits (per-visit rows, on_pack
+ * flag), keyed on (member_id, pack, intro_end) since this view doesn't expose the purchase date to
+ * join on directly. Verified against live data before writing this.
+ *
+ * Four buckets via `reason`, founder's own words (2026-09-30, same day as the original rule):
+ * - unused_ending: 2-Class, 1 of 2 used, <=5 days left (a rolling window now, not "this calendar
+ *   week" — daily cron, so rolling is simpler and doesn't miss someone with under 5 days left later
+ *   in the week), AND no upcoming class already booked (checked against v_pulse_member_activity).
+ * - completed_followup (NEW): 2-Class, both used, within 3 days of the 2nd class — for a conversion
+ *   follow-up call, not a "come back" reminder ("não estamos a apanhar as pessoas... e fizeram as
+ *   duas aulas. quero apanhar estes perto de fazerem a 2ª aula, para fazer follow up"). The 3-day
+ *   visibility window is Claude Code's own default — the founder specified when it starts showing,
+ *   not how long it keeps showing.
+ * - ending: 10-Day, <=5 days left, usage doesn't matter any more ("não interessa quantas aulas fez").
+ * - underused (NEW): 10-Day, EXACTLY 5 days since the first check-in on this pack, still at only 1-2
+ *   classes — the exact-day match (not >=) is what makes it fire once per person on a daily cron.
  */
 export interface IntroPackWatchRow {
   member_id: string;
@@ -296,6 +322,9 @@ export interface IntroPackWatchRow {
   intro_end: string;
   visits_in_pack: number;
   nudge_window: "this_week" | "next_3_days" | null;
+  first_pack_visit: string | null;
+  last_pack_visit: string | null;
+  reason: "unused_ending" | "completed_followup" | "ending" | "underused" | null;
 }
 export async function fetchIntroPackWatch(): Promise<IntroPackWatchRow[]> {
   if (!isStudioDbAvailable()) {
@@ -303,11 +332,39 @@ export async function fetchIntroPackWatch(): Promise<IntroPackWatchRow[]> {
     return [];
   }
   return query<IntroPackWatchRow>(
-    `select * from ${PULSE_VIEW.introPackWatch}
-     where (nudge_window = 'this_week'
-            and intro_end >= date_trunc('week', current_date)::date
-            and intro_end < date_trunc('week', current_date)::date + 7)
-        or (nudge_window = 'next_3_days' and intro_end between current_date and current_date + 3)`,
+    `with pack_visit_dates as (
+       select member_id, ended_on, pack_group, min(day) as first_pack_visit, max(day) as last_pack_visit
+       from ${PULSE_VIEW.introClassVisits}
+       where on_pack
+       group by member_id, ended_on, pack_group
+     )
+     select
+       w.*,
+       v.first_pack_visit,
+       v.last_pack_visit,
+       case
+         when w.pack = '2-Class' and w.visits_in_pack = 1 then 'unused_ending'
+         when w.pack = '2-Class' and w.visits_in_pack = 2 then 'completed_followup'
+         when w.pack = '10-Day' and w.intro_end between current_date and current_date + 5 then 'ending'
+         when w.pack = '10-Day' then 'underused'
+       end as reason
+     from ${PULSE_VIEW.introPackWatch} w
+     left join pack_visit_dates v
+       on v.member_id = w.member_id and v.ended_on = w.intro_end and v.pack_group = w.pack
+     where w.pack in ('2-Class', '10-Day')
+       and (
+         (w.pack = '2-Class' and w.visits_in_pack = 1
+            and w.intro_end between current_date and current_date + 5
+            and not exists (
+              select 1 from ${PULSE_VIEW.memberActivity} ma
+              where ma.member_id = w.member_id and ma.next_or_last_booked >= current_date
+            ))
+         or (w.pack = '2-Class' and w.visits_in_pack = 2
+            and v.last_pack_visit is not null and current_date - v.last_pack_visit between 0 and 3)
+         or (w.pack = '10-Day' and w.intro_end between current_date and current_date + 5)
+         or (w.pack = '10-Day' and w.visits_in_pack in (1, 2)
+            and v.first_pack_visit is not null and current_date - v.first_pack_visit = 5)
+       )`,
   );
 }
 
