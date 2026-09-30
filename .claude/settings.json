@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/studio-deploy-status.sh",
+            "timeout": 15,
+            "statusMessage": "Checking the studio dashboard release"
+          }
+        ]
+      }
+    ]
+  }
+}
