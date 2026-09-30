@@ -9,10 +9,9 @@ import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
+import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReminders } from "./crons/reminders.js";
-import { run as runSyncPartnerships } from "./crons/sync-partnerships.js";
-import { run as runTidyMailboxes } from "./crons/tidy-mailboxes.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
 import * as notion from "./notion.js";
@@ -27,13 +26,15 @@ const tasks = [
     cron.schedule("0 8 * * *", () => runFounderMeetingCheck().catch((e) => log.error("cron.founder_meeting_check", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runFounderMeetingBalanceCheck().catch((e) => log.error("cron.founder_meeting_balance_check", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * 1-5", () => runPipelineAlerts().catch((e) => log.error("cron.pipeline", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("0 7 * * *", () => runTidyMailboxes().catch((e) => log.error("cron.tidy_mailboxes", { e: String(e) })), { timezone: TZ }),
+    // One daily email pass: record in Notion → forward → clean geral@/hello@.
+    // Replaced tidy-mailboxes (07:00 daily) + sync-partnerships (08:14 Mon)
+    // on 2026-09-30 — see src/crons/mail-triage.ts.
+    cron.schedule("0 7 * * *", () => runMailTriage().catch((e) => log.error("cron.mail_triage", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 1 * *", () => runTidyMailboxesFeedbackReminder().catch((e) => log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) })), { timezone: TZ }),
     cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
     cron.schedule("12 8 * * 1", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
     cron.schedule("15 8 * * *", () => runIntroPackExpiring().catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("14 8 * * 1", () => runSyncPartnerships().catch((e) => log.error("cron.sync_partnerships", { e: String(e) })), { timezone: TZ }),
     cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
     cron.schedule("45 8 * * 1", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
     cron.schedule("30 8 * * 1", () => runCompetitorIntel().catch((e) => log.error("cron.competitor_intel", { e: String(e) })), { timezone: TZ }),
