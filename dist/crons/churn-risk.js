@@ -183,13 +183,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [
-            PULSE_VIEW.membershipState,
-            PULSE_VIEW.memberActivity,
-            PULSE_VIEW.failedPayments,
-            PULSE_VIEW.utilizationMonthly,
-            PULSE_VIEW.pauseHistory,
-        ], asOf);
+        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.churnRiskSignals], asOf);
         log.info("churn_risk.posted", {
             messageId,
             count: emRisco.length,
