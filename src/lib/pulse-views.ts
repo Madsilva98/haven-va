@@ -282,7 +282,7 @@ export const fetchUtilizationMonthly = (): Promise<UtilizationMonthRow[]> =>
 export const fetchFailedPayments = (): Promise<FailedPaymentsRow[]> =>
   fetchView<FailedPaymentsRow>(PULSE_VIEW.failedPayments);
 
-/** v_pulse_intro_pack_watch — see scripts/studio-db-views-2026-09-30.sql. */
+/** v_pulse_intro_pack_watch — see scripts/studio-db-views-intro-pack-watch-v2-2026-09-30.sql. */
 export interface IntroPackWatchRow {
   member_id: string;
   email: string;
@@ -290,6 +290,9 @@ export interface IntroPackWatchRow {
   item_name: string;
   intro_end: string;
   visits_in_pack: number;
+  first_pack_visit: string | null; // earliest check-in on this specific pack — "activation" per the founder's own definition
+  last_pack_visit: string | null; // latest check-in on this specific pack — the 2nd/final class date for a completed 2-Class pack
+  reason: string; // unused_ending | completed_followup | ending | underused — see the view's own COMMENT
 }
 export const fetchIntroPackWatch = (): Promise<IntroPackWatchRow[]> =>
   fetchView<IntroPackWatchRow>(PULSE_VIEW.introPackWatch);

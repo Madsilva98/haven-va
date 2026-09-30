@@ -255,6 +255,8 @@ export async function findUnconvertedIntroPacks(): Promise<{
   return { candidates, asOf };
 }
 
+export type IntroPackWatchReason = "unused_ending" | "completed_followup" | "ending" | "underused";
+
 export interface ExpiringIntroPackToWatch {
   email: string;
   name: string;
@@ -263,15 +265,23 @@ export interface ExpiringIntroPackToWatch {
   packName: string;
   expiresAt: Date;
   visitCount: number; // visits_in_pack — check-ins booked on this pack, not lifetime
+  reason: IntroPackWatchReason;
+  firstVisitOn: string | null; // first check-in on this pack ("activation") — set for the 10-Day underused reason
+  lastVisitOn: string | null; // last check-in on this pack — set for the 2-Class completed_followup reason (the 2nd/final class)
 }
 
 /**
  * Activated intro packs worth a same-day nudge before they lapse — the
  * "which pack, which window, which usage pattern" decision lives entirely
  * in `va.v_pulse_intro_pack_watch` now (2026-09-30, see
- * scripts/studio-db-views-2026-09-30.sql), including the real-calendar
- * anchoring (not `asOf`) this window has always needed and the 2-Class
- * (this week) vs 10-Day (3 days) split the founder asked for the same day.
+ * scripts/studio-db-views-intro-pack-watch-v2-2026-09-30.sql), including
+ * the real-calendar anchoring (not `asOf`) this window has always needed.
+ * Four reasons now (founder's call, same day, after the first cut of this
+ * view only caught 2-Class packs that still had an unused class): 2-Class
+ * unused_ending (still has an unused class, <=5 days left) and
+ * completed_followup (used both, follow-up window) alongside 10-Day
+ * ending (<=5 days left, usage no longer matters) and underused (exactly
+ * 5 days since the first check-in on this pack, still at 1-2 classes).
  * This function only shapes the view's rows and fills in name/phone.
  * Used by src/crons/intro-pack-expiring.ts.
  */
@@ -301,6 +311,9 @@ export async function findExpiringIntroPacksToWatch(): Promise<{
       packName: r.item_name,
       expiresAt: lisbonEndOfDay(r.intro_end),
       visitCount: r.visits_in_pack,
+      reason: r.reason as IntroPackWatchReason,
+      firstVisitOn: r.first_pack_visit,
+      lastVisitOn: r.last_pack_visit,
     };
   });
   packs.sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
