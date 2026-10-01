@@ -190,6 +190,43 @@ export async function listEvents(days = 7) {
 export async function listEventsInRange(from, to) {
     return fetchEventsInRange(from.toISOString(), to.toISOString());
 }
+/**
+ * Every event of ONE calendar, found by its name (e.g. "Receção"), in
+ * [from, to], all pages. Unlike `listEventsInRange` it THROWS on any failure
+ * (no auth, calendar not visible, API error) instead of returning [] — a
+ * caller that deletes what is missing must never mistake an error for an
+ * empty calendar. Used by `crons/reception-hours-sync.ts`.
+ */
+export async function listCalendarEventsStrict(calendarName, from, to) {
+    const auth = await getAuthenticatedClient();
+    if (!auth)
+        throw new Error("calendar: not authenticated (run /auth)");
+    const cal = google.calendar({ version: "v3", auth });
+    const list = await cal.calendarList.list({ maxResults: 250 });
+    const match = (list.data.items ?? []).find((c) => c.summary?.trim().toLowerCase() === calendarName.trim().toLowerCase());
+    if (!match?.id)
+        throw new Error(`calendar: no calendar named "${calendarName}" on this account`);
+    const events = [];
+    let pageToken;
+    do {
+        const res = await cal.events.list({
+            calendarId: match.id,
+            timeMin: from.toISOString(),
+            timeMax: to.toISOString(),
+            singleEvents: true,
+            orderBy: "startTime",
+            maxResults: 250,
+            pageToken,
+        });
+        for (const e of res.data.items ?? []) {
+            if (e.status === "cancelled")
+                continue;
+            events.push(normalizeEvent(e, match.id, match.summary ?? calendarName));
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return events;
+}
 export async function createEvent(params) {
     const auth = await getAuthenticatedClient();
     if (!auth)
