@@ -11,6 +11,7 @@ import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
+import { run as runReceptionHoursSync } from "./crons/reception-hours-sync.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
@@ -126,6 +127,16 @@ const tasks = [
     () =>
       runCompetitorIntel().catch((e) =>
         log.error("cron.competitor_intel", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  // Receção calendar → studio DB, for the front desk hours (2026-10-01).
+  // After the day's last shift. See src/crons/reception-hours-sync.ts.
+  cron.schedule(
+    "30 23 * * *",
+    () =>
+      runReceptionHoursSync().catch((e) =>
+        log.error("cron.reception_hours_sync", { e: String(e) }),
       ),
     { timezone: TZ },
   ),
