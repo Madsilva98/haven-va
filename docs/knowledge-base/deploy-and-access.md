@@ -139,6 +139,18 @@ Note: the NAS's `sftp-server` subsystem isn't enabled, so plain `scp` fails with
 
 If a `tsc` run is already stuck like this, `pkill -f 'node_modules/.bin/tsc'` on the NAS frees the RAM/swap immediately (the killed process only holds `dist/`'s work-in-progress, nothing persists mid-compile).
 
+### Gotcha: a `dist/` tar-copied from Windows shows up as "modified" on the NAS
+
+With `core.autocrlf=true` on the Windows machine, `copy-assets.mjs` copies the `.md` prompts (and a few non-ASCII `.js` files come out) with CRLF, so after the tar pipe `git status` on the NAS lists ~20 `dist/` files as modified. Check it's line endings only (`git diff --ignore-cr-at-eol --stat` on the NAS prints nothing), then `git checkout -- dist/` on the NAS to go back to the committed LF copies — same content, and the next `git pull --ff-only` stays clean. (Seen 2026-10-01.)
+
+### Running a cron by hand after a deploy
+
+Don't wait for the schedule — run it once inside the container. Its log lines go to the exec's stdout, not `docker logs`. The `process.exit` is there because the studio DB pool otherwise keeps the process alive:
+```bash
+ssh haven-nas "cd /volume1/docker/haven-va/code/haven-va && sudo -n /usr/local/bin/docker compose exec -T haven-va node -e \"import('./dist/crons/reception-hours-sync.js').then(async m => { await m.run(); process.exit(0); })\""
+```
+For `reception-hours-sync` (2026-10-01, nightly 23:30): `cron.reception_hours_sync.done` with `synced` ≈ the number of timed Receção events = good. `fetch_failed` with `no calendar named "Receção" on this account` = Madalena's Google account (the one behind `/auth`) can't see that calendar; it must be shared from yourhavenpilates@gmail.com, which owns it. Nothing is written or deleted in that case. `fetch_failed` with an auth error = redo `/auth` in Madalena's DM. Verify in the studio DB with `select max(synced_at) from public.reception_calendar_events`.
+
 ### Gotcha: `.env` changes don't reload
 
 The compose file uses `env_file: /volume1/docker/haven-va/data/.env`. Compose reads it at container creation, not at runtime. So editing `.env` and running `docker compose restart` does **not** pick up new values — you need `docker compose up -d --force-recreate` (or just rebuild).
