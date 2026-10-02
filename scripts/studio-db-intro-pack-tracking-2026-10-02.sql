@@ -2,6 +2,9 @@
 -- (founder, 2026-10-02: "devias criar views ... para não fazeres erros a calcular coisas everytime").
 -- Read by haven-va src/crons/intro-pack-tracking.ts, which only writes what this view says into Notion.
 --
+-- Full request list for haven-studio (incl. the 2-Class pack-end rule for is_lead / pack_ended_on):
+-- docs/plans/2026-10-02-haven-studio-requests.md.
+--
 -- HOW THIS GETS APPLIED. haven-va's role is read-only; this needs a haven-studio session (Management API):
 --   1. FIRST add `booked_ahead` to public.v_pulse_member_activity (canonical owner of bookings) — the number
 --      of classes the person has booked (status Booked, not cancelled, not waitlist) on a day AFTER
@@ -32,10 +35,11 @@
 --   not started  = 0 classes on the pack. Listed from 7 days after purchase (waiting_to_start), unless a
 --                  first class is already booked; idle at 30 days with nothing booked (= studio setting
 --                  idle_intro_days). The 20-day rule never applies: an unstarted pack has no real end.
---   pack ended   = a 2-Class pack with both classes used ends on the 2nd class (v_pulse_intro_outcome
---                  .pack_ended_on); any other pack on Kenko's expiry. A 2-Class pack with 1 class used ends
---                  on expiry here, not on that class (pack_ended_on's rule), so nobody holding a valid
---                  class goes cold.
+--   pack ended   = founder, verbatim: "the end of the pack, on the 2 day intro pack, IS the day of the last
+--                  [class]. this rule applies ALWAYS. if the 2nd class doesn't exist, then yes the pack has
+--                  an expiry date (2 weeks after the first class)". 2-Class with the 2nd class done → the
+--                  2nd class; otherwise, and any other pack, Kenko's expiry. (pack_ended_on still says "1
+--                  class used = that class" — requested fix, see the requests doc.)
 --   cold_lead    = 20 days after that end, not converted. leads-intro-pack.ts (Monday, is_lead, 21 days)
 --                  is unchanged and adds them to "Leads a contactar" — unless marked Perdido here.
 --   pack_ending  = 2-Class with 1 class used and none booked ahead, or any 10-Day, 0-5 days to expiry.
