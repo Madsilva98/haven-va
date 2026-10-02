@@ -51,6 +51,9 @@ export const PULSE_VIEW = {
   introPackWatch: "v_pulse_intro_pack_watch",
   introPackLeads: "v_pulse_intro_pack_leads",
   churnRiskSignals: "v_pulse_churn_risk_signals",
+  // The bot's own analysis view (reads only va copies, data-model check C6), 2026-10-02:
+  // scripts/studio-db-intro-pack-tracking-2026-10-02.sql — the "Tracking intro packs" rules.
+  introPackTracking: "v_pulse_intro_pack_tracking",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -392,6 +395,43 @@ export async function fetchIntroPackLeads(): Promise<IntroPackLeadRow[]> {
     return [];
   }
   return query<IntroPackLeadRow>(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
+}
+
+/**
+ * v_pulse_intro_pack_tracking: one row per 2-Class/10-Day intro buyer. The view decides everything —
+ * `reason` (why they belong on the "Tracking intro packs" list today) and `auto_state` (the state the bot
+ * sets on its own); src/crons/intro-pack-tracking.ts only writes it into Notion. Rules and their dates:
+ * the view's own SQL file, scripts/studio-db-intro-pack-tracking-2026-10-02.sql.
+ */
+export type IntroTrackingReason = "waiting_to_start" | "underused" | "pack_ending" | "pack_ended";
+export type IntroTrackingAutoState = "converted" | "bought_other" | "cold_lead" | "idle";
+export interface IntroPackTrackingRow {
+  member_id: string;
+  email: string;
+  item_name: string;
+  pack: "2-Class" | "10-Day";
+  bought_on: string;
+  first_class_on: string | null;
+  expires_on: string;
+  ended_on: string;
+  visits_in_pack: number;
+  booked_ahead: number;
+  outcome: string;
+  data_as_of: string;
+  auto_state: IntroTrackingAutoState | null;
+  is_lead: boolean; // 21+ days since the same end, not converted — the Monday "Leads a contactar" rule
+  days_since_end: number;
+  is_recent: boolean; // under 28 days since the end: crossed day 21 within about the last week
+  reason: IntroTrackingReason | null;
+}
+export const fetchIntroPackTracking = (): Promise<IntroPackTrackingRow[]> =>
+  fetchView<IntroPackTrackingRow>(PULSE_VIEW.introPackTracking);
+export async function fetchIntroPackTrackingLeads(): Promise<IntroPackTrackingRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackTracking, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return query<IntroPackTrackingRow>(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
 }
 
 /**

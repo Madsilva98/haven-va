@@ -353,6 +353,51 @@ export interface ChurnRiskRow {
   status: ChurnStatus;
 }
 
+// ----- Tracking intro packs -----
+// Fed by src/crons/intro-pack-tracking.ts from va.v_pulse_intro_pack_tracking.
+// The bot sets "A contactar" on creation and Convertido / Comprou outra coisa /
+// Cold lead / Idle on its own; Contactado and Perdido are the founders'.
+
+export type IntroTrackingEstado =
+  | "A contactar"
+  | "Contactado"
+  | "Convertido"
+  | "Perdido"
+  | "Comprou outra coisa"
+  | "Cold lead"
+  | "Idle";
+
+export type IntroTrackingMotivo =
+  | "À espera de começar"
+  | "Underused pack"
+  | "Pack ending"
+  | "Pack ended";
+
+/** Bot-written columns only — "Notas" is never read or written by the bot. */
+export interface IntroTrackingFields {
+  motivo?: IntroTrackingMotivo;
+  pack: "2-Class" | "10-Day";
+  aulasFeitas: number;
+  aulasMarcadas: number;
+  compra: string; // YYYY-MM-DD
+  inicio: string | null; // first class on the pack
+  fim: string; // pack end (2-Class with both classes: the 2nd class; otherwise expiry)
+  email: string;
+  telefone: string | null;
+}
+
+export interface IntroTrackingRow {
+  id: string;
+  memberId: string;
+  nome: string;
+  estado: IntroTrackingEstado | null;
+  motivo: IntroTrackingMotivo | null;
+  aulasFeitas: number | null;
+  aulasMarcadas: number | null;
+  inicio: string | null;
+  fim: string | null;
+}
+
 // ----- Competitor intel (newsletters → Notion) -----
 // CompetitorSourceRow (the "Fontes" DB) is the founder's own reference list
 // of what she's subscribed and how she's classified each source — not read

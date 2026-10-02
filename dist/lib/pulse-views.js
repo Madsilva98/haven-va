@@ -46,6 +46,9 @@ export const PULSE_VIEW = {
     introPackWatch: "v_pulse_intro_pack_watch",
     introPackLeads: "v_pulse_intro_pack_leads",
     churnRiskSignals: "v_pulse_churn_risk_signals",
+    // The bot's own analysis view (reads only va copies, data-model check C6), 2026-10-02:
+    // scripts/studio-db-intro-pack-tracking-2026-10-02.sql — the "Tracking intro packs" rules.
+    introPackTracking: "v_pulse_intro_pack_tracking",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -151,6 +154,14 @@ export async function fetchIntroPackLeads() {
         return [];
     }
     return query(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
+}
+export const fetchIntroPackTracking = () => fetchView(PULSE_VIEW.introPackTracking);
+export async function fetchIntroPackTrackingLeads() {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackTracking, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return query(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
 }
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
 /**
