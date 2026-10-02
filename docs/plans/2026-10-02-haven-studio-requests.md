@@ -16,12 +16,23 @@ So for a 2-Class pack:
 
 Two places in `public.v_pulse_intro_outcome` disagree today:
 
-a. **`pack_ended_on`** — currently "the 2nd charged to it, else the 1st, none = expiry". The "else the 1st"
-   branch contradicts the rule: with 1 class used it must be the expiry. Change
-   `coalesce(p.second_class_on, p.first_class_on, p.intro_end)` to `coalesce(p.second_class_on, p.intro_end)`
-   (and the same in `month_ended`, `outcome`'s maturing test and `counted`). This moves the conversion
-   charts' "ended" basis for 1-class packs — predict the month counts before applying, as the 2026-10-01
-   migration did.
+a. **`pack_ended_on` — INVESTIGATE ONLY, do not change anything** (founder, 2026-10-02: "don't change the
+   dashboard"). Prompt for the haven-studio session:
+
+   > Investigate, without changing any view, migration or dashboard code: `v_pulse_intro_outcome.pack_ended_on`
+   > says a 2-Class intro pack with only 1 class used ends on that class ("the 2nd charged to it, else the
+   > 1st, none = expiry", Madalena 2026-09-30). On 2026-10-02 Madalena stated the rule as: "the end of the
+   > pack, on the 2 day intro pack, IS the day of the last class. this rule applies ALWAYS. if the 2nd class
+   > doesn't exist, then yes the pack has an expiry date (2 weeks after the first class)" — i.e. with 1 class
+   > used, the end would be the expiry. Find out (1) where the "else the 1st" branch came from and whether
+   > it was a deliberate choice for the conversion charts (git history, docs/data-model/, for-mafalda.md,
+   > v_pulse_known_cases); (2) every reader of pack_ended_on / month_ended (Conversion page, pulse_conversion,
+   > outcome maturing/counted, health-check) and what each would show differently; (3) the numbers: how many
+   > tracked 2-Class packs have exactly 1 class, how far their end would move, which months' intros/members
+   > and conversion rates would change and by how much (haven-va's quick check on 2026-10-02: 47 packs,
+   > +13.9 days on average, 21 change month). Report back for a decision with Madalena and Mafalda; record
+   > it as an open question in docs/data-model/for-mafalda.md. Note: haven-va already uses the 2026-10-02
+   > rule in its own view (va.v_pulse_intro_pack_tracking), so the bot's lists do not depend on this.
 
 b. **`is_lead`** — counts from expiry. **Handled on haven-va's side** (founder: "change it"): the bot's own
    view (step 3) carries `is_lead` / `days_since_end` / `is_recent` from the right end, and the Monday cron
