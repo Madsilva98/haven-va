@@ -6,6 +6,7 @@ import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
+import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
@@ -101,7 +102,8 @@ const tasks = [
   cron.schedule(
     "15 8 * * *",
     () =>
-      runIntroPackExpiring().catch((e) =>
+      // The "Tracking intro packs" list replaces the old digest once its DB is configured.
+      (process.env.NOTION_INTRO_TRACKING_DB_ID ? runIntroPackTracking() : runIntroPackExpiring()).catch((e) =>
         log.error("cron.intro_pack_expiring", { e: String(e) }),
       ),
     { timezone: TZ },

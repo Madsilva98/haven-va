@@ -27,6 +27,7 @@ const EVENTS_DB_ID           = process.env.NOTION_EVENT_DB_ID;
 const LISTS_DB_ID            = process.env.NOTION_LISTS_DB_ID;
 const LEADS_DB_ID            = process.env.NOTION_LEADS_DB_ID;
 const CHURN_RISK_DB_ID       = process.env.NOTION_CHURN_RISK_DB_ID;
+const INTRO_TRACKING_DB_ID   = process.env.NOTION_INTRO_TRACKING_DB_ID;
 const COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const COMPETITOR_INTEL_DB_ID   = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
@@ -295,6 +296,31 @@ const churnRiskProperties = {
   "Criado em": { created_time: {} },
 };
 
+// ── Tracking intro packs ─────────────────────────────────────────────────────
+// Title property is "Name" (the founder created the DB). Fed by
+// src/crons/intro-pack-tracking.ts. "Notas" is the founders' own — the bot
+// never writes it. "Member ID" is the dedup key (md5 of the email).
+const introTrackingProperties = {
+  Estado: { select: { options: [
+    { name: "A contactar" }, { name: "Contactado" }, { name: "Convertido" }, { name: "Perdido" },
+    { name: "Comprou outra coisa" }, { name: "Cold lead" }, { name: "Idle" },
+  ] } },
+  Motivo: { select: { options: [
+    { name: "À espera de começar" }, { name: "Underused pack" }, { name: "Pack ending" }, { name: "Pack ended" },
+  ] } },
+  Pack: { select: { options: [{ name: "2-Class" }, { name: "10-Day" }] } },
+  "Aulas feitas": { number: {} },
+  "Aulas marcadas": { number: {} },
+  Compra: { date: {} },
+  "Início": { date: {} },
+  Fim: { date: {} },
+  Email: { email: {} },
+  Telefone: { phone_number: {} },
+  Notas: { rich_text: {} },
+  "Member ID": { rich_text: {} },
+  "Criado em": { created_time: {} },
+};
+
 // ── Fontes Concorrência/Inspiração ──────────────────────────────────────────
 // Founder-maintained sender list driving the competitor-intel Gmail tidy step.
 const competitorSourcesProperties = {
@@ -373,6 +399,8 @@ async function main() {
   else console.log("· Leads a contactar DB id not set — skipping");
   if (CHURN_RISK_DB_ID)       await setup("Clientes em risco", CHURN_RISK_DB_ID,      churnRiskProperties);
   else console.log("· Clientes em risco DB id not set — skipping");
+  if (INTRO_TRACKING_DB_ID)   await setup("Tracking intro packs", INTRO_TRACKING_DB_ID, introTrackingProperties);
+  else console.log("· Tracking intro packs DB id not set — skipping");
   if (COMPETITOR_SOURCES_DB_ID) await setup("Fontes Concorrência/Inspiração", COMPETITOR_SOURCES_DB_ID, competitorSourcesProperties);
   else console.log("· Fontes Concorrência/Inspiração DB id not set — skipping");
   if (COMPETITOR_INTEL_DB_ID)   await setup("Competitor Intel", COMPETITOR_INTEL_DB_ID, competitorIntelProperties);

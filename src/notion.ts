@@ -42,6 +42,10 @@ import type {
   LeadStatus,
   ChurnSignalType,
   ChurnStatus,
+  IntroTrackingEstado,
+  IntroTrackingFields,
+  IntroTrackingMotivo,
+  IntroTrackingRow,
   CompetitorSourceRow,
   CompetitorSourceCategory,
   CompetitorIntelFinding,
@@ -70,6 +74,7 @@ const NOTION_EVENT_DB_ID = process.env.NOTION_EVENT_DB_ID;
 const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
 const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
 const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
+const NOTION_INTRO_TRACKING_DB_ID = process.env.NOTION_INTRO_TRACKING_DB_ID;
 const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
@@ -108,6 +113,7 @@ export async function initialize(): Promise<void> {
     NOTION_LISTS_DB_ID,
     NOTION_LEADS_DB_ID,
     NOTION_CHURN_RISK_DB_ID,
+    NOTION_INTRO_TRACKING_DB_ID,
     NOTION_COMPETITOR_SOURCES_DB_ID,
     NOTION_COMPETITOR_INTEL_DB_ID,
   ]);
@@ -2626,6 +2632,98 @@ async function updateChurnFlag(
   log.info("notion.churn_flag_updated", { pageId, sinais });
 }
 
+// ----- Tracking intro packs -----
+// One row per person, keyed on "Member ID" (md5 of the email, the studio
+// views' join key) — the dedup key, so a stale or repeated import can never
+// create a second row. The bot writes only its own columns: "Notas" (and the
+// page body) are the founders' and never appear in any write below.
+
+function introTrackingFieldProps(f: IntroTrackingFields): Record<string, unknown> {
+  return {
+    ...(f.motivo ? { Motivo: { select: { name: f.motivo } } } : {}),
+    Pack: { select: { name: f.pack } },
+    "Aulas feitas": { number: f.aulasFeitas },
+    "Aulas marcadas": { number: f.aulasMarcadas },
+    Compra: { date: { start: f.compra } },
+    "Início": { date: f.inicio ? { start: f.inicio } : null },
+    Fim: { date: { start: f.fim } },
+    Email: { email: f.email },
+    ...(f.telefone ? { Telefone: { phone_number: f.telefone } } : {}),
+  };
+}
+
+// Every row, any Estado — full cursor loop. Hidden (closed) rows are read
+// too: they are what stops the same person being added again.
+async function getAllIntroTrackingRows(): Promise<IntroTrackingRow[]> {
+  if (!NOTION_INTRO_TRACKING_DB_ID) return [];
+  const rows: IntroTrackingRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getAllIntroTrackingRows", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_INTRO_TRACKING_DB_ID!),
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        memberId: readPlainText(props["Member ID"]).trim(),
+        nome: readPlainText(props["Name"]),
+        estado: readSelectName(props["Estado"]) as IntroTrackingEstado | null,
+        motivo: readSelectName(props["Motivo"]) as IntroTrackingMotivo | null,
+        aulasFeitas: readNumber(props["Aulas feitas"]),
+        aulasMarcadas: readNumber(props["Aulas marcadas"]),
+        inicio: readDateStart(props["Início"]),
+        fim: readDateStart(props["Fim"]),
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return rows;
+}
+
+async function createIntroTrackingRow(
+  nome: string,
+  memberId: string,
+  fields: IntroTrackingFields,
+): Promise<string> {
+  if (!NOTION_INTRO_TRACKING_DB_ID) throw new Error("NOTION_INTRO_TRACKING_DB_ID not set");
+  const page = await withRetry("createIntroTrackingRow", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_INTRO_TRACKING_DB_ID!) },
+      properties: {
+        Name: { title: [{ text: { content: nome } }] },
+        "Member ID": richText(memberId),
+        Estado: { select: { name: "A contactar" satisfies IntroTrackingEstado } },
+        ...introTrackingFieldProps(fields),
+      } as Parameters<typeof client.pages.create>[0]["properties"],
+    }),
+  );
+  log.info("notion.intro_tracking_created", { pageId: page.id, motivo: fields.motivo });
+  return page.id;
+}
+
+// Refreshes the bot's columns and, when given, Estado. Never touches Notas.
+async function updateIntroTrackingRow(
+  pageId: string,
+  fields: IntroTrackingFields,
+  estado?: IntroTrackingEstado,
+): Promise<void> {
+  await withRetry("updateIntroTrackingRow", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: {
+        ...introTrackingFieldProps(fields),
+        ...(estado ? { Estado: { select: { name: estado } } } : {}),
+      } as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+  log.info("notion.intro_tracking_updated", { pageId, estado: estado ?? null });
+}
+
 // ----- Page section editing -----
 
 function normalizeSectionName(text: string): string {
@@ -3218,6 +3316,10 @@ export {
   createChurnFlag,
   updateChurnFlag,
   getChurnRowsByStatus,
+  // Tracking intro packs
+  getAllIntroTrackingRows,
+  createIntroTrackingRow,
+  updateIntroTrackingRow,
   // Competitor intel
   getActiveCompetitorSources,
   createCompetitorIntelFinding,
@@ -3300,6 +3402,10 @@ export const notion = {
   createChurnFlag,
   updateChurnFlag,
   getChurnRowsByStatus,
+  // Tracking intro packs
+  getAllIntroTrackingRows,
+  createIntroTrackingRow,
+  updateIntroTrackingRow,
   // Competitor intel
   getActiveCompetitorSources,
   createCompetitorIntelFinding,

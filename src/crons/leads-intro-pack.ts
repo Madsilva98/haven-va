@@ -24,7 +24,7 @@ import { log } from "../lib/log.js";
 import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
-import { PULSE_VIEW } from "../lib/pulse-views.js";
+import { memberIdFromEmail, PULSE_VIEW } from "../lib/pulse-views.js";
 import { formatLeadsDigest, type NewLeadSummary } from "../messages/leads.js";
 import * as notion from "../notion.js";
 
@@ -51,12 +51,31 @@ export async function run(): Promise<void> {
     return;
   }
 
+  // Someone a founder marked Perdido on "Tracking intro packs" was already
+  // given up on — they never become a lead here (founder, 2026-10-02). A
+  // failed read stops the run rather than risk adding them; next Monday retries.
+  let lostOnTracking = new Set<string>();
+  if (process.env.NOTION_INTRO_TRACKING_DB_ID) {
+    try {
+      const rows = await notion.getAllIntroTrackingRows();
+      lostOnTracking = new Set(rows.filter((r) => r.estado === "Perdido").map((r) => r.memberId));
+    } catch (err) {
+      log.error("leads_intro_pack.tracking_read_failed", { message: errMsg(err) });
+      return;
+    }
+  }
+
   const created: NewLeadSummary[] = [];
   const digestWorthy: NewLeadSummary[] = [];
   let skippedExisting = 0;
+  let skippedLost = 0;
   let backlogSuppressed = 0;
 
   for (const c of candidates) {
+    if (lostOnTracking.has(memberIdFromEmail(c.email))) {
+      skippedLost++;
+      continue;
+    }
     try {
       // findLeadByEmailAny, not findLeadByEmail: an Intro Pack candidate
       // re-derives every Monday for as long as the pack stays unconverted,
@@ -102,6 +121,7 @@ export async function run(): Promise<void> {
     log.info("leads_intro_pack.no_new", {
       totalCandidates: candidates.length,
       skippedExisting,
+      skippedLost,
       created: created.length,
       backlogSuppressed,
     });
@@ -115,6 +135,7 @@ export async function run(): Promise<void> {
       created: created.length,
       backlogSuppressed,
       skippedExisting,
+      skippedLost,
     });
   } catch (err) {
     log.error("leads_intro_pack.send_failed", { message: errMsg(err) });

@@ -20,13 +20,16 @@ vi.mock("../src/lib/telegram.js", () => ({
 const findLeadByEmail = vi.fn();
 const findLeadByEmailAny = vi.fn();
 const createLead = vi.fn().mockResolvedValue("new-page-id");
+const getAllIntroTrackingRows = vi.fn().mockResolvedValue([]);
 vi.mock("../src/notion.js", () => ({
   findLeadByEmail: (...args: unknown[]) => findLeadByEmail(...args),
   findLeadByEmailAny: (...args: unknown[]) => findLeadByEmailAny(...args),
   createLead: (...args: unknown[]) => createLead(...args),
+  getAllIntroTrackingRows: (...args: unknown[]) => getAllIntroTrackingRows(...args),
 }));
 
 import { run } from "../src/crons/leads-intro-pack.js";
+import { memberIdFromEmail } from "../src/lib/pulse-views.js";
 
 const candidate = {
   email: "marta@x.com",
@@ -142,5 +145,32 @@ describe("leads-intro-pack", () => {
     const [sentText] = sendGroupMessage.mock.calls[0]!;
     expect(sentText).toContain("Fresh Candidate");
     expect(sentText).not.toContain("Francisca Rosa");
+  });
+
+  it("never turns someone marked Perdido on Tracking intro packs into a lead (founder, 2026-10-02)", async () => {
+    process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18" });
+    findLeadByEmailAny.mockResolvedValue(null);
+    getAllIntroTrackingRows.mockResolvedValue([
+      { id: "t1", memberId: memberIdFromEmail("marta@x.com"), nome: "Marta", estado: "Perdido" },
+    ]);
+
+    await run();
+
+    expect(createLead).not.toHaveBeenCalled();
+    delete process.env.NOTION_INTRO_TRACKING_DB_ID;
+    getAllIntroTrackingRows.mockResolvedValue([]);
+  });
+
+  it("stops the run rather than risk adding a Perdido person when the tracking list can't be read", async () => {
+    process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18" });
+    getAllIntroTrackingRows.mockRejectedValue(new Error("notion down"));
+
+    await run();
+
+    expect(createLead).not.toHaveBeenCalled();
+    delete process.env.NOTION_INTRO_TRACKING_DB_ID;
+    getAllIntroTrackingRows.mockResolvedValue([]);
   });
 });
