@@ -3,6 +3,12 @@
 From haven-va PR #51 ("Tracking intro packs"). haven-va's database role is read-only, so these need a
 haven-studio session (data-model-review, migration, view file, va rebuild). Do them in this order.
 
+> **Status 2026-10-02 (haven-studio PR #28).** 2 and 3 done and live. 1a settled by the founder as two
+> rules for two uses: the dashboard keeps `pack_ended_on` (the last class taken, none = expiry), unchanged;
+> the bot treats a 1-class 2-Class pack as open until expiry, then counts from that class, so the tracking
+> view reads `ended_on = o.pack_ended_on` (2-Class leads 99 → 103). The "otherwise → expiry" lines below are
+> superseded. 1b waits until the bot reads the tracking view (`NOTION_INTRO_TRACKING_DB_ID` set, one Monday run).
+
 ## 1. When a 2-Class intro pack ends — one rule, everywhere
 
 Founder (Madalena, 2026-10-02, verbatim): "the end of the pack, on the 2 day intro pack, IS the day of the

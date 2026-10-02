@@ -230,8 +230,8 @@ export async function findUnconvertedIntroPacks(): Promise<{
 }> {
   // Once "Tracking intro packs" is on, the rule comes from the bot's own view
   // so both lists count from the same pack end (founder, 2026-10-02: a 2-Class
-  // pack ends on its 2nd class when there is one, "ALWAYS"; the studio's
-  // is_lead counts from expiry). That view is created together with the
+  // pack with 1 class is open until expiry, then counts from the class taken;
+  // the studio's is_lead counts from expiry). That view is created together with the
   // switch, so it is only read when NOTION_INTRO_TRACKING_DB_ID is set.
   const useTracking = Boolean(process.env.NOTION_INTRO_TRACKING_DB_ID);
   const sourceView = useTracking ? PULSE_VIEW.introPackTracking : PULSE_VIEW.introPackLeads;
