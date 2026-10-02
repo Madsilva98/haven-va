@@ -40,8 +40,10 @@
 --                  an expiry date (2 weeks after the first class)". 2-Class with the 2nd class done → the
 --                  2nd class; otherwise, and any other pack, Kenko's expiry. (pack_ended_on still says "1
 --                  class used = that class" — requested fix, see the requests doc.)
---   cold_lead    = 20 days after that end, not converted. leads-intro-pack.ts (Monday, is_lead, 21 days)
---                  is unchanged and adds them to "Leads a contactar" — unless marked Perdido here.
+--   cold_lead    = 20 days after that end, not converted. is_lead (21 days after the SAME end) is what
+--                  leads-intro-pack.ts reads on Mondays to add them to "Leads a contactar" — unless marked
+--                  Perdido here. This replaces v_pulse_intro_outcome.is_lead for the bot (that one counts
+--                  from expiry); once haven-va reads this view, haven-studio can drop is_lead there.
 --   pack_ending  = 2-Class with 1 class used and none booked ahead, or any 10-Day, 0-5 days to expiry.
 --   underused    = 10-Day, 1-2 classes, 5+ days since the first class on the pack.
 
@@ -83,6 +85,13 @@ select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on,
        when f.not_started and f.booked_ahead = 0 and f.data_as_of - f.bought_on >= 30 then 'idle'
        when not f.not_started and f.pack_over and f.data_as_of - f.ended_on >= 20 then 'cold_lead'
   end as auto_state,
+  -- "Leads a contactar" (leads-intro-pack.ts, Monday) reads these instead of v_pulse_intro_outcome.is_lead,
+  -- so both lists count from the same pack end (founder, 2026-10-02: "change it"). Same rule otherwise:
+  -- 21+ days since the end, no membership or class pack; an unstarted pack is idle, never a lead.
+  not f.not_started and f.pack_over and f.outcome not in ('member', 'pack')
+    and f.data_as_of - f.ended_on >= 21 as is_lead,
+  f.data_as_of - f.ended_on as days_since_end,
+  f.data_as_of - f.ended_on < 28 as is_recent,
   case when f.outcome in ('member', 'pack') then null
        when f.not_started then
          case when f.booked_ahead = 0 and f.data_as_of - f.bought_on between 7 and 29 then 'waiting_to_start' end
@@ -95,6 +104,6 @@ select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on,
   end as reason
 from f;
 
-comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reason = why they belong on the list today (waiting_to_start: 0 classes, 7-29 days since purchase, nothing booked; underused: 10-Day, 1-2 classes, 5+ days since the first; pack_ending: 0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked; pack_ended: under 20 days since the end). auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack with both classes ends on the 2nd class, any other on expiry. Time rules count to data_as_of; pack_ending reads the calendar.';
+comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reason = why they belong on the list today (waiting_to_start: 0 classes, 7-29 days since purchase, nothing booked; underused: 10-Day, 1-2 classes, 5+ days since the first; pack_ending: 0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked; pack_ended: under 20 days since the end). auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack with both classes ends on the 2nd class, any other on expiry. Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
 
 grant select on va.v_pulse_intro_pack_tracking to haven_va;

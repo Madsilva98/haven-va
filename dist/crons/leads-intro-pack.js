@@ -23,7 +23,7 @@ import { log } from "../lib/log.js";
 import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
-import { memberIdFromEmail, PULSE_VIEW } from "../lib/pulse-views.js";
+import { memberIdFromEmail } from "../lib/pulse-views.js";
 import { formatLeadsDigest } from "../messages/leads.js";
 import * as notion from "../notion.js";
 function errMsg(err) {
@@ -40,8 +40,9 @@ export async function run() {
     }
     let candidates;
     let asOf;
+    let sourceView;
     try {
-        ({ candidates, asOf } = await findUnconvertedIntroPacks());
+        ({ candidates, asOf, sourceView } = await findUnconvertedIntroPacks());
     }
     catch (err) {
         log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
@@ -120,7 +121,7 @@ export async function run() {
         return;
     }
     try {
-        const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPackLeads], asOf);
+        const messageId = await sendGroupMessageWithSource(message, [sourceView], asOf);
         log.info("leads_intro_pack.posted", {
             messageId,
             count: digestWorthy.length,

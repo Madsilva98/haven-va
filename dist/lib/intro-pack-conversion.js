@@ -29,7 +29,7 @@
  */
 import { fetchAllCustomerNames, findPhoneByEmail } from "./leads.js";
 import { log } from "./log.js";
-import { fetchDataAsOf, fetchIntroConversion, fetchIntroPackLeads, fetchIntroPackWatch, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, } from "./pulse-views.js";
+import { fetchDataAsOf, fetchIntroConversion, fetchIntroPackLeads, fetchIntroPackTrackingLeads, fetchIntroPackWatch, fetchIntroPurchases, fetchMemberActivity, memberIdFromEmail, PULSE_VIEW, } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
 import { lisbonNaiveToUtcIso } from "./tz.js";
 /** The view's `pack` labels this bot tracks. */
@@ -154,18 +154,25 @@ function toUnconverted(row, now, visitsByMember, customers) {
  * simple joins, not business-rule decisions.
  */
 export async function findUnconvertedIntroPacks() {
+    // Once "Tracking intro packs" is on, the rule comes from the bot's own view
+    // so both lists count from the same pack end (founder, 2026-10-02: a 2-Class
+    // pack ends on its 2nd class when there is one, "ALWAYS"; the studio's
+    // is_lead counts from expiry). That view is created together with the
+    // switch, so it is only read when NOTION_INTRO_TRACKING_DB_ID is set.
+    const useTracking = Boolean(process.env.NOTION_INTRO_TRACKING_DB_ID);
+    const sourceView = useTracking ? PULSE_VIEW.introPackTracking : PULSE_VIEW.introPackLeads;
     if (!isStudioDbAvailable()) {
         log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
-        return { candidates: [], asOf: null };
+        return { candidates: [], asOf: null, sourceView };
     }
     const [asOf, leadRows, activity, customers] = await Promise.all([
         fetchDataAsOf(),
-        fetchIntroPackLeads(),
+        useTracking ? fetchTrackingLeadsAsLeadRows() : fetchIntroPackLeads(),
         fetchMemberActivity(),
         fetchAllCustomerNames(),
     ]);
     if (!asOf)
-        return { candidates: [], asOf: null };
+        return { candidates: [], asOf: null, sourceView };
     const visits = visitStats(activity);
     const names = nameByMemberId(customers);
     const candidates = leadRows.map((r) => {
@@ -184,7 +191,20 @@ export async function findUnconvertedIntroPacks() {
             visitCount: v?.count ?? 0,
         };
     });
-    return { candidates, asOf };
+    return { candidates, asOf, sourceView };
+}
+/** The tracking view's lead rows in the old view's shape: its `ended_on` is the pack end. */
+async function fetchTrackingLeadsAsLeadRows() {
+    const rows = await fetchIntroPackTrackingLeads();
+    return rows.map((r) => ({
+        member_id: r.member_id,
+        email: r.email,
+        pack: r.pack,
+        item_name: r.item_name,
+        intro_end: r.ended_on,
+        days_since_expiry: r.days_since_end,
+        is_recent: r.is_recent,
+    }));
 }
 /**
  * Activated intro packs worth a same-day nudge before they lapse. Four

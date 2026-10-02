@@ -156,6 +156,13 @@ export async function fetchIntroPackLeads() {
     return query(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
 }
 export const fetchIntroPackTracking = () => fetchView(PULSE_VIEW.introPackTracking);
+export async function fetchIntroPackTrackingLeads() {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackTracking, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return query(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
+}
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
 /**
  * The last date the studio data covers — the one "today" for every roster,

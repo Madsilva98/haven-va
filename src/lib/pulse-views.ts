@@ -419,10 +419,20 @@ export interface IntroPackTrackingRow {
   outcome: string;
   data_as_of: string;
   auto_state: IntroTrackingAutoState | null;
+  is_lead: boolean; // 21+ days since the same end, not converted — the Monday "Leads a contactar" rule
+  days_since_end: number;
+  is_recent: boolean; // under 28 days since the end: crossed day 21 within about the last week
   reason: IntroTrackingReason | null;
 }
 export const fetchIntroPackTracking = (): Promise<IntroPackTrackingRow[]> =>
   fetchView<IntroPackTrackingRow>(PULSE_VIEW.introPackTracking);
+export async function fetchIntroPackTrackingLeads(): Promise<IntroPackTrackingRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackTracking, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return query<IntroPackTrackingRow>(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
+}
 
 /**
  * v_pulse_churn_risk_signals: one row per active member, a column copy of haven-studio's

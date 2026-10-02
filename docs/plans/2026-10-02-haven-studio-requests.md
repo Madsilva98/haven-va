@@ -23,11 +23,15 @@ a. **`pack_ended_on`** — currently "the 2nd charged to it, else the 1st, none 
    charts' "ended" basis for 1-class packs — predict the month counts before applying, as the 2026-10-01
    migration did.
 
-b. **`is_lead`** — currently `s.asof - o.ended_on >= 21` (expiry). It must count from the pack end:
-   `s.asof - o.pack_ended_on >= 21`. Effect: someone who used both classes quickly reaches "Leads a
-   contactar" up to ~2 weeks earlier, right after leaving the bot's tracking list (Cold lead at 20 days
-   from the same end) instead of falling into a gap on neither list. `days_since_expiry` / `is_recent`
-   (the bot's digest gate) should follow the same end.
+b. **`is_lead`** — counts from expiry. **Handled on haven-va's side** (founder: "change it"): the bot's own
+   view (step 3) carries `is_lead` / `days_since_end` / `is_recent` from the right end, and the Monday cron
+   reads those once the list is switched on. Live data 2026-10-02: 2-Class leads 103 → 99 (the 4 dropped
+   never came to a class: idle, not leads), 10-Day unchanged at 91, both-classes people reach the list 8.3
+   days earlier on average. After haven-va switches over, `v_pulse_intro_outcome.is_lead` and
+   `va.v_pulse_intro_pack_leads` have no reader — drop them so the rule has one owner.
+
+   **1a is still the founder's call** (it moves the dashboard's conversion charts): 47 tracked 2-Class packs
+   with 1 class used, end moves 13.9 days later on average, 21 change month.
 
 ## 2. `booked_ahead` on `public.v_pulse_member_activity`
 

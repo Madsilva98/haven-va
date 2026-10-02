@@ -34,11 +34,15 @@ import {
   fetchDataAsOf,
   fetchIntroConversion,
   fetchIntroPackLeads,
+  fetchIntroPackTrackingLeads,
   fetchIntroPackWatch,
   fetchIntroPurchases,
   fetchMemberActivity,
   memberIdFromEmail,
+  PULSE_VIEW,
+  type IntroPackLeadRow,
   type IntroPurchaseRow,
+  type PulseViewName,
   type MemberActivityRow,
 } from "./pulse-views.js";
 import { isStudioDbAvailable } from "./studio-db.js";
@@ -222,18 +226,26 @@ function toUnconverted(
 export async function findUnconvertedIntroPacks(): Promise<{
   candidates: UnconvertedIntroPack[];
   asOf: string | null;
+  sourceView: PulseViewName;
 }> {
+  // Once "Tracking intro packs" is on, the rule comes from the bot's own view
+  // so both lists count from the same pack end (founder, 2026-10-02: a 2-Class
+  // pack ends on its 2nd class when there is one, "ALWAYS"; the studio's
+  // is_lead counts from expiry). That view is created together with the
+  // switch, so it is only read when NOTION_INTRO_TRACKING_DB_ID is set.
+  const useTracking = Boolean(process.env.NOTION_INTRO_TRACKING_DB_ID);
+  const sourceView = useTracking ? PULSE_VIEW.introPackTracking : PULSE_VIEW.introPackLeads;
   if (!isStudioDbAvailable()) {
     log.warn("intro_pack_conversion.fetch_skipped", { reason: "studio_db_not_configured" });
-    return { candidates: [], asOf: null };
+    return { candidates: [], asOf: null, sourceView };
   }
   const [asOf, leadRows, activity, customers] = await Promise.all([
     fetchDataAsOf(),
-    fetchIntroPackLeads(),
+    useTracking ? fetchTrackingLeadsAsLeadRows() : fetchIntroPackLeads(),
     fetchMemberActivity(),
     fetchAllCustomerNames(),
   ]);
-  if (!asOf) return { candidates: [], asOf: null };
+  if (!asOf) return { candidates: [], asOf: null, sourceView };
   const visits = visitStats(activity);
   const names = nameByMemberId(customers);
   const candidates: UnconvertedIntroPack[] = leadRows.map((r) => {
@@ -252,7 +264,23 @@ export async function findUnconvertedIntroPacks(): Promise<{
       visitCount: v?.count ?? 0,
     };
   });
-  return { candidates, asOf };
+  return { candidates, asOf, sourceView };
+}
+
+/** The tracking view's lead rows in the old view's shape: its `ended_on` is the pack end. */
+async function fetchTrackingLeadsAsLeadRows(): Promise<
+  Pick<IntroPackLeadRow, "member_id" | "email" | "pack" | "item_name" | "intro_end" | "days_since_expiry" | "is_recent">[]
+> {
+  const rows = await fetchIntroPackTrackingLeads();
+  return rows.map((r) => ({
+    member_id: r.member_id,
+    email: r.email,
+    pack: r.pack,
+    item_name: r.item_name,
+    intro_end: r.ended_on,
+    days_since_expiry: r.days_since_end,
+    is_recent: r.is_recent,
+  }));
 }
 
 export type IntroPackWatchReason = "unused_ending" | "completed_followup" | "ending" | "underused";
