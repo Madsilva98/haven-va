@@ -20,7 +20,11 @@ function viewRow(over: Partial<IntroPackTrackingRow> = {}): IntroPackTrackingRow
     outcome: "maturing",
     data_as_of: "2026-10-02",
     auto_state: null,
+    is_lead: false,
+    days_since_end: 7,
+    is_recent: true,
     reason: "pack_ended",
+    reasons: ["pack_ended"],
     ...over,
   };
 }
@@ -31,7 +35,7 @@ function notionRow(over: Partial<IntroTrackingRow> = {}): IntroTrackingRow {
     memberId: "m1",
     nome: "Ana",
     estado: "A contactar",
-    motivo: "Pack ended",
+    motivos: ["Pack ended"],
     aulasFeitas: 2,
     aulasMarcadas: 0,
     inicio: "2026-09-18",
@@ -74,10 +78,19 @@ describe("planIntroTracking", () => {
       {
         memberId: "m1",
         name: "Ana Silva",
-        fields: expect.objectContaining({ motivo: "Pack ended", pack: "2-Class", aulasFeitas: 2, telefone: "+351 900" }),
+        fields: expect.objectContaining({ motivos: ["Pack ended"], pack: "2-Class", aulasFeitas: 2, telefone: "+351 900" }),
       },
     ]);
     expect(plan.updates).toEqual([]);
+  });
+
+  it("a 10-Day pack can be Underused and Pack ending on the same day — both are kept (2026-10-03)", () => {
+    const plan = planIntroTracking(
+      [viewRow({ pack: "10-Day", visits_in_pack: 2, reason: "pack_ending", reasons: ["underused", "pack_ending"] })],
+      [],
+      people,
+    );
+    expect(plan.creates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
   });
 
   it("never adds a person twice, whatever their Estado — a stale import repeats the same rows", () => {
@@ -90,38 +103,62 @@ describe("planIntroTracking", () => {
   it("does not write at all when nothing changed", () => {
     const plan = planIntroTracking([viewRow()], [notionRow()], people);
     expect(plan.updates).toEqual([]);
+    expect(plan.newMotivos).toEqual([]);
   });
 
-  it("refreshes the numbers and moves Motivo to the latest reason, keeping Estado", () => {
+  it("reasons accumulate: a new one is added after the old ones and announced", () => {
     const plan = planIntroTracking(
-      [viewRow({ pack: "10-Day", reason: "pack_ending", visits_in_pack: 3, booked_ahead: 2 })],
-      [notionRow({ motivo: "Underused pack", aulasFeitas: 2 })],
+      [viewRow({ pack: "10-Day", reasons: ["pack_ending"], visits_in_pack: 3, booked_ahead: 2 })],
+      [notionRow({ motivos: ["Underused pack"], aulasFeitas: 2 })],
       people,
     );
     expect(plan.updates).toHaveLength(1);
     expect(plan.updates[0]!.estado).toBeUndefined();
-    expect(plan.updates[0]!.fields).toMatchObject({ motivo: "Pack ending", aulasFeitas: 3, aulasMarcadas: 2 });
+    expect(plan.updates[0]!.fields).toMatchObject({
+      motivos: ["Underused pack", "Pack ending"],
+      aulasFeitas: 3,
+      aulasMarcadas: 2,
+    });
+    expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ending"] }]);
   });
 
-  it("a day with no reason keeps the last Motivo (it is not written)", () => {
-    const plan = planIntroTracking([viewRow({ reason: null, booked_ahead: 1 })], [notionRow()], people);
-    expect(plan.updates[0]!.fields.motivo).toBeUndefined();
+  it("a reason no longer true today is never removed", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: [], booked_ahead: 1 })],
+      [notionRow({ motivos: ["Underused pack", "Pack ending"] })],
+      people,
+    );
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
+    expect(plan.newMotivos).toEqual([]);
+  });
+
+  it("does not announce a new reason on a row the founder closed (Perdido)", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: ["pack_ended"] })],
+      [notionRow({ estado: "Perdido", motivos: ["Pack ending"] })],
+      people,
+    );
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ending", "Pack ended"]);
+    expect(plan.newMotivos).toEqual([]);
   });
 
   it("never creates a closed row — the first run is not a backfill of past intros", () => {
     const plan = planIntroTracking(
-      [viewRow({ reason: null, auto_state: "cold_lead" }), viewRow({ member_id: "m2", reason: null, auto_state: "converted" })],
+      [
+        viewRow({ reasons: [], auto_state: "cold_lead" }),
+        viewRow({ member_id: "m2", reasons: [], auto_state: "converted" }),
+      ],
       [],
       people,
     );
     expect(plan.creates).toEqual([]);
   });
 
-  it("announces only who converted to a membership", () => {
+  it("announces only who converted to a membership among the exits", () => {
     const plan = planIntroTracking(
       [
-        viewRow({ reason: null, auto_state: "converted" }),
-        viewRow({ member_id: "m2", reason: null, auto_state: "bought_other" }),
+        viewRow({ reasons: [], auto_state: "converted" }),
+        viewRow({ member_id: "m2", reasons: [], auto_state: "bought_other" }),
       ],
       [notionRow({ estado: "Contactado" }), notionRow({ id: "page-2", memberId: "m2", nome: "Rita" })],
       people,
@@ -133,13 +170,19 @@ describe("planIntroTracking", () => {
 
 describe("formatIntroTrackingDigest", () => {
   it("is silent when nothing is new", () => {
-    expect(formatIntroTrackingDigest([], [])).toBeNull();
+    expect(formatIntroTrackingDigest([], [], [])).toBeNull();
   });
 
-  it("lists who joined and who converted", () => {
-    const { creates } = planIntroTracking([viewRow({ booked_ahead: 1 })], [], people);
-    const text = formatIntroTrackingDigest(creates, ["Rita"])!;
-    expect(text).toContain("Ana Silva — Pack ended, 2-Class, 2 aulas feita(s), 1 aula marcada(s) (+351 900)");
+  it("lists who joined, who gained a reason, and who converted", () => {
+    const { creates } = planIntroTracking(
+      [viewRow({ booked_ahead: 1, reasons: ["underused", "pack_ending"] })],
+      [],
+      people,
+    );
+    const text = formatIntroTrackingDigest(creates, ["Rita"], [{ pageId: "p", name: "Joana", motivos: ["Underused pack"] }])!;
+    expect(text).toContain("Ana Silva — Underused pack + Pack ending, 2-Class, 2 aulas feita(s), 1 aula marcada(s) (+351 900)");
+    expect(text).toContain("Já na lista — novo motivo");
+    expect(text).toContain("• Joana — Underused pack");
     expect(text).toContain("Converteram para mensalidade");
     expect(text).toContain("• Rita");
   });

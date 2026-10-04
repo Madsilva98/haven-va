@@ -103,9 +103,20 @@ select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on,
             and (f.pack = '10-Day' or (f.visits_in_pack = 1 and f.booked_ahead = 0)) then 'pack_ending'
        when f.pack = '10-Day' and f.visits_in_pack between 1 and 2
             and f.data_as_of - f.first_class_on >= 5 then 'underused'
-  end as reason
+  end as reason,
+  -- every reason true today, each tested on its own (Madalena 2026-10-03: reasons accumulate). The single
+  -- `reason` above could never say underused on a 10-Day pack: "5 days since the first class" and "5 days
+  -- left" fall on the same day and pack_ending won. Applied live by haven-studio 2026-10-03.
+  case when f.outcome in ('member', 'pack') then '{}'::text[] else array_remove(array[
+    case when f.not_started and f.booked_ahead = 0 and f.data_as_of - f.bought_on between 7 and 29 then 'waiting_to_start' end,
+    case when f.pack = '10-Day' and not f.pack_over and f.visits_in_pack between 1 and 2
+              and f.data_as_of - f.first_class_on >= 5 then 'underused' end,
+    case when not f.not_started and not f.pack_over and f.expires_on - current_date between 0 and 5
+              and (f.pack = '10-Day' or (f.visits_in_pack = 1 and f.booked_ahead = 0)) then 'pack_ending' end,
+    case when not f.not_started and f.pack_over and f.data_as_of - f.ended_on < 20 then 'pack_ended' end
+  ], null) end as reasons
 from f;
 
-comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reason = why they belong on the list today (waiting_to_start: 0 classes, 7-29 days since purchase, nothing booked; underused: 10-Day, 1-2 classes, 5+ days since the first; pack_ending: 0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked; pack_ended: under 20 days since the end). auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack is over on its 2nd class or, with 1 class, once its expiry passes (the bot keeps trying until then); its end then counts from the last class taken (= v_pulse_intro_outcome.pack_ended_on, Madalena 2026-10-02). Any other pack: expiry. Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
+comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reasons = every reason true today, each tested on its own (Madalena 2026-10-03; the bot accumulates them): waiting_to_start (0 classes, 7-29 days since purchase, nothing booked), underused (10-Day still running, 1-2 classes, 5+ days since the first), pack_ending (0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked), pack_ended (under 20 days since the end). reason = the older single-reason column, kept for compatibility. auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack is over on its 2nd class or, with 1 class, once its expiry passes; its end then counts from the last class taken (= v_pulse_intro_outcome.pack_ended_on, Madalena 2026-10-02). Any other pack: expiry. Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
 
 grant select on va.v_pulse_intro_pack_tracking to haven_va;

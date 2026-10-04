@@ -5,14 +5,18 @@
  * only answers "given the view's answer and what's already in Notion, what
  * do we write?" — pure, so it is unit-tested without Notion or the database.
  *
- * Founder's rules (2026-10-02):
+ * Founder's rules (2026-10-02, reasons 2026-10-03):
  * - Someone already on the list is never added again, whatever their Estado
  *   (dedup on Member ID, which a stale import cannot change).
  * - The bot sets Convertido (membership) and Comprou outra coisa (class pack)
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
  * - Cold lead / Idle only replace an open Estado (A contactar / Contactado):
  *   never a founder's Perdido.
- * - Motivo always shows the latest reason; a day with no reason keeps it.
+ * - Motivo is a multi-select of every reason the person ever had: the view's
+ *   `reasons` (each tested on its own) are added, never removed. A single
+ *   reason could never show "Underused pack" on a 10-Day pack, because it
+ *   falls on the same day as "Pack ending" (found 2026-10-03).
+ * - A new reason on an open row is announced on Telegram, like a new person.
  * - Notas is never part of any write (src/notion.ts).
  */
 
@@ -70,16 +74,24 @@ export interface TrackingUpdate {
   estado?: IntroTrackingEstado;
 }
 
+export interface NewMotivo {
+  pageId: string;
+  name: string;
+  motivos: IntroTrackingMotivo[]; // only the ones added on this run
+}
+
 export interface TrackingPlan {
   creates: TrackingCreate[];
   updates: TrackingUpdate[];
   /** Became Convertido on this run — the only exits announced on Telegram. */
   converted: string[];
+  /** Open rows that gained a reason on this run — announced on Telegram. */
+  newMotivos: NewMotivo[];
 }
 
-function fieldsFor(r: IntroPackTrackingRow, person: Person, motivo?: IntroTrackingMotivo): IntroTrackingFields {
+function fieldsFor(r: IntroPackTrackingRow, person: Person, motivos: IntroTrackingMotivo[]): IntroTrackingFields {
   return {
-    motivo,
+    motivos,
     pack: r.pack,
     aulasFeitas: r.visits_in_pack,
     aulasMarcadas: r.booked_ahead,
@@ -93,7 +105,7 @@ function fieldsFor(r: IntroPackTrackingRow, person: Person, motivo?: IntroTracki
 
 function sameFields(row: IntroTrackingRow, f: IntroTrackingFields): boolean {
   return (
-    (f.motivo === undefined || row.motivo === f.motivo) &&
+    row.motivos.length === f.motivos.length &&
     row.aulasFeitas === f.aulasFeitas &&
     row.aulasMarcadas === f.aulasMarcadas &&
     row.inicio === f.inicio &&
@@ -109,26 +121,31 @@ export function planIntroTracking(
   const byMember = new Map<string, IntroTrackingRow>();
   for (const row of notionRows) if (row.memberId) byMember.set(row.memberId, row);
 
-  const plan: TrackingPlan = { creates: [], updates: [], converted: [] };
+  const plan: TrackingPlan = { creates: [], updates: [], converted: [], newMotivos: [] };
   for (const r of viewRows) {
     const person = people.get(r.member_id) ?? { name: r.email, phone: null };
-    const motivo = r.reason ? MOTIVO_BY_REASON[r.reason] : undefined;
+    const today = (r.reasons ?? []).map((reason) => MOTIVO_BY_REASON[reason]);
     const existing = byMember.get(r.member_id);
 
     if (!existing) {
       // Only someone who belongs on the list today gets a row — never a
       // closed one, so the first run is not a backfill of every past intro.
-      if (motivo && !r.auto_state) {
-        plan.creates.push({ memberId: r.member_id, name: person.name, fields: fieldsFor(r, person, motivo) });
+      if (today.length > 0 && !r.auto_state) {
+        plan.creates.push({ memberId: r.member_id, name: person.name, fields: fieldsFor(r, person, today) });
       }
       continue;
     }
 
-    const fields = fieldsFor(r, person, motivo);
+    const added = today.filter((m) => !existing.motivos.includes(m));
+    const fields = fieldsFor(r, person, [...existing.motivos, ...added]);
     const estado = nextEstado(existing.estado, r.auto_state);
     if (!estado && sameFields(existing, fields)) continue;
-    plan.updates.push({ pageId: existing.id, name: existing.nome || person.name, fields, ...(estado ? { estado } : {}) });
-    if (estado === "Convertido") plan.converted.push(existing.nome || person.name);
+    const name = existing.nome || person.name;
+    plan.updates.push({ pageId: existing.id, name, fields, ...(estado ? { estado } : {}) });
+    if (estado === "Convertido") plan.converted.push(name);
+    if (added.length > 0 && !estado && OPEN_ESTADOS.includes(existing.estado)) {
+      plan.newMotivos.push({ pageId: existing.id, name, motivos: added });
+    }
   }
   return plan;
 }

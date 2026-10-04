@@ -1,17 +1,22 @@
 /**
- * Daily Telegram note for the "Tracking intro packs" list: only who joined
- * the list on this run and who converted to a membership (founder's call,
- * 2026-10-02 — no link, no other exits). Null = nothing new, no message.
+ * Daily Telegram note for the "Tracking intro packs" list: who joined the
+ * list on this run, who already on it gained a new reason (founder,
+ * 2026-10-03: "go on telegram"), and who converted to a membership. Null =
+ * nothing new, no message.
  */
 
-import type { TrackingCreate } from "../lib/intro-pack-tracking.js";
+import type { NewMotivo, TrackingCreate } from "../lib/intro-pack-tracking.js";
 
 function aulas(n: number): string {
   return n === 1 ? "1 aula" : `${n} aulas`;
 }
 
-export function formatIntroTrackingDigest(created: TrackingCreate[], converted: string[]): string | null {
-  if (created.length === 0 && converted.length === 0) return null;
+export function formatIntroTrackingDigest(
+  created: TrackingCreate[],
+  converted: string[],
+  newMotivos: NewMotivo[] = [],
+): string | null {
+  if (created.length === 0 && converted.length === 0 && newMotivos.length === 0) return null;
   const lines: string[] = [];
 
   if (created.length > 0) {
@@ -19,11 +24,17 @@ export function formatIntroTrackingDigest(created: TrackingCreate[], converted: 
     for (const c of created) {
       const f = c.fields;
       lines.push(
-        `• ${c.name} — ${f.motivo}, ${f.pack}, ${aulas(f.aulasFeitas)} feita(s)` +
+        `• ${c.name} — ${f.motivos.join(" + ")}, ${f.pack}, ${aulas(f.aulasFeitas)} feita(s)` +
           (f.aulasMarcadas > 0 ? `, ${aulas(f.aulasMarcadas)} marcada(s)` : "") +
           (f.telefone ? ` (${f.telefone})` : ""),
       );
     }
+  }
+
+  if (newMotivos.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("🔁 *Já na lista — novo motivo:*");
+    for (const n of newMotivos) lines.push(`• ${n.name} — ${n.motivos.join(" + ")}`);
   }
 
   if (converted.length > 0) {

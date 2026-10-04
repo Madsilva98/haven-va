@@ -305,7 +305,7 @@ const introTrackingProperties = {
     { name: "A contactar" }, { name: "Contactado" }, { name: "Convertido" }, { name: "Perdido" },
     { name: "Comprou outra coisa" }, { name: "Cold lead" }, { name: "Idle" },
   ] } },
-  Motivo: { select: { options: [
+  Motivo: { multi_select: { options: [
     { name: "À espera de começar" }, { name: "Underused pack" }, { name: "Pack ending" }, { name: "Pack ended" },
   ] } },
   Pack: { select: { options: [{ name: "2-Class" }, { name: "10-Day" }] } },
