@@ -2201,7 +2201,7 @@ async function updateChurnFlag(pageId, sinais, detalhes) {
 // page body) are the founders' and never appear in any write below.
 function introTrackingFieldProps(f) {
     return {
-        ...(f.motivo ? { Motivo: { select: { name: f.motivo } } } : {}),
+        Motivo: { multi_select: f.motivos.map((name) => ({ name })) },
         Pack: { select: { name: f.pack } },
         "Aulas feitas": { number: f.aulasFeitas },
         "Aulas marcadas": { number: f.aulasMarcadas },
@@ -2233,7 +2233,7 @@ async function getAllIntroTrackingRows() {
                 memberId: readPlainText(props["Member ID"]).trim(),
                 nome: readPlainText(props["Name"]),
                 estado: readSelectName(props["Estado"]),
-                motivo: readSelectName(props["Motivo"]),
+                motivos: readMultiSelectNames(props["Motivo"]),
                 aulasFeitas: readNumber(props["Aulas feitas"]),
                 aulasMarcadas: readNumber(props["Aulas marcadas"]),
                 inicio: readDateStart(props["Início"]),
@@ -2256,7 +2256,7 @@ async function createIntroTrackingRow(nome, memberId, fields) {
             ...introTrackingFieldProps(fields),
         },
     }));
-    log.info("notion.intro_tracking_created", { pageId: page.id, motivo: fields.motivo });
+    log.info("notion.intro_tracking_created", { pageId: page.id, motivos: fields.motivos });
     return page.id;
 }
 // Refreshes the bot's columns and, when given, Estado. Never touches Notas.

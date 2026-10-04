@@ -422,7 +422,8 @@ export interface IntroPackTrackingRow {
   is_lead: boolean; // 21+ days since the same end, not converted — the Monday "Leads a contactar" rule
   days_since_end: number;
   is_recent: boolean; // under 28 days since the end: crossed day 21 within about the last week
-  reason: IntroTrackingReason | null;
+  reason: IntroTrackingReason | null; // older single-reason column, kept in the view for compatibility
+  reasons: IntroTrackingReason[]; // every reason true today, each tested on its own (2026-10-03) — what the bot reads
 }
 export const fetchIntroPackTracking = (): Promise<IntroPackTrackingRow[]> =>
   fetchView<IntroPackTrackingRow>(PULSE_VIEW.introPackTracking);

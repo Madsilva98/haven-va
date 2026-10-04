@@ -375,7 +375,7 @@ export type IntroTrackingMotivo =
 
 /** Bot-written columns only — "Notas" is never read or written by the bot. */
 export interface IntroTrackingFields {
-  motivo?: IntroTrackingMotivo;
+  motivos: IntroTrackingMotivo[]; // multi-select; reasons only accumulate, never removed (founder, 2026-10-03)
   pack: "2-Class" | "10-Day";
   aulasFeitas: number;
   aulasMarcadas: number;
@@ -391,7 +391,7 @@ export interface IntroTrackingRow {
   memberId: string;
   nome: string;
   estado: IntroTrackingEstado | null;
-  motivo: IntroTrackingMotivo | null;
+  motivos: IntroTrackingMotivo[];
   aulasFeitas: number | null;
   aulasMarcadas: number | null;
   inicio: string | null;

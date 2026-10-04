@@ -63,9 +63,11 @@ export async function run() {
         }
     }
     const converted = [];
+    const written = new Set();
     for (const u of plan.updates) {
         try {
             await notion.updateIntroTrackingRow(u.pageId, u.fields, u.estado);
+            written.add(u.pageId);
             if (u.estado === "Convertido")
                 converted.push(u.name);
         }
@@ -73,13 +75,17 @@ export async function run() {
             log.error("intro_pack_tracking.update_failed", { pageId: u.pageId, message: errMsg(err) });
         }
     }
+    // Announce a new reason only once it is in Notion — a failed write retries
+    // tomorrow and is announced then.
+    const newMotivos = plan.newMotivos.filter((n) => written.has(n.pageId));
     log.info("intro_pack_tracking.synced", {
         asOf,
         created: created.length,
         updated: plan.updates.length,
         converted: converted.length,
+        newMotivos: newMotivos.length,
     });
-    const message = formatIntroTrackingDigest(created, converted);
+    const message = formatIntroTrackingDigest(created, converted, newMotivos);
     if (!message)
         return;
     try {

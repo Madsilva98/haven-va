@@ -2640,7 +2640,7 @@ async function updateChurnFlag(
 
 function introTrackingFieldProps(f: IntroTrackingFields): Record<string, unknown> {
   return {
-    ...(f.motivo ? { Motivo: { select: { name: f.motivo } } } : {}),
+    Motivo: { multi_select: f.motivos.map((name) => ({ name })) },
     Pack: { select: { name: f.pack } },
     "Aulas feitas": { number: f.aulasFeitas },
     "Aulas marcadas": { number: f.aulasMarcadas },
@@ -2673,7 +2673,7 @@ async function getAllIntroTrackingRows(): Promise<IntroTrackingRow[]> {
         memberId: readPlainText(props["Member ID"]).trim(),
         nome: readPlainText(props["Name"]),
         estado: readSelectName(props["Estado"]) as IntroTrackingEstado | null,
-        motivo: readSelectName(props["Motivo"]) as IntroTrackingMotivo | null,
+        motivos: readMultiSelectNames(props["Motivo"]) as IntroTrackingMotivo[],
         aulasFeitas: readNumber(props["Aulas feitas"]),
         aulasMarcadas: readNumber(props["Aulas marcadas"]),
         inicio: readDateStart(props["Início"]),
@@ -2702,7 +2702,7 @@ async function createIntroTrackingRow(
       } as Parameters<typeof client.pages.create>[0]["properties"],
     }),
   );
-  log.info("notion.intro_tracking_created", { pageId: page.id, motivo: fields.motivo });
+  log.info("notion.intro_tracking_created", { pageId: page.id, motivos: fields.motivos });
   return page.id;
 }
 
