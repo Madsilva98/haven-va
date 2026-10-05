@@ -111,6 +111,15 @@ describe("planIntroTracking", () => {
     expect(bothClasses.creates[0]!.fields.fim).toBe("2026-09-25");
   });
 
+  it("Fim is empty while the pack hasn't started — no real expiry before the first class (2026-10-05)", () => {
+    const plan = planIntroTracking(
+      [viewRow({ visits_in_pack: 0, first_class_on: null, expires_on: "2026-10-12", ended_on: "2026-10-12", reasons: ["waiting_to_start"] })],
+      [],
+      people,
+    );
+    expect(plan.creates[0]!.fields.fim).toBeNull();
+  });
+
   it("never adds a person twice, whatever their Estado — a stale import repeats the same rows", () => {
     for (const estado of ["A contactar", "Perdido", "Cold lead", "Idle"] as const) {
       const plan = planIntroTracking([viewRow()], [notionRow({ estado })], people);

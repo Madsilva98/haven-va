@@ -2207,7 +2207,7 @@ function introTrackingFieldProps(f) {
         "Aulas marcadas": { number: f.aulasMarcadas },
         Compra: { date: { start: f.compra } },
         "Início": { date: f.inicio ? { start: f.inicio } : null },
-        Fim: { date: { start: f.fim } },
+        Fim: { date: f.fim ? { start: f.fim } : null },
         Email: { email: f.email },
         ...(f.telefone ? { Telefone: { phone_number: f.telefone } } : {}),
     };
