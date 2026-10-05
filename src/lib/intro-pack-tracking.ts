@@ -101,7 +101,11 @@ function fieldsFor(r: IntroPackTrackingRow, person: Person, motivos: IntroTracki
     aulasMarcadas: r.booked_ahead,
     compra: r.bought_on,
     inicio: r.first_class_on,
-    fim: r.ended_on,
+    // "Fim" shows when the pack ends for the person: the 2nd class once both are used, else Kenko's
+    // expiry (founder, 2026-10-05: "go with kenko, sometimes we extend the dates manually"). The view's
+    // ended_on — the start of the 20-day count — is the class taken for a 1-class 2-Class pack, which
+    // read as an already-ended pack (Victoria: Fim 14/09 on a pack valid until 09/10).
+    fim: r.pack === "2-Class" && r.visits_in_pack >= 2 ? r.ended_on : r.expires_on,
     email: r.email,
     telefone: person.phone,
   };
