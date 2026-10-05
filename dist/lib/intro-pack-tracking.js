@@ -10,16 +10,18 @@
  *   (dedup on Member ID, which a stale import cannot change).
  * - The bot sets Convertido (membership) and Comprou outra coisa (class pack)
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
- * - Cold lead / Idle only replace an open Estado (A contactar / Contactado / Follow up):
+ * - Cold lead / Idle only replace A contactar / Contactado — never Follow up (the founder is working that
+ *   person; they stay on this list, 2026-10-05) and
  *   never a founder's Perdido.
  * - Motivo is a multi-select of the reasons true TODAY — the view's `reasons`,
  *   each tested on its own (a single reason could never show "Underused pack"
  *   on a 10-Day pack: it falls on the same day as "Pack ending", 2026-10-03).
  *   A reason that no longer matches the current state disappears (founder,
- *   2026-10-05, after Jacqueline showed "Pack ending" + "Pack ended"). Only open
- *   rows follow today; a closed row keeps the Motivo it had when it closed, as
- *   the record of why the person was on the list.
- * - A new reason on an open row is announced on Telegram, like a new person.
+ *   2026-10-05, after Jacqueline showed "Pack ending" + "Pack ended"). Only
+ *   A contactar / Contactado rows follow today; a closed row — and a Follow up
+ *   row — keeps the Motivo it had when it got that Estado, as the record of
+ *   why the person was on the list.
+ * - A new reason on an A contactar / Contactado row is announced on Telegram.
  * - Notas is never part of any write (src/notion.ts).
  */
 export const MOTIVO_BY_REASON = {
@@ -28,8 +30,11 @@ export const MOTIVO_BY_REASON = {
     pack_ending: "Pack ending",
     pack_ended: "Pack ended",
 };
-// Follow up (founder, 2026-10-05) is open like Contactado: set by hand, the person stays on the list.
-const OPEN_ESTADOS = ["A contactar", "Contactado", "Follow up", null];
+// The Estados the bot keeps live: Motivo follows today, new reasons are announced, and the row can be
+// closed as Cold lead / Idle. Follow up (founder, 2026-10-05) is not one of them: the founder is working that
+// person — "se está follow-up, não passes para a lista das leads, deixa nos intro packs a converter", and
+// "the follow-up should keep the motivo it had before" — so only a purchase or the founder moves it on.
+const LIVE_ESTADOS = ["A contactar", "Contactado", null];
 /** The Estado the bot moves a row to, or null to leave it as it is. */
 export function nextEstado(current, autoState) {
     switch (autoState) {
@@ -38,9 +43,9 @@ export function nextEstado(current, autoState) {
         case "bought_other":
             return current === "Convertido" || current === "Comprou outra coisa" ? null : "Comprou outra coisa";
         case "cold_lead":
-            return OPEN_ESTADOS.includes(current) ? "Cold lead" : null;
+            return LIVE_ESTADOS.includes(current) ? "Cold lead" : null;
         case "idle":
-            return OPEN_ESTADOS.includes(current) ? "Idle" : null;
+            return LIVE_ESTADOS.includes(current) ? "Idle" : null;
         default:
             return null;
     }
@@ -97,7 +102,7 @@ export function planIntroTracking(viewRows, notionRows, people) {
             continue;
         }
         const estado = nextEstado(existing.estado, r.auto_state);
-        const staysOpen = !estado && OPEN_ESTADOS.includes(existing.estado);
+        const staysOpen = !estado && LIVE_ESTADOS.includes(existing.estado);
         const fields = fieldsFor(r, person, staysOpen ? today : existing.motivos);
         if (!estado && sameFields(existing, fields))
             continue;

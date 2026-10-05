@@ -66,10 +66,11 @@ describe("nextEstado", () => {
     expect(nextEstado("Perdido", "idle")).toBeNull();
   });
 
-  it("Follow up is open like Contactado: it can go cold or idle, and a purchase wins (2026-10-05)", () => {
-    expect(nextEstado("Follow up", "cold_lead")).toBe("Cold lead");
-    expect(nextEstado("Follow up", "idle")).toBe("Idle");
+  it("Follow up never goes Cold lead / Idle — it stays on this list to convert; a purchase still wins (2026-10-05)", () => {
+    expect(nextEstado("Follow up", "cold_lead")).toBeNull();
+    expect(nextEstado("Follow up", "idle")).toBeNull();
     expect(nextEstado("Follow up", "converted")).toBe("Convertido");
+    expect(nextEstado("Follow up", "bought_other")).toBe("Comprou outra coisa");
     expect(nextEstado("Follow up", null)).toBeNull();
   });
 
@@ -156,14 +157,24 @@ describe("planIntroTracking", () => {
     expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ending"] }]);
   });
 
-  it("a Follow up row follows today's reasons and announces a new one", () => {
+  it("a Follow up row keeps the Motivo it had — nothing new announced (founder, 2026-10-05)", () => {
     const plan = planIntroTracking(
-      [viewRow({ reasons: ["pack_ended"] })],
+      [viewRow({ reasons: ["pack_ended"], booked_ahead: 1 })],
       [notionRow({ estado: "Follow up", motivos: ["Pack ending"] })],
       people,
     );
-    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ended"]);
-    expect(plan.newMotivos).toHaveLength(1);
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ending"]);
+    expect(plan.updates[0]!.fields.aulasMarcadas).toBe(1); // the numbers still refresh
+    expect(plan.newMotivos).toEqual([]);
+  });
+
+  it("a Follow up row past the 20 days keeps its Motivo instead of going empty", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: [], auto_state: "cold_lead" })],
+      [notionRow({ estado: "Follow up", motivos: ["Pack ended"] })],
+      people,
+    );
+    expect(plan.updates).toEqual([]);
   });
 
   it("an open row with no reason today shows none — nothing announced", () => {
