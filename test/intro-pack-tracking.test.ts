@@ -66,10 +66,11 @@ describe("nextEstado", () => {
     expect(nextEstado("Perdido", "idle")).toBeNull();
   });
 
-  it("Follow up is open like Contactado: it can go cold or idle, and a purchase wins (2026-10-05)", () => {
-    expect(nextEstado("Follow up", "cold_lead")).toBe("Cold lead");
-    expect(nextEstado("Follow up", "idle")).toBe("Idle");
+  it("Follow up never goes Cold lead / Idle — it stays on this list to convert; a purchase still wins (2026-10-05)", () => {
+    expect(nextEstado("Follow up", "cold_lead")).toBeNull();
+    expect(nextEstado("Follow up", "idle")).toBeNull();
     expect(nextEstado("Follow up", "converted")).toBe("Convertido");
+    expect(nextEstado("Follow up", "bought_other")).toBe("Comprou outra coisa");
     expect(nextEstado("Follow up", null)).toBeNull();
   });
 

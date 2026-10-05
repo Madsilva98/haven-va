@@ -10,7 +10,8 @@
  *   (dedup on Member ID, which a stale import cannot change).
  * - The bot sets Convertido (membership) and Comprou outra coisa (class pack)
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
- * - Cold lead / Idle only replace an open Estado (A contactar / Contactado / Follow up):
+ * - Cold lead / Idle only replace A contactar / Contactado — never Follow up (the founder is working that
+ *   person; they stay on this list, 2026-10-05) and
  *   never a founder's Perdido.
  * - Motivo is a multi-select of the reasons true TODAY — the view's `reasons`,
  *   each tested on its own (a single reason could never show "Underused pack"
@@ -30,6 +31,10 @@ export const MOTIVO_BY_REASON = {
 };
 // Follow up (founder, 2026-10-05) is open like Contactado: set by hand, the person stays on the list.
 const OPEN_ESTADOS = ["A contactar", "Contactado", "Follow up", null];
+// The ones the bot may close as Cold lead / Idle. Follow up is not one of them (founder, 2026-10-05: "se está
+// follow-up, não passes para a lista das leads, deixa nos intro packs a converter") — only a purchase or
+// the founder moves it on.
+const AUTO_CLOSABLE = ["A contactar", "Contactado", null];
 /** The Estado the bot moves a row to, or null to leave it as it is. */
 export function nextEstado(current, autoState) {
     switch (autoState) {
@@ -38,9 +43,9 @@ export function nextEstado(current, autoState) {
         case "bought_other":
             return current === "Convertido" || current === "Comprou outra coisa" ? null : "Comprou outra coisa";
         case "cold_lead":
-            return OPEN_ESTADOS.includes(current) ? "Cold lead" : null;
+            return AUTO_CLOSABLE.includes(current) ? "Cold lead" : null;
         case "idle":
-            return OPEN_ESTADOS.includes(current) ? "Idle" : null;
+            return AUTO_CLOSABLE.includes(current) ? "Idle" : null;
         default:
             return null;
     }

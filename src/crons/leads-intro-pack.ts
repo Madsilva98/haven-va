@@ -29,7 +29,7 @@ import * as notion from "../notion.js";
 import type { IntroTrackingEstado } from "../types.js";
 
 /** Estados on "Tracking intro packs" that keep someone out of Leads a contactar. */
-const SKIP_AS_LEAD: IntroTrackingEstado[] = ["Perdido", "Convertido", "Comprou outra coisa"];
+const SKIP_AS_LEAD: IntroTrackingEstado[] = ["Perdido", "Convertido", "Comprou outra coisa", "Follow up"];
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -57,7 +57,9 @@ export async function run(): Promise<void> {
 
   // Someone a founder closed on "Tracking intro packs" never becomes a lead
   // here: Perdido (founder, 2026-10-02), and Convertido / Comprou outra coisa
-  // even when set by hand for a purchase Kenko doesn't show (2026-10-05). A
+  // even when set by hand for a purchase Kenko doesn't show (2026-10-05).
+  // Follow up stays on the intro packs list to convert, never a lead here
+  // (founder, 2026-10-05) — the tracking cron never makes it Cold lead. A
   // failed read stops the run rather than risk adding them; next Monday retries.
   let lostOnTracking = new Set<string>();
   if (process.env.NOTION_INTRO_TRACKING_DB_ID) {

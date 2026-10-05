@@ -161,7 +161,7 @@ describe("leads-intro-pack", () => {
 
   it("never turns someone marked Convertido or Comprou outra coisa by hand into a lead (founder, 2026-10-05)", async () => {
     process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
-    for (const estado of ["Convertido", "Comprou outra coisa"]) {
+    for (const estado of ["Convertido", "Comprou outra coisa", "Follow up"]) {
       findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18", sourceView: "v_pulse_intro_pack_leads" });
       findLeadByEmailAny.mockResolvedValue(null);
       getAllIntroTrackingRows.mockResolvedValue([
