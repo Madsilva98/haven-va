@@ -120,7 +120,7 @@ describe("leads-intro-pack", () => {
     expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
-  it("announces a candidate that crossed the threshold within the last week alongside a suppressed backlog one", async () => {
+  it("creates every lead but sends no Telegram message at all (founder, 2026-10-05)", async () => {
     const freshCandidate = {
       ...candidate,
       email: "fresh@x.com",
@@ -141,10 +141,7 @@ describe("leads-intro-pack", () => {
     await run();
 
     expect(createLead).toHaveBeenCalledTimes(2);
-    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
-    const [sentText] = sendGroupMessage.mock.calls[0]!;
-    expect(sentText).toContain("Fresh Candidate");
-    expect(sentText).not.toContain("Francisca Rosa");
+    expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("never turns someone marked Perdido on Tracking intro packs into a lead (founder, 2026-10-02)", async () => {
@@ -160,21 +157,6 @@ describe("leads-intro-pack", () => {
     expect(createLead).not.toHaveBeenCalled();
     delete process.env.NOTION_INTRO_TRACKING_DB_ID;
     getAllIntroTrackingRows.mockResolvedValue([]);
-  });
-
-  it("names the view the candidates came from in the Fonte line (the tracking view once the list is on)", async () => {
-    findUnconvertedIntroPacks.mockResolvedValue({
-      candidates: [candidate],
-      asOf: "2026-09-18",
-      sourceView: "v_pulse_intro_pack_tracking",
-    });
-    findLeadByEmailAny.mockResolvedValue(null);
-
-    await run();
-
-    const [sentText] = sendGroupMessage.mock.calls[0]!;
-    expect(sentText).toContain("v_pulse_intro_pack_tracking");
-    expect(sentText).not.toContain("v_pulse_intro_pack_leads");
   });
 
   it("never turns someone marked Convertido or Comprou outra coisa by hand into a lead (founder, 2026-10-05)", async () => {

@@ -22,9 +22,7 @@
 import { log } from "../lib/log.js";
 import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
-import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
 import { memberIdFromEmail } from "../lib/pulse-views.js";
-import { formatLeadsDigest } from "../messages/leads.js";
 import * as notion from "../notion.js";
 /** Estados on "Tracking intro packs" that keep someone out of Leads a contactar. */
 const SKIP_AS_LEAD = ["Perdido", "Convertido", "Comprou outra coisa"];
@@ -112,29 +110,17 @@ export async function run() {
             log.error("leads_intro_pack.write_failed", { email: c.email, message: errMsg(err) });
         }
     }
-    const message = formatLeadsDigest(digestWorthy);
-    if (!message) {
-        log.info("leads_intro_pack.no_new", {
-            totalCandidates: candidates.length,
-            skippedExisting,
-            skippedLost,
-            created: created.length,
-            backlogSuppressed,
-        });
-        return;
-    }
-    try {
-        const messageId = await sendGroupMessageWithSource(message, [sourceView], asOf);
-        log.info("leads_intro_pack.posted", {
-            messageId,
-            count: digestWorthy.length,
-            created: created.length,
-            backlogSuppressed,
-            skippedExisting,
-            skippedLost,
-        });
-    }
-    catch (err) {
-        log.error("leads_intro_pack.send_failed", { message: errMsg(err) });
-    }
+    // No Telegram message for Leads a contactar (founder, 2026-10-05: "não
+    // preciso que envies mensagem no telegram dos leads a contactar") — the
+    // leads live in Notion; the run is only logged.
+    log.info("leads_intro_pack.done", {
+        asOf,
+        sourceView,
+        totalCandidates: candidates.length,
+        created: created.length,
+        recent: digestWorthy.length,
+        backlogSuppressed,
+        skippedExisting,
+        skippedLost,
+    });
 }
