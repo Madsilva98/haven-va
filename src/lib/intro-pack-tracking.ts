@@ -10,12 +10,15 @@
  *   (dedup on Member ID, which a stale import cannot change).
  * - The bot sets Convertido (membership) and Comprou outra coisa (class pack)
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
- * - Cold lead / Idle only replace an open Estado (A contactar / Contactado):
+ * - Cold lead / Idle only replace an open Estado (A contactar / Contactado / Follow up):
  *   never a founder's Perdido.
- * - Motivo is a multi-select of every reason the person ever had: the view's
- *   `reasons` (each tested on its own) are added, never removed. A single
- *   reason could never show "Underused pack" on a 10-Day pack, because it
- *   falls on the same day as "Pack ending" (found 2026-10-03).
+ * - Motivo is a multi-select of the reasons true TODAY — the view's `reasons`,
+ *   each tested on its own (a single reason could never show "Underused pack"
+ *   on a 10-Day pack: it falls on the same day as "Pack ending", 2026-10-03).
+ *   A reason that no longer matches the current state disappears (founder,
+ *   2026-10-05, after Jacqueline showed "Pack ending" + "Pack ended"). Only open
+ *   rows follow today; a closed row keeps the Motivo it had when it closed, as
+ *   the record of why the person was on the list.
  * - A new reason on an open row is announced on Telegram, like a new person.
  * - Notas is never part of any write (src/notion.ts).
  */
@@ -35,7 +38,8 @@ export const MOTIVO_BY_REASON: Record<IntroTrackingReason, IntroTrackingMotivo> 
   pack_ended: "Pack ended",
 };
 
-const OPEN_ESTADOS: (IntroTrackingEstado | null)[] = ["A contactar", "Contactado", null];
+// Follow up (founder, 2026-10-05) is open like Contactado: set by hand, the person stays on the list.
+const OPEN_ESTADOS: (IntroTrackingEstado | null)[] = ["A contactar", "Contactado", "Follow up", null];
 
 /** The Estado the bot moves a row to, or null to leave it as it is. */
 export function nextEstado(
@@ -97,15 +101,23 @@ function fieldsFor(r: IntroPackTrackingRow, person: Person, motivos: IntroTracki
     aulasMarcadas: r.booked_ahead,
     compra: r.bought_on,
     inicio: r.first_class_on,
-    fim: r.ended_on,
+    // "Fim" shows when the pack ends for the person: the 2nd class once both are used, else Kenko's
+    // expiry (founder, 2026-10-05: "go with kenko, sometimes we extend the dates manually"). The view's
+    // ended_on — the start of the 20-day count — is the class taken for a 1-class 2-Class pack, which
+    // read as an already-ended pack (Victoria: Fim 14/09 on a pack valid until 09/10).
+    fim: r.pack === "2-Class" && r.visits_in_pack >= 2 ? r.ended_on : r.expires_on,
     email: r.email,
     telefone: person.phone,
   };
 }
 
+function sameMotivos(a: IntroTrackingMotivo[], b: IntroTrackingMotivo[]): boolean {
+  return a.length === b.length && a.every((m) => b.includes(m));
+}
+
 function sameFields(row: IntroTrackingRow, f: IntroTrackingFields): boolean {
   return (
-    row.motivos.length === f.motivos.length &&
+    sameMotivos(row.motivos, f.motivos) &&
     row.aulasFeitas === f.aulasFeitas &&
     row.aulasMarcadas === f.aulasMarcadas &&
     row.inicio === f.inicio &&
@@ -136,16 +148,15 @@ export function planIntroTracking(
       continue;
     }
 
-    const added = today.filter((m) => !existing.motivos.includes(m));
-    const fields = fieldsFor(r, person, [...existing.motivos, ...added]);
     const estado = nextEstado(existing.estado, r.auto_state);
+    const staysOpen = !estado && OPEN_ESTADOS.includes(existing.estado);
+    const fields = fieldsFor(r, person, staysOpen ? today : existing.motivos);
     if (!estado && sameFields(existing, fields)) continue;
     const name = existing.nome || person.name;
     plan.updates.push({ pageId: existing.id, name, fields, ...(estado ? { estado } : {}) });
     if (estado === "Convertido") plan.converted.push(name);
-    if (added.length > 0 && !estado && OPEN_ESTADOS.includes(existing.estado)) {
-      plan.newMotivos.push({ pageId: existing.id, name, motivos: added });
-    }
+    const added = today.filter((m) => !existing.motivos.includes(m));
+    if (staysOpen && added.length > 0) plan.newMotivos.push({ pageId: existing.id, name, motivos: added });
   }
   return plan;
 }

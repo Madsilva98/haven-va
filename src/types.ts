@@ -356,11 +356,12 @@ export interface ChurnRiskRow {
 // ----- Tracking intro packs -----
 // Fed by src/crons/intro-pack-tracking.ts from va.v_pulse_intro_pack_tracking.
 // The bot sets "A contactar" on creation and Convertido / Comprou outra coisa /
-// Cold lead / Idle on its own; Contactado and Perdido are the founders'.
+// Cold lead / Idle on its own; Contactado, Follow up and Perdido are the founders'.
 
 export type IntroTrackingEstado =
   | "A contactar"
   | "Contactado"
+  | "Follow up"
   | "Convertido"
   | "Perdido"
   | "Comprou outra coisa"
@@ -375,13 +376,13 @@ export type IntroTrackingMotivo =
 
 /** Bot-written columns only — "Notas" is never read or written by the bot. */
 export interface IntroTrackingFields {
-  motivos: IntroTrackingMotivo[]; // multi-select; reasons only accumulate, never removed (founder, 2026-10-03)
+  motivos: IntroTrackingMotivo[]; // multi-select; the reasons true today on an open row (founder, 2026-10-05)
   pack: "2-Class" | "10-Day";
   aulasFeitas: number;
   aulasMarcadas: number;
   compra: string; // YYYY-MM-DD
   inicio: string | null; // first class on the pack
-  fim: string; // pack end (2-Class with both classes: the 2nd class; otherwise expiry)
+  fim: string; // 2-Class with both classes: the 2nd class; otherwise Kenko's expiry (hand extensions included)
   email: string;
   telefone: string | null;
 }

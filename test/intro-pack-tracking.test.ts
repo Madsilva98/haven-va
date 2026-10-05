@@ -66,6 +66,13 @@ describe("nextEstado", () => {
     expect(nextEstado("Perdido", "idle")).toBeNull();
   });
 
+  it("Follow up is open like Contactado: it can go cold or idle, and a purchase wins (2026-10-05)", () => {
+    expect(nextEstado("Follow up", "cold_lead")).toBe("Cold lead");
+    expect(nextEstado("Follow up", "idle")).toBe("Idle");
+    expect(nextEstado("Follow up", "converted")).toBe("Convertido");
+    expect(nextEstado("Follow up", null)).toBeNull();
+  });
+
   it("no auto_state leaves the Estado alone", () => {
     expect(nextEstado("Contactado", null)).toBeNull();
   });
@@ -93,6 +100,17 @@ describe("planIntroTracking", () => {
     expect(plan.creates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
   });
 
+  it("Fim shows Kenko's expiry while a 2-Class pack has 1 class, the 2nd class once both are used (Victoria, 2026-10-05)", () => {
+    const oneClass = planIntroTracking(
+      [viewRow({ visits_in_pack: 1, first_class_on: "2026-09-14", ended_on: "2026-09-14", expires_on: "2026-10-09", reasons: ["pack_ending"] })],
+      [],
+      people,
+    );
+    expect(oneClass.creates[0]!.fields.fim).toBe("2026-10-09");
+    const bothClasses = planIntroTracking([viewRow()], [], people);
+    expect(bothClasses.creates[0]!.fields.fim).toBe("2026-09-25");
+  });
+
   it("never adds a person twice, whatever their Estado — a stale import repeats the same rows", () => {
     for (const estado of ["A contactar", "Perdido", "Cold lead", "Idle"] as const) {
       const plan = planIntroTracking([viewRow()], [notionRow({ estado })], people);
@@ -106,40 +124,76 @@ describe("planIntroTracking", () => {
     expect(plan.newMotivos).toEqual([]);
   });
 
-  it("reasons accumulate: a new one is added after the old ones and announced", () => {
+  it("Motivo follows today: a new reason is shown and announced, one that no longer applies goes (Jacqueline, 2026-10-05)", () => {
+    // 2-Class: 1 class, ending → used the 2nd class on the last day → pack over.
     const plan = planIntroTracking(
-      [viewRow({ pack: "10-Day", reasons: ["pack_ending"], visits_in_pack: 3, booked_ahead: 2 })],
-      [notionRow({ motivos: ["Underused pack"], aulasFeitas: 2 })],
+      [viewRow({ reasons: ["pack_ended"] })],
+      [notionRow({ motivos: ["Pack ending"] })],
       people,
     );
     expect(plan.updates).toHaveLength(1);
     expect(plan.updates[0]!.estado).toBeUndefined();
-    expect(plan.updates[0]!.fields).toMatchObject({
-      motivos: ["Underused pack", "Pack ending"],
-      aulasFeitas: 3,
-      aulasMarcadas: 2,
-    });
-    expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ending"] }]);
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ended"]);
+    expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ended"] }]);
   });
 
-  it("a reason no longer true today is never removed", () => {
+  it("keeps two reasons that are both true today (10-Day underused and ending)", () => {
     const plan = planIntroTracking(
-      [viewRow({ reasons: [], booked_ahead: 1 })],
-      [notionRow({ motivos: ["Underused pack", "Pack ending"] })],
+      [viewRow({ pack: "10-Day", reasons: ["underused", "pack_ending"], visits_in_pack: 2 })],
+      [notionRow({ motivos: ["Underused pack"] })],
       people,
     );
     expect(plan.updates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
+    expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ending"] }]);
+  });
+
+  it("a Follow up row follows today's reasons and announces a new one", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: ["pack_ended"] })],
+      [notionRow({ estado: "Follow up", motivos: ["Pack ending"] })],
+      people,
+    );
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ended"]);
+    expect(plan.newMotivos).toHaveLength(1);
+  });
+
+  it("an open row with no reason today shows none — nothing announced", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: [], booked_ahead: 1 })],
+      [notionRow({ motivos: ["Pack ending"] })],
+      people,
+    );
+    expect(plan.updates[0]!.fields.motivos).toEqual([]);
     expect(plan.newMotivos).toEqual([]);
   });
 
-  it("does not announce a new reason on a row the founder closed (Perdido)", () => {
+  it("does not rewrite when only the order of the same reasons differs", () => {
     const plan = planIntroTracking(
-      [viewRow({ reasons: ["pack_ended"] })],
+      [viewRow({ reasons: ["underused", "pack_ending"] })],
+      [notionRow({ motivos: ["Pack ending", "Underused pack"] })],
+      people,
+    );
+    expect(plan.updates).toEqual([]);
+  });
+
+  it("a closed row keeps the Motivo it had when it closed, and nothing is announced", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: ["pack_ended"], booked_ahead: 1 })],
       [notionRow({ estado: "Perdido", motivos: ["Pack ending"] })],
       people,
     );
-    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ending", "Pack ended"]);
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ending"]);
     expect(plan.newMotivos).toEqual([]);
+  });
+
+  it("a row closing on this run keeps its last Motivo (the reason it was on the list)", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: [], auto_state: "cold_lead" })],
+      [notionRow({ motivos: ["Pack ended"] })],
+      people,
+    );
+    expect(plan.updates[0]!.estado).toBe("Cold lead");
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ended"]);
   });
 
   it("never creates a closed row — the first run is not a backfill of past intros", () => {
