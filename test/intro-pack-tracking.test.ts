@@ -66,6 +66,13 @@ describe("nextEstado", () => {
     expect(nextEstado("Perdido", "idle")).toBeNull();
   });
 
+  it("Follow up is open like Contactado: it can go cold or idle, and a purchase wins (2026-10-05)", () => {
+    expect(nextEstado("Follow up", "cold_lead")).toBe("Cold lead");
+    expect(nextEstado("Follow up", "idle")).toBe("Idle");
+    expect(nextEstado("Follow up", "converted")).toBe("Convertido");
+    expect(nextEstado("Follow up", null)).toBeNull();
+  });
+
   it("no auto_state leaves the Estado alone", () => {
     expect(nextEstado("Contactado", null)).toBeNull();
   });
@@ -127,6 +134,16 @@ describe("planIntroTracking", () => {
     );
     expect(plan.updates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
     expect(plan.newMotivos).toEqual([{ pageId: "page-1", name: "Ana", motivos: ["Pack ending"] }]);
+  });
+
+  it("a Follow up row follows today's reasons and announces a new one", () => {
+    const plan = planIntroTracking(
+      [viewRow({ reasons: ["pack_ended"] })],
+      [notionRow({ estado: "Follow up", motivos: ["Pack ending"] })],
+      people,
+    );
+    expect(plan.updates[0]!.fields.motivos).toEqual(["Pack ended"]);
+    expect(plan.newMotivos).toHaveLength(1);
   });
 
   it("an open row with no reason today shows none — nothing announced", () => {

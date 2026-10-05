@@ -302,7 +302,7 @@ const churnRiskProperties = {
 // never writes it. "Member ID" is the dedup key (md5 of the email).
 const introTrackingProperties = {
   Estado: { select: { options: [
-    { name: "A contactar" }, { name: "Contactado" }, { name: "Convertido" }, { name: "Perdido" },
+    { name: "A contactar" }, { name: "Contactado" }, { name: "Follow up" }, { name: "Convertido" }, { name: "Perdido" },
     { name: "Comprou outra coisa" }, { name: "Cold lead" }, { name: "Idle" },
   ] } },
   Motivo: { multi_select: { options: [
