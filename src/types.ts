@@ -356,11 +356,12 @@ export interface ChurnRiskRow {
 // ----- Tracking intro packs -----
 // Fed by src/crons/intro-pack-tracking.ts from va.v_pulse_intro_pack_tracking.
 // The bot sets "A contactar" on creation and Convertido / Comprou outra coisa /
-// Cold lead / Idle on its own; Contactado and Perdido are the founders'.
+// Cold lead / Idle on its own; Contactado, Follow up and Perdido are the founders'.
 
 export type IntroTrackingEstado =
   | "A contactar"
   | "Contactado"
+  | "Follow up"
   | "Convertido"
   | "Perdido"
   | "Comprou outra coisa"

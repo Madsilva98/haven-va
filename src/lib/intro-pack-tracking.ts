@@ -10,7 +10,7 @@
  *   (dedup on Member ID, which a stale import cannot change).
  * - The bot sets Convertido (membership) and Comprou outra coisa (class pack)
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
- * - Cold lead / Idle only replace an open Estado (A contactar / Contactado):
+ * - Cold lead / Idle only replace an open Estado (A contactar / Contactado / Follow up):
  *   never a founder's Perdido.
  * - Motivo is a multi-select of the reasons true TODAY — the view's `reasons`,
  *   each tested on its own (a single reason could never show "Underused pack"
@@ -38,7 +38,8 @@ export const MOTIVO_BY_REASON: Record<IntroTrackingReason, IntroTrackingMotivo> 
   pack_ended: "Pack ended",
 };
 
-const OPEN_ESTADOS: (IntroTrackingEstado | null)[] = ["A contactar", "Contactado", null];
+// Follow up (founder, 2026-10-05) is open like Contactado: set by hand, the person stays on the list.
+const OPEN_ESTADOS: (IntroTrackingEstado | null)[] = ["A contactar", "Contactado", "Follow up", null];
 
 /** The Estado the bot moves a row to, or null to leave it as it is. */
 export function nextEstado(
