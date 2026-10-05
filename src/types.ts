@@ -382,7 +382,7 @@ export interface IntroTrackingFields {
   aulasMarcadas: number;
   compra: string; // YYYY-MM-DD
   inicio: string | null; // first class on the pack
-  fim: string; // pack end (2-Class with both classes: the 2nd class; otherwise expiry)
+  fim: string; // 2-Class with both classes: the 2nd class; otherwise Kenko's expiry (hand extensions included)
   email: string;
   telefone: string | null;
 }

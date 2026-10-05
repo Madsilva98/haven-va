@@ -100,6 +100,17 @@ describe("planIntroTracking", () => {
     expect(plan.creates[0]!.fields.motivos).toEqual(["Underused pack", "Pack ending"]);
   });
 
+  it("Fim shows Kenko's expiry while a 2-Class pack has 1 class, the 2nd class once both are used (Victoria, 2026-10-05)", () => {
+    const oneClass = planIntroTracking(
+      [viewRow({ visits_in_pack: 1, first_class_on: "2026-09-14", ended_on: "2026-09-14", expires_on: "2026-10-09", reasons: ["pack_ending"] })],
+      [],
+      people,
+    );
+    expect(oneClass.creates[0]!.fields.fim).toBe("2026-10-09");
+    const bothClasses = planIntroTracking([viewRow()], [], people);
+    expect(bothClasses.creates[0]!.fields.fim).toBe("2026-09-25");
+  });
+
   it("never adds a person twice, whatever their Estado — a stale import repeats the same rows", () => {
     for (const estado of ["A contactar", "Perdido", "Cold lead", "Idle"] as const) {
       const plan = planIntroTracking([viewRow()], [notionRow({ estado })], people);
