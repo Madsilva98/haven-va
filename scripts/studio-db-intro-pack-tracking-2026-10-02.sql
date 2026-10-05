@@ -39,10 +39,11 @@
 --                  [class]. this rule applies ALWAYS. if the 2nd class doesn't exist, then yes the pack has
 --                  an expiry date (2 weeks after the first class)". Refined the same day (two uses, two
 --                  rules): a 2-Class pack is OVER on its 2nd class or, with 1 class, once its expiry passes
---                  (until then the bot keeps trying to get the 2nd class booked); once over, its END is the
---                  last class taken = v_pulse_intro_outcome.pack_ended_on (the dashboard's rule, unchanged;
---                  none = expiry). Any other pack: Kenko's expiry. Recorded in haven-studio
---                  docs/data-model/for-mafalda.md question 9.
+--                  (until then the bot keeps trying to get the 2nd class booked). Its END: the 2nd class
+--                  once both are used, else Kenko's expiry, hand extensions included (2026-10-05, "conta a
+--                  partir da data do kenko" — 2026-10-02 to 10-05 a 1-class pack ended on that class, =
+--                  v_pulse_intro_outcome.pack_ended_on, so it went cold the day it expired). Any other pack:
+--                  Kenko's expiry. The dashboard keeps pack_ended_on (haven-studio for-mafalda.md q. 9).
 --   cold_lead    = 20 days after that end, not converted. is_lead (21 days after the SAME end) is what
 --                  leads-intro-pack.ts reads on Mondays to add them to "Leads a contactar" — unless marked
 --                  Perdido here. This replaces v_pulse_intro_outcome.is_lead for the bot (that one counts
@@ -56,7 +57,11 @@ base as (
   select o.member_id, o.email, o.item_name, o.pack_group as pack, o.bought_on,
          p.first_class_on,
          o.ended_on as expires_on,
-         o.pack_ended_on as ended_on,  -- the day of the last class (none = expiry): Madalena 2026-10-02
+         -- the pack's end: the 2nd class once both are used, else Kenko's expiry, hand extensions included
+         -- (Madalena 2026-10-05: "conta a partir da data do kenko" — replaces pack_ended_on, which ended a
+         -- 1-class pack on that class, so it went cold on expiry without ever showing as pack_ended)
+         case when o.pack_group = '2-Class' and o.visits_in_pack >= 2 then o.pack_ended_on
+              else o.ended_on end as ended_on,
          o.visits_in_pack,
          coalesce(a.booked_ahead, 0) as booked_ahead,
          o.outcome,
@@ -117,6 +122,6 @@ select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on,
   ], null) end as reasons
 from f;
 
-comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reasons = every reason true today, each tested on its own (Madalena 2026-10-03; the bot accumulates them): waiting_to_start (0 classes, 7-29 days since purchase, nothing booked), underused (10-Day still running, 1-2 classes, 5+ days since the first), pack_ending (0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked), pack_ended (under 20 days since the end). reason = the older single-reason column, kept for compatibility. auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack is over on its 2nd class or, with 1 class, once its expiry passes; its end then counts from the last class taken (= v_pulse_intro_outcome.pack_ended_on, Madalena 2026-10-02). Any other pack: expiry. Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
+comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reasons = every reason true today, each tested on its own (Madalena 2026-10-03; the bot accumulates them): waiting_to_start (0 classes, 7-29 days since purchase, nothing booked), underused (10-Day still running, 1-2 classes, 5+ days since the first), pack_ending (0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked), pack_ended (under 20 days since the end). reason = the older single-reason column, kept for compatibility. auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack ends on its 2nd class; otherwise, and any other pack, on Kenko''s expiry, hand extensions included (Madalena 2026-10-05). Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
 
 grant select on va.v_pulse_intro_pack_tracking to haven_va;
