@@ -12,10 +12,13 @@
  *   over any Estado — the purchase wins, even over Contactado/Perdido.
  * - Cold lead / Idle only replace an open Estado (A contactar / Contactado):
  *   never a founder's Perdido.
- * - Motivo is a multi-select of every reason the person ever had: the view's
- *   `reasons` (each tested on its own) are added, never removed. A single
- *   reason could never show "Underused pack" on a 10-Day pack, because it
- *   falls on the same day as "Pack ending" (found 2026-10-03).
+ * - Motivo is a multi-select of the reasons true TODAY — the view's `reasons`,
+ *   each tested on its own (a single reason could never show "Underused pack"
+ *   on a 10-Day pack: it falls on the same day as "Pack ending", 2026-10-03).
+ *   A reason that no longer matches the current state disappears (founder,
+ *   2026-10-05, after Jacqueline showed "Pack ending" + "Pack ended"). Only open
+ *   rows follow today; a closed row keeps the Motivo it had when it closed, as
+ *   the record of why the person was on the list.
  * - A new reason on an open row is announced on Telegram, like a new person.
  * - Notas is never part of any write (src/notion.ts).
  */
@@ -54,8 +57,11 @@ function fieldsFor(r, person, motivos) {
         telefone: person.phone,
     };
 }
+function sameMotivos(a, b) {
+    return a.length === b.length && a.every((m) => b.includes(m));
+}
 function sameFields(row, f) {
-    return (row.motivos.length === f.motivos.length &&
+    return (sameMotivos(row.motivos, f.motivos) &&
         row.aulasFeitas === f.aulasFeitas &&
         row.aulasMarcadas === f.aulasMarcadas &&
         row.inicio === f.inicio &&
@@ -79,18 +85,18 @@ export function planIntroTracking(viewRows, notionRows, people) {
             }
             continue;
         }
-        const added = today.filter((m) => !existing.motivos.includes(m));
-        const fields = fieldsFor(r, person, [...existing.motivos, ...added]);
         const estado = nextEstado(existing.estado, r.auto_state);
+        const staysOpen = !estado && OPEN_ESTADOS.includes(existing.estado);
+        const fields = fieldsFor(r, person, staysOpen ? today : existing.motivos);
         if (!estado && sameFields(existing, fields))
             continue;
         const name = existing.nome || person.name;
         plan.updates.push({ pageId: existing.id, name, fields, ...(estado ? { estado } : {}) });
         if (estado === "Convertido")
             plan.converted.push(name);
-        if (added.length > 0 && !estado && OPEN_ESTADOS.includes(existing.estado)) {
+        const added = today.filter((m) => !existing.motivos.includes(m));
+        if (staysOpen && added.length > 0)
             plan.newMotivos.push({ pageId: existing.id, name, motivos: added });
-        }
     }
     return plan;
 }

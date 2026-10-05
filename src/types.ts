@@ -375,7 +375,7 @@ export type IntroTrackingMotivo =
 
 /** Bot-written columns only — "Notas" is never read or written by the bot. */
 export interface IntroTrackingFields {
-  motivos: IntroTrackingMotivo[]; // multi-select; reasons only accumulate, never removed (founder, 2026-10-03)
+  motivos: IntroTrackingMotivo[]; // multi-select; the reasons true today on an open row (founder, 2026-10-05)
   pack: "2-Class" | "10-Day";
   aulasFeitas: number;
   aulasMarcadas: number;
