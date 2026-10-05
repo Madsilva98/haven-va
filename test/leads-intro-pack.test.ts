@@ -177,6 +177,38 @@ describe("leads-intro-pack", () => {
     expect(sentText).not.toContain("v_pulse_intro_pack_leads");
   });
 
+  it("never turns someone marked Convertido or Comprou outra coisa by hand into a lead (founder, 2026-10-05)", async () => {
+    process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
+    for (const estado of ["Convertido", "Comprou outra coisa"]) {
+      findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18", sourceView: "v_pulse_intro_pack_leads" });
+      findLeadByEmailAny.mockResolvedValue(null);
+      getAllIntroTrackingRows.mockResolvedValue([
+        { id: "t1", memberId: memberIdFromEmail("marta@x.com"), nome: "Marta", estado },
+      ]);
+
+      await run();
+
+      expect(createLead).not.toHaveBeenCalled();
+    }
+    delete process.env.NOTION_INTRO_TRACKING_DB_ID;
+    getAllIntroTrackingRows.mockResolvedValue([]);
+  });
+
+  it("still turns a Cold lead from the tracking list into a lead — Cold lead means 'still worth contacting'", async () => {
+    process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
+    findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18", sourceView: "v_pulse_intro_pack_leads" });
+    findLeadByEmailAny.mockResolvedValue(null);
+    getAllIntroTrackingRows.mockResolvedValue([
+      { id: "t1", memberId: memberIdFromEmail("marta@x.com"), nome: "Marta", estado: "Cold lead" },
+    ]);
+
+    await run();
+
+    expect(createLead).toHaveBeenCalledTimes(1);
+    delete process.env.NOTION_INTRO_TRACKING_DB_ID;
+    getAllIntroTrackingRows.mockResolvedValue([]);
+  });
+
   it("stops the run rather than risk adding a Perdido person when the tracking list can't be read", async () => {
     process.env.NOTION_INTRO_TRACKING_DB_ID = "test-tracking-db";
     findUnconvertedIntroPacks.mockResolvedValue({ candidates: [candidate], asOf: "2026-09-18", sourceView: "v_pulse_intro_pack_leads" });

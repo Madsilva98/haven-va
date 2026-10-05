@@ -27,6 +27,10 @@ import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
 import { memberIdFromEmail } from "../lib/pulse-views.js";
 import { formatLeadsDigest, type NewLeadSummary } from "../messages/leads.js";
 import * as notion from "../notion.js";
+import type { IntroTrackingEstado } from "../types.js";
+
+/** Estados on "Tracking intro packs" that keep someone out of Leads a contactar. */
+const SKIP_AS_LEAD: IntroTrackingEstado[] = ["Perdido", "Convertido", "Comprou outra coisa"];
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -52,14 +56,17 @@ export async function run(): Promise<void> {
     return;
   }
 
-  // Someone a founder marked Perdido on "Tracking intro packs" was already
-  // given up on — they never become a lead here (founder, 2026-10-02). A
+  // Someone a founder closed on "Tracking intro packs" never becomes a lead
+  // here: Perdido (founder, 2026-10-02), and Convertido / Comprou outra coisa
+  // even when set by hand for a purchase Kenko doesn't show (2026-10-05). A
   // failed read stops the run rather than risk adding them; next Monday retries.
   let lostOnTracking = new Set<string>();
   if (process.env.NOTION_INTRO_TRACKING_DB_ID) {
     try {
       const rows = await notion.getAllIntroTrackingRows();
-      lostOnTracking = new Set(rows.filter((r) => r.estado === "Perdido").map((r) => r.memberId));
+      lostOnTracking = new Set(
+        rows.filter((r) => r.estado !== null && SKIP_AS_LEAD.includes(r.estado)).map((r) => r.memberId),
+      );
     } catch (err) {
       log.error("leads_intro_pack.tracking_read_failed", { message: errMsg(err) });
       return;
