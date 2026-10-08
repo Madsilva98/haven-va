@@ -1,38 +1,33 @@
 /**
  * Telegram MarkdownV2 message for the Monday competitor-movements cron.
  *
- * Founder's call (2026-10-08): tell the group only about BREAKS — a competitor
- * doing something new against its own strategy or the industry (a new class or
- * format, an offer or price change, a partnership, an event) — never routine
- * posts. The list is decided in haven-comms (competitor_movements.py, from
- * Instagram, websites and the newsletters this bot records in Notion) and lives
- * in the month's watch.json, which is also the dashboard's Competitors page; this
- * message just shows the items found this week, plus a warning when the weekly
- * analysis didn't run, so a silent gap (like 5 Oct 2026) can't go unnoticed.
- * Positioning changes are counted, not listed.
+ * Founder's call (2026-10-08): key points only — the week's three BREAKS
+ * that matter most (a competitor doing something new against its own strategy
+ * or the industry), one line each, and a count of the rest with a link to the
+ * dashboard's Competitors page, where everything is listed. The list is decided
+ * in haven-comms (competitor_movements.py, from Instagram, websites and the
+ * newsletters this bot records in Notion), each item scored `m` (matters to The
+ * Haven, 1-5); this message only picks the top three of the week. It also warns
+ * when the weekly analysis didn't run, so a silent gap (like 5 Oct 2026) can't
+ * go unnoticed.
  */
 import { escapeMd } from "./cycle.js";
 export const COMPETITORS_PAGE_URL = "https://project-t33mk.vercel.app/competitors";
-const GROUPS = [
-    ["Classes & products", "aulas e formatos novos"],
-    ["Offers & campaigns", "ofertas e preços"],
-    ["Partnerships", "parcerias"],
-    ["Events", "eventos"],
-];
+const TOP = 3;
 const STALE_AFTER_DAYS = 6;
 function daysBetween(from, to) {
     return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
-/** Items the weekly analysis added in the 7 days up to `today`. */
+/** Items the weekly analysis added in the 7 days up to `today`, most important first. */
 export function thisWeeksMovements(items, today) {
-    return items.filter((i) => i.wk && daysBetween(i.wk, today) >= 0 && daysBetween(i.wk, today) < 7);
+    return items
+        .filter((i) => i.wk && daysBetween(i.wk, today) >= 0 && daysBetween(i.wk, today) < 7)
+        .map((i, n) => ({ i, n }))
+        .sort((a, b) => (b.i.m ?? 0) - (a.i.m ?? 0) || a.n - b.n)
+        .map(({ i }) => i);
 }
 function mdLink(label, url) {
     return `[${escapeMd(label)}](${url.replace(/[)\\]/g, (m) => `\\${m}`)})`;
-}
-function line(i) {
-    const text = `• *${escapeMd(i.who ?? "?")}* — ${escapeMd(i.pt || i.t)}`;
-    return i.url ? `${text} ${mdLink("ver", i.url)}` : text;
 }
 function warnings(args) {
     const out = [];
@@ -54,25 +49,16 @@ function warnings(args) {
 }
 export function formatCompetitorMovements(args) {
     const week = thisWeeksMovements(args.innovations, args.today);
-    const lines = ["*concorrência — movimentos da semana*"];
+    const lines = ["*concorrência — semana*"];
     const warn = warnings(args);
     if (warn.length)
-        lines.push("", ...warn.map(escapeMd));
-    let listed = 0;
-    for (const [type, label] of GROUPS) {
-        const items = week.filter((i) => i.type === type);
-        if (!items.length)
-            continue;
-        lines.push("", `*${escapeMd(label)}*`, ...items.map(line));
-        listed += items.length;
+        lines.push(...warn.map(escapeMd));
+    if (week.length === 0) {
+        lines.push(escapeMd("nada fora do habitual esta semana."), mdLink("página Competitors", COMPETITORS_PAGE_URL));
+        return lines.join("\n");
     }
-    if (listed === 0) {
-        lines.push("", escapeMd("nada fora do habitual esta semana."));
-    }
-    const positioning = week.filter((i) => !GROUPS.some(([t]) => t === i.type)).length;
-    if (positioning > 0) {
-        lines.push("", escapeMd(`+ ${positioning} mudança(s) de posicionamento na página.`));
-    }
-    lines.push("", `${mdLink("página Competitors", COMPETITORS_PAGE_URL)}`);
+    lines.push(...week.slice(0, TOP).map((i) => escapeMd(`• ${i.pt || `${i.who}: ${i.t}`}`)));
+    const rest = week.length - TOP;
+    lines.push(rest > 0 ? `${escapeMd(`+${rest} na`)} ${mdLink("página Competitors", COMPETITORS_PAGE_URL)}` : mdLink("página Competitors", COMPETITORS_PAGE_URL));
     return lines.join("\n");
 }

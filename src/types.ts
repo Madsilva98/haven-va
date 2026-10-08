@@ -461,6 +461,7 @@ export interface CompetitorInnovation {
   ch?: string; // Instagram | Website | Email
   pt?: string; // one pt-PT line for the Monday message
   why?: string;
+  m?: number; // matters to The Haven, 1-5: the Monday message shows the week's top 3
 }
 
 interface MovementsSourceStatus {
