@@ -3,6 +3,7 @@ import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
+import { run as runCompetitorMovements } from "./crons/competitor-movements.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
@@ -124,11 +125,21 @@ const tasks = [
       ),
     { timezone: TZ },
   ),
+  // Newsletters → Notion, silent, before haven-comms' 04:00 scrape reads them
+  // (2026-10-08). The group message is competitor-movements at 08:30.
   cron.schedule(
-    "30 8 * * 1",
+    "30 2 * * 1",
     () =>
       runCompetitorIntel().catch((e) =>
         log.error("cron.competitor_intel", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "30 8 * * 1",
+    () =>
+      runCompetitorMovements().catch((e) =>
+        log.error("cron.competitor_movements", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

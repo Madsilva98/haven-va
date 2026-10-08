@@ -442,3 +442,40 @@ export interface CompetitorIntelRunSummary {
   errors: number;
   byMessage: CompetitorIntelProcessedMessage[];
 }
+
+// One "Innovations in the market" item of haven-comms'
+// research/competitors/monthly/<YYYY-MM>/watch.json — the list the dashboard's
+// Competitors page shows. Items written by haven-comms' weekly
+// competitor_movements.py also carry wk/ch/pt/why; hand-written ones don't.
+export interface CompetitorInnovation {
+  id: string;
+  type: string; // "Classes & products" | "Offers & campaigns" | "Partnerships" | "Events" | "Positioning & message"
+  t: string;
+  d?: string;
+  who?: string;
+  src?: string;
+  url?: string;
+  fit?: string;
+  fn?: string;
+  wk?: string; // YYYY-MM-DD scrape date it was found
+  ch?: string; // Instagram | Website | Email
+  pt?: string; // one pt-PT line for the Monday message
+  why?: string;
+}
+
+interface MovementsSourceStatus {
+  ok: boolean;
+  error?: string;
+  skipped?: string;
+}
+
+// research/competitors/movements/<date>/status.json, written by competitor_movements.py.
+export interface CompetitorMovementsStatus {
+  date: string;
+  ok: boolean;
+  instagram: MovementsSourceStatus & { new_items?: number; studios?: number };
+  websites: MovementsSourceStatus;
+  newsletters: MovementsSourceStatus;
+  failures: { studio: string; error: string }[];
+  breaks?: number;
+}
