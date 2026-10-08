@@ -462,6 +462,7 @@ export interface CompetitorInnovation {
   pt?: string; // one pt-PT line for the Monday message
   why?: string;
   m?: number; // matters to The Haven, 1-5: the Monday message shows the week's top 3
+  tier?: string; // handles.md tier; "International" never reaches the Monday message
 }
 
 interface MovementsSourceStatus {

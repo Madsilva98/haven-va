@@ -18,10 +18,18 @@ const STALE_AFTER_DAYS = 6;
 function daysBetween(from, to) {
     return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
-/** Items the weekly analysis added in the 7 days up to `today`, most important first. */
+/**
+ * International studios are inspiration only: they stay on the page but never reach the message
+ * (founder's call, 2026-10-08). Hand-written items may lack `tier`; their `who` says "(international)".
+ */
+function isInternational(i) {
+    return i.tier === "International" || /international/i.test(i.who ?? "");
+}
+/** Items the weekly analysis added in the 7 days up to `today`, most important first, international left out. */
 export function thisWeeksMovements(items, today) {
     return items
         .filter((i) => i.wk && daysBetween(i.wk, today) >= 0 && daysBetween(i.wk, today) < 7)
+        .filter((i) => !isInternational(i))
         .map((i, n) => ({ i, n }))
         .sort((a, b) => (b.i.m ?? 0) - (a.i.m ?? 0) || a.n - b.n)
         .map(({ i }) => i);

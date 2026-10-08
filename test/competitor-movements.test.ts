@@ -39,6 +39,15 @@ describe("thisWeeksMovements", () => {
     expect(thisWeeksMovements(items, TODAY).map((i) => i.id)).toEqual(["a", "b"]);
   });
 
+  it("leaves international studios out, by tier or by '(international)' in who", () => {
+    const items = [
+      item({ id: "a", m: 5, tier: "International" }),
+      item({ id: "b", m: 5, tier: undefined, who: "OREN (international)" }),
+      item({ id: "c", m: 2, tier: "Main" }),
+    ];
+    expect(thisWeeksMovements(items, TODAY).map((i) => i.id)).toEqual(["c"]);
+  });
+
   it("orders by m, keeping the written order within a score", () => {
     const items = [item({ id: "a", m: 2 }), item({ id: "b", m: 5 }), item({ id: "c", m: 2 }), item({ id: "d" , m: undefined })];
     expect(thisWeeksMovements(items, TODAY).map((i) => i.id)).toEqual(["b", "a", "c", "d"]);
