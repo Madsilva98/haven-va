@@ -49,6 +49,9 @@ export const PULSE_VIEW = {
     // The bot's own analysis view (reads only va copies, data-model check C6), 2026-10-02:
     // scripts/studio-db-intro-pack-tracking-2026-10-02.sql — the "Tracking intro packs" rules.
     introPackTracking: "v_pulse_intro_pack_tracking",
+    // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
+    // the one status label each studio contact carries in Google Contacts.
+    contactStatus: "v_pulse_contact_status",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -162,6 +165,12 @@ export async function fetchIntroPackTrackingLeads() {
         return [];
     }
     return query(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
+}
+export async function fetchContactSyncRows() {
+    return query(`select i.member_id, i.contact_name, i.contact_phone, i.added_on, s.status
+       from ${PULSE_VIEW.memberIdentity} i
+       join ${PULSE_VIEW.contactStatus} s on s.member_id = i.member_id
+      where i.contact_phone ~ '[0-9]'`);
 }
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
 /**

@@ -6,6 +6,7 @@ import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
 import { run as runCompetitorMovements } from "./crons/competitor-movements.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
+import { run as runGoogleContactsSync } from "./crons/google-contacts-sync.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
 import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
@@ -49,6 +50,10 @@ const tasks = [
     // Receção calendar → studio DB, for the front desk hours (2026-10-01).
     // After the day's last shift. See src/crons/reception-hours-sync.ts.
     cron.schedule("30 23 * * *", () => runReceptionHoursSync().catch((e) => log.error("cron.reception_hours_sync", { e: String(e) })), { timezone: TZ }),
+    // Studio clients → the studio's Google Contacts, one status label each
+    // (2026-10-10). Its own failures go to Telegram: see
+    // src/crons/google-contacts-sync.ts.
+    cron.schedule("30 6 * * *", () => runGoogleContactsSync().catch((e) => log.error("cron.google_contacts_sync", { e: String(e) })), { timezone: TZ }),
 ];
 log.info("server.crons_registered", { count: tasks.length });
 const bot = buildBot();
