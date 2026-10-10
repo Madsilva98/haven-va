@@ -54,6 +54,9 @@ export const PULSE_VIEW = {
   // The bot's own analysis view (reads only va copies, data-model check C6), 2026-10-02:
   // scripts/studio-db-intro-pack-tracking-2026-10-02.sql — the "Tracking intro packs" rules.
   introPackTracking: "v_pulse_intro_pack_tracking",
+  // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
+  // the one status label each studio contact carries in Google Contacts.
+  contactStatus: "v_pulse_contact_status",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -433,6 +436,28 @@ export async function fetchIntroPackTrackingLeads(): Promise<IntroPackTrackingRo
     return [];
   }
   return query<IntroPackTrackingRow>(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
+}
+
+/**
+ * The Google Contacts sync's source: everyone in v_pulse_member_identity with a phone, with the status
+ * label v_pulse_contact_status gives them (the label's rule is that view's, never computed here). PII —
+ * name and phone go to the studio's own Google account and nowhere else. Throws when the studio DB is
+ * not configured: an empty answer here would read as "remove every contact".
+ */
+export interface ContactSyncRow {
+  member_id: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+  added_on: string | null;
+  status: string | null;
+}
+export async function fetchContactSyncRows(): Promise<ContactSyncRow[]> {
+  return query<ContactSyncRow>(
+    `select i.member_id, i.contact_name, i.contact_phone, i.added_on, s.status
+       from ${PULSE_VIEW.memberIdentity} i
+       join ${PULSE_VIEW.contactStatus} s on s.member_id = i.member_id
+      where i.contact_phone ~ '[0-9]'`,
+  );
 }
 
 /**

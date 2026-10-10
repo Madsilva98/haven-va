@@ -12,6 +12,7 @@
 import { Bot, type Context } from "grammy";
 
 import * as calendar from "../lib/calendar.js";
+import * as googleContacts from "../lib/google-contacts.js";
 import { getFounderName, isFounder } from "../lib/founders.js";
 import { isWhyQuestion } from "../lib/pulse-source.js";
 import { log } from "../lib/log.js";
@@ -85,6 +86,9 @@ function parseCaptionForFileTarget(text: string): {
 
 let botInstance: Bot | null = null;
 let awaitingAuthCodeFrom: number | null = null;
+// Same copy-the-code flow, for the studio's Google account (contacts). Only one
+// of the two waits at a time: both codes start with "4/".
+let awaitingContactsAuthCodeFrom: number | null = null;
 let botInfoUserId: number | null = null;
 const dedupedUpdates = new Set<number>();
 const DEDUPE_MAX = 200;
@@ -213,10 +217,25 @@ export function buildBot(): Bot {
     if (ctx.chat.type !== "private") return;
     if (getFounderName(ctx.from?.id ?? 0) !== "Madalena") return;
     awaitingAuthCodeFrom = ctx.from!.id;
+    awaitingContactsAuthCodeFrom = null;
     await ctx.reply(
       "Abre o link, autoriza, copia o valor de code= da barra de endereço e cola aqui:",
     );
     await ctx.reply(calendar.getAuthUrl());
+  });
+
+  // Google Contacts auth for the STUDIO's account — Madalena's private DM only.
+  // A separate login and token file from /auth (her calendar): see
+  // src/lib/google-contacts.ts.
+  bot.command("authcontacts", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    if (getFounderName(ctx.from?.id ?? 0) !== "Madalena") return;
+    awaitingContactsAuthCodeFrom = ctx.from!.id;
+    awaitingAuthCodeFrom = null;
+    await ctx.reply(
+      `Abre o link e entra com a conta do estúdio (${googleContacts.STUDIO_ACCOUNT}), não a tua. Autoriza, copia o valor de code= da barra de endereço e cola aqui:`,
+    );
+    await ctx.reply(googleContacts.getAuthUrl());
   });
 
   bot.command("cals", async (ctx) => {
@@ -359,6 +378,21 @@ export function buildBot(): Bot {
 
     // 1) DM router.
     if (chatType === "private") {
+      // Google Contacts (studio account) auth code intercept.
+      if (awaitingContactsAuthCodeFrom === fromId && text.startsWith("4/")) {
+        try {
+          await googleContacts.exchangeCodeForToken(text.trim());
+          awaitingContactsAuthCodeFrom = null;
+          await ctx.reply(
+            "✅ Contactos Google do estúdio ligados. A sincronização corre todos os dias às 06:30.",
+          );
+        } catch (err) {
+          log.warn("authcontacts.exchange_failed", { err: String(err) });
+          await ctx.reply("Código inválido. Tenta /authcontacts de novo.");
+        }
+        return;
+      }
+
       // Google Calendar auth code intercept.
       if (awaitingAuthCodeFrom === fromId && text.startsWith("4/")) {
         try {
