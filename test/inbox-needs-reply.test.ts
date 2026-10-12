@@ -46,7 +46,7 @@ describe("formatDigest", () => {
   it("says when only a manual reply is still possible, and flags unjudged threads", () => {
     const out = formatDigest([row({ username: null, display_name: "Rita", is_lead: false, state: "unlabelled", category: null, reason: null,
       last_in_at: "2026-10-11 09:00:00+00", window_closes_at: "2026-10-12 09:00:00+00" })], now, true)!;
-    expect(out).toContain("• Rita · por classificar · há 49h · janela de 24h fechou: só resposta escrita por ti até 20/10");
+    expect(out).toContain("• Rita · por classificar · há 49h · janela de 24h fechou: só resposta escrita à mão até 20/10");
     expect(out).toContain("Semana de teste");
   });
 });

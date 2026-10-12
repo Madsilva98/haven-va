@@ -92,7 +92,7 @@ function hoursBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 3_600_000);
 }
 
-/** The Telegram digest for Madalena, pt-PT, plain text. Empty list = no message. */
+/** The morning group post, pt-PT, plain text. Empty list = no message. */
 export function formatDigest(rows: InboxWaitingRow[], now: Date, shadow: boolean): string | null {
   if (rows.length === 0) return null;
   const lines = rows.map((r) => {
@@ -101,14 +101,14 @@ export function formatDigest(rows: InboxWaitingRow[], now: Date, shadow: boolean
     const window =
       closes > 0
         ? `janela fecha em ${closes}h`
-        : `janela de 24h fechou: só resposta escrita por ti até ${new Date(r.human_agent_until).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", timeZone: "Europe/Lisbon" })}`;
+        : `janela de 24h fechou: só resposta escrita à mão até ${new Date(r.human_agent_until).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", timeZone: "Europe/Lisbon" })}`;
     const kind = r.state === "unlabelled" ? "por classificar" : (r.category ?? "other").replace(/_/g, " ");
     const lead = r.is_lead ? " · lead" : "";
     const reason = r.reason ? `\n   ${r.reason}` : "";
     return `• ${who(r)}${lead} · ${kind} · há ${waited}h · ${window}${reason}`;
   });
   const head = `💬 Instagram: ${rows.length} ${rows.length === 1 ? "pessoa à espera" : "pessoas à espera"} de resposta`;
-  const foot = shadow ? "\n\nSemana de teste: se alguma estiver mal (já respondida, ou devia estar aqui e não está), diz-me qual." : "";
+  const foot = shadow ? "\n\nSemana de teste: se alguma estiver mal (já respondida, ou devia estar aqui e não está), digam qual." : "";
   return `${head}\n\n${lines.join("\n")}${foot}`;
 }
 
