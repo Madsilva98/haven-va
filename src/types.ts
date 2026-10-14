@@ -353,6 +353,52 @@ export interface ChurnRiskRow {
   status: ChurnStatus;
 }
 
+// ----- Tracking intro packs -----
+// Fed by src/crons/intro-pack-tracking.ts from va.v_pulse_intro_pack_tracking.
+// The bot sets "A contactar" on creation and Convertido / Comprou outra coisa /
+// Cold lead / Idle on its own; Contactado, Follow up and Perdido are the founders'.
+
+export type IntroTrackingEstado =
+  | "A contactar"
+  | "Contactado"
+  | "Follow up"
+  | "Convertido"
+  | "Perdido"
+  | "Comprou outra coisa"
+  | "Cold lead"
+  | "Idle";
+
+export type IntroTrackingMotivo =
+  | "À espera de começar"
+  | "Underused pack"
+  | "Pack ending"
+  | "Pack ended";
+
+/** Bot-written columns only — "Notas" is never read or written by the bot. */
+export interface IntroTrackingFields {
+  motivos: IntroTrackingMotivo[]; // multi-select; the reasons true today on an open row (founder, 2026-10-05)
+  pack: "2-Class" | "10-Day";
+  aulasFeitas: number;
+  aulasMarcadas: number;
+  compra: string; // YYYY-MM-DD
+  inicio: string | null; // first class on the pack
+  fim: string | null; // empty before the first class; 2-Class with both classes: the 2nd class; otherwise Kenko's expiry (hand extensions included)
+  email: string;
+  telefone: string | null;
+}
+
+export interface IntroTrackingRow {
+  id: string;
+  memberId: string;
+  nome: string;
+  estado: IntroTrackingEstado | null;
+  motivos: IntroTrackingMotivo[];
+  aulasFeitas: number | null;
+  aulasMarcadas: number | null;
+  inicio: string | null;
+  fim: string | null;
+}
+
 // ----- Competitor intel (newsletters → Notion) -----
 // CompetitorSourceRow (the "Fontes" DB) is the founder's own reference list
 // of what she's subscribed and how she's classified each source — not read
@@ -395,4 +441,43 @@ export interface CompetitorIntelRunSummary {
   findingsWritten: number;
   errors: number;
   byMessage: CompetitorIntelProcessedMessage[];
+}
+
+// One "Innovations in the market" item of haven-comms'
+// research/competitors/monthly/<YYYY-MM>/watch.json — the list the dashboard's
+// Competitors page shows. Items written by haven-comms' weekly
+// competitor_movements.py also carry wk/ch/pt/why; hand-written ones don't.
+export interface CompetitorInnovation {
+  id: string;
+  type: string; // "Classes & products" | "Offers & campaigns" | "Partnerships" | "Events" | "Positioning & message"
+  t: string;
+  d?: string;
+  who?: string;
+  src?: string;
+  url?: string;
+  fit?: string;
+  fn?: string;
+  wk?: string; // YYYY-MM-DD scrape date it was found
+  ch?: string; // Instagram | Website | Email
+  pt?: string; // one pt-PT line for the Monday message
+  why?: string;
+  m?: number; // matters to The Haven, 1-5: the Monday message shows the week's top 3
+  tier?: string; // handles.md tier; "International" never reaches the Monday message
+}
+
+interface MovementsSourceStatus {
+  ok: boolean;
+  error?: string;
+  skipped?: string;
+}
+
+// research/competitors/movements/<date>/status.json, written by competitor_movements.py.
+export interface CompetitorMovementsStatus {
+  date: string;
+  ok: boolean;
+  instagram: MovementsSourceStatus & { new_items?: number; studios?: number };
+  websites: MovementsSourceStatus;
+  newsletters: MovementsSourceStatus;
+  failures: { studio: string; error: string }[];
+  breaks?: number;
 }

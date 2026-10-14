@@ -23,10 +23,13 @@
 import { log } from "../lib/log.js";
 import { describePostExpiryVisit, findUnconvertedIntroPacks } from "../lib/intro-pack-conversion.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
-import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
-import { PULSE_VIEW } from "../lib/pulse-views.js";
-import { formatLeadsDigest, type NewLeadSummary } from "../messages/leads.js";
+import { memberIdFromEmail } from "../lib/pulse-views.js";
+import type { NewLeadSummary } from "../messages/leads.js";
 import * as notion from "../notion.js";
+import type { IntroTrackingEstado } from "../types.js";
+
+/** Estados on "Tracking intro packs" that keep someone out of Leads a contactar. */
+const SKIP_AS_LEAD: IntroTrackingEstado[] = ["Perdido", "Convertido", "Comprou outra coisa", "Follow up"];
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -44,19 +47,44 @@ export async function run(): Promise<void> {
 
   let candidates: Awaited<ReturnType<typeof findUnconvertedIntroPacks>>["candidates"];
   let asOf: string | null;
+  let sourceView: Awaited<ReturnType<typeof findUnconvertedIntroPacks>>["sourceView"];
   try {
-    ({ candidates, asOf } = await findUnconvertedIntroPacks());
+    ({ candidates, asOf, sourceView } = await findUnconvertedIntroPacks());
   } catch (err) {
     log.error("leads_intro_pack.fetch_failed", { message: errMsg(err) });
     return;
   }
 
+  // Someone a founder closed on "Tracking intro packs" never becomes a lead
+  // here: Perdido (founder, 2026-10-02), and Convertido / Comprou outra coisa
+  // even when set by hand for a purchase Kenko doesn't show (2026-10-05).
+  // Follow up stays on the intro packs list to convert, never a lead here
+  // (founder, 2026-10-05) — the tracking cron never makes it Cold lead. A
+  // failed read stops the run rather than risk adding them; next Monday retries.
+  let lostOnTracking = new Set<string>();
+  if (process.env.NOTION_INTRO_TRACKING_DB_ID) {
+    try {
+      const rows = await notion.getAllIntroTrackingRows();
+      lostOnTracking = new Set(
+        rows.filter((r) => r.estado !== null && SKIP_AS_LEAD.includes(r.estado)).map((r) => r.memberId),
+      );
+    } catch (err) {
+      log.error("leads_intro_pack.tracking_read_failed", { message: errMsg(err) });
+      return;
+    }
+  }
+
   const created: NewLeadSummary[] = [];
   const digestWorthy: NewLeadSummary[] = [];
   let skippedExisting = 0;
+  let skippedLost = 0;
   let backlogSuppressed = 0;
 
   for (const c of candidates) {
+    if (lostOnTracking.has(memberIdFromEmail(c.email))) {
+      skippedLost++;
+      continue;
+    }
     try {
       // findLeadByEmailAny, not findLeadByEmail: an Intro Pack candidate
       // re-derives every Monday for as long as the pack stays unconverted,
@@ -97,26 +125,17 @@ export async function run(): Promise<void> {
     }
   }
 
-  const message = formatLeadsDigest(digestWorthy);
-  if (!message) {
-    log.info("leads_intro_pack.no_new", {
-      totalCandidates: candidates.length,
-      skippedExisting,
-      created: created.length,
-      backlogSuppressed,
-    });
-    return;
-  }
-  try {
-    const messageId = await sendGroupMessageWithSource(message, [PULSE_VIEW.introPackLeads], asOf);
-    log.info("leads_intro_pack.posted", {
-      messageId,
-      count: digestWorthy.length,
-      created: created.length,
-      backlogSuppressed,
-      skippedExisting,
-    });
-  } catch (err) {
-    log.error("leads_intro_pack.send_failed", { message: errMsg(err) });
-  }
+  // No Telegram message for Leads a contactar (founder, 2026-10-05: "não
+  // preciso que envies mensagem no telegram dos leads a contactar") — the
+  // leads live in Notion; the run is only logged.
+  log.info("leads_intro_pack.done", {
+    asOf,
+    sourceView,
+    totalCandidates: candidates.length,
+    created: created.length,
+    recent: digestWorthy.length,
+    backlogSuppressed,
+    skippedExisting,
+    skippedLost,
+  });
 }

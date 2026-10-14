@@ -95,8 +95,6 @@ import { checkExistingCustomer, fetchAllCustomerNames, fetchAllVisitHistory, } f
 import { classifyInstagramDM, classifyOutreachIntent, summarizeRelationshipUpdate, } from "../lib/lead-classifier.js";
 import { log } from "../lib/log.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
-import { sendGroupMessage } from "../lib/telegram.js";
-import { formatLeadsDigests } from "../messages/leads.js";
 import * as notion from "../notion.js";
 const DATA_DIR = process.env.DATA_DIR ?? ".";
 const STATE_PATH = path.join(DATA_DIR, "instagram-leads-sync-state.json");
@@ -510,13 +508,6 @@ export async function run() {
         createdInfluencers,
         createdSuppliers,
     });
-    for (const message of formatLeadsDigests(createdLeads)) {
-        try {
-            const messageId = await sendGroupMessage(message);
-            log.info("leads_instagram_scan.leads_posted", { messageId });
-        }
-        catch (err) {
-            log.error("leads_instagram_scan.leads_send_failed", { message: errMsg(err) });
-        }
-    }
+    // No Telegram message for new Leads a contactar either (founder, 2026-10-05:
+    // "não preciso que envies mensagem no telegram dos leads a contactar").
 }

@@ -3,15 +3,19 @@ import { buildBot } from "./bot/index.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
+import { run as runCompetitorMovements } from "./crons/competitor-movements.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
+import { run as runGoogleContactsSync } from "./crons/google-contacts-sync.js";
 import { run as runInboxNeedsReply } from "./crons/inbox-needs-reply.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
+import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
+import { run as runReceptionHoursSync } from "./crons/reception-hours-sync.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
@@ -106,7 +110,8 @@ const tasks = [
   cron.schedule(
     "15 8 * * *",
     () =>
-      runIntroPackExpiring().catch((e) =>
+      // The "Tracking intro packs" list replaces the old digest once its DB is configured.
+      (process.env.NOTION_INTRO_TRACKING_DB_ID ? runIntroPackTracking() : runIntroPackExpiring()).catch((e) =>
         log.error("cron.intro_pack_expiring", { e: String(e) }),
       ),
     { timezone: TZ },
@@ -127,11 +132,42 @@ const tasks = [
       ),
     { timezone: TZ },
   ),
+  // Newsletters → Notion, silent, before haven-comms' 04:00 scrape reads them
+  // (2026-10-08). The group message is competitor-movements at 08:30.
   cron.schedule(
-    "30 8 * * 1",
+    "30 2 * * 1",
     () =>
       runCompetitorIntel().catch((e) =>
         log.error("cron.competitor_intel", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "30 8 * * 1",
+    () =>
+      runCompetitorMovements().catch((e) =>
+        log.error("cron.competitor_movements", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  // Receção calendar → studio DB, for the front desk hours (2026-10-01).
+  // After the day's last shift. See src/crons/reception-hours-sync.ts.
+  cron.schedule(
+    "30 23 * * *",
+    () =>
+      runReceptionHoursSync().catch((e) =>
+        log.error("cron.reception_hours_sync", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  // Studio clients → the studio's Google Contacts, one status label each
+  // (2026-10-10). Its own failures go to Telegram: see
+  // src/crons/google-contacts-sync.ts.
+  cron.schedule(
+    "30 6 * * *",
+    () =>
+      runGoogleContactsSync().catch((e) =>
+        log.error("cron.google_contacts_sync", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

@@ -171,7 +171,8 @@ describe("leads-instagram-scan", () => {
       { telefone: null },
     );
     expect(createPartner).not.toHaveBeenCalled();
-    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    // No Telegram message for new Leads a contactar (founder, 2026-10-05).
+    expect(sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("routes a business/networking contact to Partner Pipeline instead of Leads a contactar", async () => {

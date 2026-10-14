@@ -51,6 +51,12 @@ export const PULSE_VIEW = {
   introPackWatch: "v_pulse_intro_pack_watch",
   introPackLeads: "v_pulse_intro_pack_leads",
   churnRiskSignals: "v_pulse_churn_risk_signals",
+  // The bot's own analysis view (reads only va copies, data-model check C6), 2026-10-02:
+  // scripts/studio-db-intro-pack-tracking-2026-10-02.sql — the "Tracking intro packs" rules.
+  introPackTracking: "v_pulse_intro_pack_tracking",
+  // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
+  // the one status label each studio contact carries in Google Contacts.
+  contactStatus: "v_pulse_contact_status",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -392,6 +398,66 @@ export async function fetchIntroPackLeads(): Promise<IntroPackLeadRow[]> {
     return [];
   }
   return query<IntroPackLeadRow>(`select * from ${PULSE_VIEW.introPackLeads} where is_lead`);
+}
+
+/**
+ * v_pulse_intro_pack_tracking: one row per 2-Class/10-Day intro buyer. The view decides everything —
+ * `reason` (why they belong on the "Tracking intro packs" list today) and `auto_state` (the state the bot
+ * sets on its own); src/crons/intro-pack-tracking.ts only writes it into Notion. Rules and their dates:
+ * the view's own SQL file, scripts/studio-db-intro-pack-tracking-2026-10-02.sql.
+ */
+export type IntroTrackingReason = "waiting_to_start" | "underused" | "pack_ending" | "pack_ended";
+export type IntroTrackingAutoState = "converted" | "bought_other" | "cold_lead" | "idle";
+export interface IntroPackTrackingRow {
+  member_id: string;
+  email: string;
+  item_name: string;
+  pack: "2-Class" | "10-Day";
+  bought_on: string;
+  first_class_on: string | null;
+  expires_on: string;
+  ended_on: string;
+  visits_in_pack: number;
+  booked_ahead: number;
+  outcome: string;
+  data_as_of: string;
+  auto_state: IntroTrackingAutoState | null;
+  is_lead: boolean; // 21+ days since the same end, not converted — the Monday "Leads a contactar" rule
+  days_since_end: number;
+  is_recent: boolean; // under 28 days since the end: crossed day 21 within about the last week
+  reason: IntroTrackingReason | null; // older single-reason column, kept in the view for compatibility
+  reasons: IntroTrackingReason[]; // every reason true today, each tested on its own (2026-10-03) — what the bot reads
+}
+export const fetchIntroPackTracking = (): Promise<IntroPackTrackingRow[]> =>
+  fetchView<IntroPackTrackingRow>(PULSE_VIEW.introPackTracking);
+export async function fetchIntroPackTrackingLeads(): Promise<IntroPackTrackingRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.introPackTracking, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return query<IntroPackTrackingRow>(`select * from ${PULSE_VIEW.introPackTracking} where is_lead`);
+}
+
+/**
+ * The Google Contacts sync's source: everyone in v_pulse_member_identity with a phone, with the status
+ * label v_pulse_contact_status gives them (the label's rule is that view's, never computed here). PII —
+ * name and phone go to the studio's own Google account and nowhere else. Throws when the studio DB is
+ * not configured: an empty answer here would read as "remove every contact".
+ */
+export interface ContactSyncRow {
+  member_id: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+  added_on: string | null;
+  status: string | null;
+}
+export async function fetchContactSyncRows(): Promise<ContactSyncRow[]> {
+  return query<ContactSyncRow>(
+    `select i.member_id, i.contact_name, i.contact_phone, i.added_on, s.status
+       from ${PULSE_VIEW.memberIdentity} i
+       join ${PULSE_VIEW.contactStatus} s on s.member_id = i.member_id
+      where i.contact_phone ~ '[0-9]'`,
+  );
 }
 
 /**
