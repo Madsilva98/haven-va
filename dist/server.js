@@ -7,6 +7,7 @@ import { run as runCompetitorMovements } from "./crons/competitor-movements.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runGoogleContactsSync } from "./crons/google-contacts-sync.js";
+import { run as runInboxNeedsReply } from "./crons/inbox-needs-reply.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
 import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
@@ -37,6 +38,7 @@ const tasks = [
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 1 * *", () => runTidyMailboxesFeedbackReminder().catch((e) => log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) })), { timezone: TZ }),
     cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("30 8 * * *", () => runInboxNeedsReply().catch((e) => log.error("cron.inbox_needs_reply", { e: String(e) })), { timezone: TZ }),
     cron.schedule("12 8 * * 1", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
     cron.schedule("15 8 * * *", () => 
     // The "Tracking intro packs" list replaces the old digest once its DB is configured.

@@ -7,6 +7,7 @@ import { run as runCompetitorMovements } from "./crons/competitor-movements.js";
 import { run as runFounderMeetingBalanceCheck } from "./crons/founder-meeting-balance-check.js";
 import { run as runFounderMeetingCheck } from "./crons/founder-meeting-check.js";
 import { run as runGoogleContactsSync } from "./crons/google-contacts-sync.js";
+import { run as runInboxNeedsReply } from "./crons/inbox-needs-reply.js";
 import { run as runIntroPackExpiring } from "./crons/intro-pack-expiring.js";
 import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
@@ -91,6 +92,11 @@ const tasks = [
       runLeadsReconcile().catch((e) =>
         log.error("cron.leads_reconcile", { e: String(e) }),
       ),
+    { timezone: TZ },
+  ),
+  cron.schedule(
+    "30 8 * * *",
+    () => runInboxNeedsReply().catch((e) => log.error("cron.inbox_needs_reply", { e: String(e) })),
     { timezone: TZ },
   ),
   cron.schedule(
