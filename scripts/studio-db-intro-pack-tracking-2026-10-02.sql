@@ -30,6 +30,9 @@
 -- is pack_ending's "5 days or less left", a forward-looking window on a fixed calendar fact (intro_end),
 -- which reads current_date like the old watch list did (2026-09-22: on a lagging data date "ending soon"
 -- became "already over"). Entering the list is harmless; leaving it is what waits for the data.
+-- Since 2026-10-15 a pack is also OVER once its Kenko expiry passes on the calendar (pack_over), so
+-- "Pack ending" hands over to "Pack ended" the day after expiry instead of leaving a gap until the next
+-- import; how long ago it ended (cold_lead, is_lead, pack_ended's 20 days) still counts to data_as_of.
 --
 -- Founder's rules (2026-10-02 interview):
 --   not started  = 0 classes on the pack. Listed from 7 days after purchase (waiting_to_start), unless a
@@ -82,7 +85,11 @@ base as (
 f as (
   select b.*,
          b.visits_in_pack = 0 as not_started,
-         (b.pack = '2-Class' and b.visits_in_pack >= 2) or b.data_as_of > b.expires_on as pack_over
+         -- Kenko's expiry is a fixed calendar fact, so it is read on the calendar, like pack_ending's window
+         -- (2026-10-15: counted to data_as_of, a 10-Day pack that had expired but was not yet past the last
+         -- import had no reason at all — no longer "ending", not yet "ended" — and dropped off the list,
+         -- e.g. Rita Pais, expired 08/10, data to 07/10). The 20/21-day counts still wait for the data.
+         (b.pack = '2-Class' and b.visits_in_pack >= 2) or current_date > b.expires_on as pack_over
   from base b
 )
 select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on, f.expires_on, f.ended_on,
@@ -122,6 +129,6 @@ select f.member_id, f.email, f.item_name, f.pack, f.bought_on, f.first_class_on,
   ], null) end as reasons
 from f;
 
-comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reasons = every reason true today, each tested on its own (Madalena 2026-10-03; the bot accumulates them): waiting_to_start (0 classes, 7-29 days since purchase, nothing booked), underused (10-Day still running, 1-2 classes, 5+ days since the first), pack_ending (0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked), pack_ended (under 20 days since the end). reason = the older single-reason column, kept for compatibility. auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack ends on its 2nd class; otherwise, and any other pack, on Kenko''s expiry, hand extensions included (Madalena 2026-10-05). Time rules count to data_as_of; pack_ending reads the calendar. is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
+comment on view va.v_pulse_intro_pack_tracking is 'Haven VA bot''s own view (haven-va scripts/studio-db-intro-pack-tracking-2026-10-02.sql): one row per 2-Class/10-Day intro buyer for the "Tracking intro packs" Notion list. reasons = every reason true today, each tested on its own (Madalena 2026-10-03; the bot accumulates them): waiting_to_start (0 classes, 7-29 days since purchase, nothing booked), underused (10-Day still running, 1-2 classes, 5+ days since the first), pack_ending (0-5 calendar days to expiry, 10-Day or 2-Class with 1 class and none booked), pack_ended (under 20 days since the end). reason = the older single-reason column, kept for compatibility. auto_state = what the bot sets on its own: converted (membership), bought_other (class pack), cold_lead (20+ days since the end, not converted), idle (never started, 30+ days, nothing booked). A 2-Class pack ends on its 2nd class; otherwise, and any other pack, on Kenko''s expiry, hand extensions included (Madalena 2026-10-05). Time rules count to data_as_of; pack_ending, and a pack being over once its expiry passed, read the calendar (2026-10-15). is_lead = started, not converted, 21+ days since the same end (the Monday "Leads a contactar" list); days_since_end; is_recent = under 28 days since the end.';
 
 grant select on va.v_pulse_intro_pack_tracking to haven_va;
