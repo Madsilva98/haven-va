@@ -149,6 +149,14 @@ Don't wait for the schedule — run it once inside the container. Its log lines 
 ```bash
 ssh haven-nas "cd /volume1/docker/haven-va/code/haven-va && sudo -n /usr/local/bin/docker compose exec -T haven-va node -e \"import('./dist/crons/reception-hours-sync.js').then(async m => { await m.run(); process.exit(0); })\""
 ```
+A cron that touches Notion also needs `notion.initialize()` first (the server does it at boot), or it fails with `dsId(...) called before initializeDataSources()`:
+```bash
+ssh haven-nas "cd /volume1/docker/haven-va/code/haven-va && sudo -n /usr/local/bin/docker compose exec -T haven-va node -e \"Promise.all([import('./dist/notion.js'), import('./dist/crons/intro-pack-tracking.js')]).then(async ([n, m]) => { await n.initialize(); await m.run(); process.exit(0); })\""
+```
+
+### Rotating the `haven_va` studio-DB password (2026-10-15)
+Two halves, both needed: `alter role haven_va with password '…'` in the Supabase SQL Editor (project `leddqmselxsjamlvxvyk`), then the same password in `STUDIO_DATABASE_URL` in `data/.env` + `docker compose up -d --force-recreate`. Letters and digits only — `$` and URL characters break the line. The pooler host is `aws-1-eu-central-1` (`aws-0` answers `tenant/user ... not found`). Right after the `alter role`, Supavisor can still answer `password authentication failed` with the old password cached; it reloads the pool after a failed login, so retry a minute later before doubting the password. Check the line's shape without printing it (length, user, host, `pwAlnum`) with a `node -e` inside the container, never `cat`/`grep` output. A va rebuild on the studio side (2026-10-12 23:11) is the likely cause of an unannounced password change: the bot's crons then fail with `fetch_failed` until the .env is updated.
+
 For `reception-hours-sync` (2026-10-01, nightly 23:30): `cron.reception_hours_sync.done` with `synced` ≈ the number of timed Receção events = good. `fetch_failed` with `no calendar named "Receção" on this account` = Madalena's Google account (the one behind `/auth`) can't see that calendar; it must be shared from yourhavenpilates@gmail.com, which owns it. Nothing is written or deleted in that case. `fetch_failed` with an auth error = redo `/auth` in Madalena's DM. Verify in the studio DB with `select max(synced_at) from public.reception_calendar_events`.
 
 ### Gotcha: `.env` changes don't reload
