@@ -387,6 +387,29 @@ export interface IntroTrackingFields {
   telefone: string | null;
 }
 
+// ----- Embaixadores -----
+// Fed by src/crons/ambassador-tiers.ts on every Kenko import (Madalena, 2026-10-15). One row per
+// ambassador, keyed on "Member ID". "Avisada" is the founders' and never written; "Desconto no Kenko"
+// is the founders' too until v_pulse_ambassador_tier_today exposes discount_in_kenko.
+
+/** Bot-written columns. */
+export interface AmbassadorFields {
+  pessoasAtivas: number;
+  nivelHoje: number | null; // null until v_pulse_ambassador_tier_today exists
+  descontoEmVigor: string | null; // the latest count on the 1st; null = no discount
+  descontoHoje: string | null; // if the count were on the data date; null = none or unknown
+  emRisco: boolean;
+  pessoasReferidas: string;
+  atualizadoEm: string; // YYYY-MM-DD, the data date
+  descontoNoKenko?: string | null; // written only when the view carries it
+}
+
+export interface AmbassadorNotionRow {
+  id: string;
+  memberId: string;
+  nome: string;
+}
+
 export interface IntroTrackingRow {
   id: string;
   memberId: string;

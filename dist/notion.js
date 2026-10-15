@@ -36,6 +36,7 @@ const NOTION_LISTS_DB_ID = process.env.NOTION_LISTS_DB_ID;
 const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
 const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
 const NOTION_INTRO_TRACKING_DB_ID = process.env.NOTION_INTRO_TRACKING_DB_ID;
+const NOTION_AMBASSADORS_DB_ID = process.env.NOTION_AMBASSADORS_DB_ID;
 const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 if (!NOTION_API_KEY) {
@@ -72,6 +73,7 @@ export async function initialize() {
         NOTION_LEADS_DB_ID,
         NOTION_CHURN_RISK_DB_ID,
         NOTION_INTRO_TRACKING_DB_ID,
+        NOTION_AMBASSADORS_DB_ID,
         NOTION_COMPETITOR_SOURCES_DB_ID,
         NOTION_COMPETITOR_INTEL_DB_ID,
     ]);
@@ -2270,6 +2272,69 @@ async function updateIntroTrackingRow(pageId, fields, estado) {
     }));
     log.info("notion.intro_tracking_updated", { pageId, estado: estado ?? null });
 }
+// ----- Embaixadores -----
+// One row per ambassador, keyed on "Member ID". The bot writes only its own
+// columns: "Avisada" never, "Desconto no Kenko" only when the studio view
+// carries the discount applied in Kenko.
+function ambassadorFieldProps(f) {
+    return {
+        "Pessoas ativas hoje": { number: f.pessoasAtivas },
+        "Nível se fosse hoje": { number: f.nivelHoje },
+        "Desconto em vigor": richText(f.descontoEmVigor ?? ""),
+        "Desconto se fosse hoje": richText(f.descontoHoje ?? ""),
+        "Em risco": { checkbox: f.emRisco },
+        "Pessoas referidas": richText(f.pessoasReferidas),
+        "Atualizado em": { date: { start: f.atualizadoEm } },
+        ...(f.descontoNoKenko !== undefined ? { "Desconto no Kenko": richText(f.descontoNoKenko ?? "") } : {}),
+    };
+}
+async function getAllAmbassadorRows() {
+    if (!NOTION_AMBASSADORS_DB_ID)
+        return [];
+    const rows = [];
+    let cursor;
+    do {
+        const res = await withRetry("getAllAmbassadorRows", () => client.dataSources.query({
+            data_source_id: dsId(NOTION_AMBASSADORS_DB_ID),
+            start_cursor: cursor,
+        }));
+        for (const row of res.results) {
+            if (!("properties" in row))
+                continue;
+            const props = row.properties;
+            rows.push({
+                id: row.id,
+                memberId: readPlainText(props["Member ID"]).trim(),
+                nome: readPlainText(props["Name"]),
+            });
+        }
+        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+    } while (cursor);
+    return rows;
+}
+async function createAmbassadorRow(nome, memberId, fields) {
+    if (!NOTION_AMBASSADORS_DB_ID)
+        throw new Error("NOTION_AMBASSADORS_DB_ID not set");
+    const page = await withRetry("createAmbassadorRow", () => client.pages.create({
+        parent: { type: "data_source_id", data_source_id: dsId(NOTION_AMBASSADORS_DB_ID) },
+        properties: {
+            Name: { title: [{ text: { content: nome } }] },
+            "Member ID": richText(memberId),
+            ...ambassadorFieldProps(fields),
+        },
+    }));
+    log.info("notion.ambassador_created", { pageId: page.id });
+    return page.id;
+}
+async function updateAmbassadorRow(pageId, nome, fields) {
+    await withRetry("updateAmbassadorRow", () => client.pages.update({
+        page_id: pageId,
+        properties: {
+            Name: { title: [{ text: { content: nome } }] },
+            ...ambassadorFieldProps(fields),
+        },
+    }));
+}
 // ----- Page section editing -----
 function normalizeSectionName(text) {
     return text
@@ -2720,7 +2785,7 @@ createLead, updateLeadDetails, setLeadEstado, findLeadByEmail, findLeadByEmailAn
 // Clientes em risco de churn
 getChurnRowByEmail, createChurnFlag, updateChurnFlag, getChurnRowsByStatus, 
 // Tracking intro packs
-getAllIntroTrackingRows, createIntroTrackingRow, updateIntroTrackingRow, 
+getAllIntroTrackingRows, createIntroTrackingRow, updateIntroTrackingRow, getAllAmbassadorRows, createAmbassadorRow, updateAmbassadorRow, 
 // Competitor intel
 getActiveCompetitorSources, createCompetitorIntelFinding, };
 export const notion = {
@@ -2804,6 +2869,9 @@ export const notion = {
     getAllIntroTrackingRows,
     createIntroTrackingRow,
     updateIntroTrackingRow,
+    getAllAmbassadorRows,
+    createAmbassadorRow,
+    updateAmbassadorRow,
     // Competitor intel
     getActiveCompetitorSources,
     createCompetitorIntelFinding,
