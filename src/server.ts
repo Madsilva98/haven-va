@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
+import { run as runAmbassadorTiers } from "./crons/ambassador-tiers.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
@@ -115,6 +116,15 @@ const tasks = [
     () =>
       runLeadsIntroPack().catch((e) =>
         log.error("cron.leads_intro_pack", { e: String(e) }),
+      ),
+    { timezone: TZ },
+  ),
+  // Ambassador tiers: daily, but posts once a month — when the data reaches the 1st.
+  cron.schedule(
+    "25 8 * * *",
+    () =>
+      runAmbassadorTiers().catch((e) =>
+        log.error("cron.ambassador_tiers", { e: String(e) }),
       ),
     { timezone: TZ },
   ),

@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { buildBot } from "./bot/index.js";
+import { run as runAmbassadorTiers } from "./crons/ambassador-tiers.js";
 import { run as runBirthdays } from "./crons/birthdays.js";
 import { run as runChurnRisk } from "./crons/churn-risk.js";
 import { run as runCompetitorIntel } from "./crons/competitor-intel.js";
@@ -42,6 +43,8 @@ const tasks = [
     // The "Tracking intro packs" list replaces the old digest once its DB is configured.
     (process.env.NOTION_INTRO_TRACKING_DB_ID ? runIntroPackTracking() : runIntroPackExpiring()).catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
     cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
+    // Ambassador tiers: daily, but posts once a month — when the data reaches the 1st.
+    cron.schedule("25 8 * * *", () => runAmbassadorTiers().catch((e) => log.error("cron.ambassador_tiers", { e: String(e) })), { timezone: TZ }),
     cron.schedule("45 8 * * 1", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
     // Newsletters → Notion, silent, before haven-comms' 04:00 scrape reads them
     // (2026-10-08). The group message is competitor-movements at 08:30.
