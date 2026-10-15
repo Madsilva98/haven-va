@@ -1,6 +1,6 @@
-# Ambassador tiers — the monthly tier-change post
+# Ambassador tiers — watched on every Kenko import
 
-`src/crons/ambassador-tiers.ts`, daily at 08:25 Europe/Lisbon, posts **at most once a month**.
+`src/crons/ambassador-tiers.ts`, daily at 08:25 Europe/Lisbon; acts only when `data_as_of` has moved (a new Kenko import). Design agreed with Madalena in a grilling session on 2026-10-15.
 
 ## What the programme is (Madalena, 2026-10-14/15)
 
@@ -14,37 +14,74 @@ A member who refers people gets a discount on their own membership, by how many 
 | 6–10 | 4 | 2x por semana oferecida |
 | 11+ | 5 | Ilimitado oferecido |
 
-Thresholds changed 2026-10-15. The new tier applies at the ambassador's **next payment**, up or down, no grace month. It does not stack with any other discount: Bia applies the larger. Launched 2026-10-15; the **first count is 2026-11-01**, where everyone with a tier shows as new. Decisions: haven-comms `docs/superpowers/specs/2026-10-14-b2b-one-pagers.md`.
+Thresholds changed 2026-10-15. The new tier applies at the ambassador's **next payment**, up or down, no grace month. No stacking with another discount: the larger applies. Any founder applies it in Kenko. Launched 2026-10-15; the **first count is 2026-11-01**. Programme spec: haven-comms `docs/superpowers/specs/2026-10-14-b2b-one-pagers.md`.
+
+**Leaving** = no membership covering the data date: cancelled, or the last cycle expired with no next one. **A pause is not leaving** and **a failed payment is not leaving** (Kenko keeps it Active). "Cancelation scheduled" = about to leave. In Kenko data, "Expired" is mostly the status of every *closed* billing cycle (444 of them on 2026-10-15) — a membership only ended by expiry when no later cycle follows (8 people that day, 1 with a failed payment). There is no "Suspended" in the data.
 
 ## Where the rules live
 
-All of it in haven-studio's `va.v_pulse_ambassador_tier_monthly` (one row per ambassador per 1st: `tier`, `discount_label`, `active_referred`, `ambassador_is_member`, `is_first_five`, `referred_member_ids`) and `va.v_pulse_ambassador_referrals` (one row per referral). The bot never maps counts to tiers or tiers to labels:
+In the studio views, never in the bot:
 
-- `src/lib/pulse-views.ts` — `fetchAmbassadorTierMonthly(month)`, `fetchAmbassadorReferrals()`.
-- `src/lib/ambassador-tiers.ts` — `planAmbassadorTierChanges(thisMonth, lastMonth, earlier)`, pure: `up` / `down` (tier changed), `new` (first month ever with tier ≥ 1 — back after a month at 0 is `up`), `left` (tier ≥ 1 → 0, or missing from the view; `isMember: false` = the ambassador no longer has a membership). `suspiciousReason` is the breaker.
-- `src/messages/ambassador-tiers.ts` — the pt-PT text. Names only from `v_pulse_member_identity`.
+| View | What the bot takes from it |
+|---|---|
+| `v_pulse_ambassador_referrals` | who counts today (`excluded_reason` null and `active_on_data_as_of`) |
+| `v_pulse_ambassador_tier_monthly` | the tier and label **in force** (latest 1st) and the count on each 1st |
+| `v_pulse_ambassador_tier_today` *(requested)* | the tier/label **if the count were today**, `is_first_five`, `discount_in_kenko` |
+| `v_pulse_ambassador_tier_scale` *(requested)* | the scale, to answer "if this person leaves, which tier?" |
+| `v_pulse_membership_state` | facts only: who has a cancellation scheduled, why someone stopped counting |
+| `v_pulse_member_identity` | names |
 
-An ambassador who isn't a member on the 1st has `tier = 0` in the view even with referrals — the discount has nothing to apply to.
+The two *requested* views, and "a pause still counts", are in Haven-Comms `docs/PROMPT-ambassador-pause-and-discount-haven-studio.md` for a haven-studio session. **Until they land** the bot reads them only if they exist (`viewExists`): no "sobe / desce / mantém" sentence, "Nível / Desconto se fosse hoje" empty, "Em risco" falls back to "fewer people counting than at the last 1st or a cancellation scheduled", and a paused referral stops counting (shown as "saiu … (em pausa)").
 
-## When it posts
+Code: `src/lib/ambassador-watch.ts` (snapshot, diff, effects — pure), `src/lib/ambassador-tiers.ts` (the count on the 1st — pure), `src/messages/ambassador-tiers.ts` (text), `src/crons/ambassador-tiers.ts` (orchestration, Notion, state).
 
-Each morning:
+## The message (one per import with news; silent otherwise)
 
-1. Skip if `DATA_DIR/ambassador-tiers-state.json` already has this calendar month as `lastPostedMonth`.
-2. Wait until `data_as_of` ≥ the 1st of the month (the Kenko import is manual, so this can be days late). The view has no row for the month before that anyway.
-3. Diff this 1st against the previous 1st. Nothing changed → silent, month marked done.
-4. Otherwise save the month, **then** post with `sendGroupMessageWithSource(…, ["v_pulse_ambassador_tier_monthly"], asOf)`, so "porquê?" and `/flag` work. A crash between the two can lose one post (re-run by clearing the state file), never double it.
+```
+Embaixadores · dados até 14/11/2026
 
-## Alerts (DM to Madalena, group if her ID isn't set)
+O que mudou
+· Ana Silva: entrou Rita Costa → 4 pessoas. Sobe de 15% para 50% na contagem de 1 de dezembro.
+· Joana Reis: Marta Dias agendou o cancelamento → 3 pessoas por agora. Se sair, mantém 15%.
+· Sofia Lopes: saiu Eva Matos (cancelou) → 1 pessoa. Desce de 15% para 10% na contagem de 1 de dezembro.
 
-- **"a importação do Kenko ainda não chegou a 1 de …"** — from the 5th, data still short of the 1st. Once per month. Do the Kenko import; the post goes out the next morning.
-- **"não publiquei a contagem de …"** — the circuit breaker: more than half the tiered ambassadors (min 4) moving in one month, or no one tiered when the previous month had some. Once per month. Check with `AMBASSADOR_TIERS_DRY_RUN=true`; if the count is real, run once with `AMBASSADOR_TIERS_FORCE=true`. It never trips on the first count.
+Contagem de 1 de novembro          ← only on the first import covering the 1st
+Subiram / Desceram / Novos / Deixam de ter desconto
 
-## Env
+A fazer
+· Avisar Ana Silva: entrou Rita Costa
+· Mudar no Kenko, no próximo pagamento: Ana Silva 15% → 50%
+```
 
-- `AMBASSADOR_TIERS_DRY_RUN=true` — logs `cron.ambassador_tiers.dry_run` with the message; posts and saves nothing.
+- Every entry, scheduled cancellation and exit is reported, even when the tier doesn't change (Madalena: tell the ambassador every time).
+- The ambassador's own scheduled cancellation or exit is informative only (no "Avisar"), and only when someone counts for them.
+- Not addressed to anyone: any founder acts on it.
+- Ends with `Fonte: v_pulse_ambassador_referrals[, v_pulse_ambassador_tier_monthly] · dados até …` so "porquê?" and `/flag` work.
+- The **first import ever seen is a baseline**: no "entrou" for everyone already counting.
+
+## Notion "Embaixadores" (`NOTION_AMBASSADORS_DB_ID`)
+
+One row per ambassador (everyone in the referrals view), keyed on `Member ID`, refreshed on every import. Schema: `scripts/setup-notion-dbs.mjs` (`node --env-file=.env scripts/setup-notion-dbs.mjs --only=Embaixadores` touches only this DB).
+
+- Bot-written: Name, Member ID, Pessoas ativas hoje, Nível se fosse hoje, Desconto em vigor, Desconto se fosse hoje, Em risco, Pessoas referidas (one line each: "conta", "conta, cancelamento agendado", "em pausa", "cancelou", "ainda sem compra", "não conta: antes do lançamento", …), Atualizado em.
+- **Never written by the bot:** Avisada (date, by hand).
+- Desconto no Kenko: by hand, until `v_pulse_ambassador_tier_today.discount_in_kenko` carries it — then the bot writes it.
+- "Por aplicar no Kenko" (formula) = Desconto em vigor ≠ Desconto no Kenko; the view of the same name filters on it.
+- Notion failures are logged, never block the message.
+
+## State, alerts, env
+
+- `DATA_DIR/ambassador-tiers-state.json`: last import seen (`lastAsOf`), its snapshot, last month counted. Saved **before** sending: a crash can lose one post, never double it. Delete it to re-baseline (the next import is then silent).
+- **"a importação do Kenko ainda não chegou a 1 de …"** — DM to Madalena from the 5th when the data is still short of the 1st. Once per month.
+- **"não publiquei nada sobre o import …"** — circuit breaker: over half the people counting leaving in one import (min 4), more than half the tiered ambassadors moving on the 1st (min 4), or no one tiered after a month that had some. Nothing posted or written to Notion, state not advanced. Once per import.
+- `AMBASSADOR_TIERS_DRY_RUN=true` — logs `cron.ambassador_tiers.dry_run` (message) and `dry_run_notion` (rows); posts and writes nothing; keeps its own `ambassador-tiers-state.dry-run.json` so successive dry runs show real diffs.
 - `AMBASSADOR_TIERS_FORCE=true` — one run past the breaker. Never leave it set.
+
+## Gotchas
+
+- `test/kenko-guard.test.ts` rejects any `kenko_…` inside a string literal in `src/` — that's why the requested column is `discount_in_kenko`, not `kenko_discount`.
+- On 2026-10-15 nobody counted yet: 15 ambassadors, 20 referrals, all `before_launch` or `no_purchase` (one — Sónia Silveira → Mafalda Pestana — bought on 2026-10-01, 14 days before launch).
 
 ## Out of scope
 
-Applying discounts in Kenko (Bia, by hand), the one-off free classes, and any message to the ambassadors themselves — ask Madalena before adding a member-facing message.
+Applying discounts in Kenko (by hand), the one-off free classes, and any message to the ambassadors themselves — ask Madalena before adding a member-facing message.
