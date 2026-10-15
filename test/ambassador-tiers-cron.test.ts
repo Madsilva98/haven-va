@@ -19,14 +19,31 @@ vi.mock("node:fs", () => ({
 
 const views = vi.hoisted(() => ({
   fetchDataAsOf: vi.fn(),
-  fetchAmbassadorTierMonthly: vi.fn(),
-  fetchMemberIdentity: vi.fn(async () => [{ member_id: "ana", contact_name: "Ana Silva" }]),
+  fetchAmbassadorTierMonthly: vi.fn(async (): Promise<unknown[]> => []),
+  fetchAmbassadorReferrals: vi.fn(async (): Promise<unknown[]> => []),
+  fetchAmbassadorTierToday: vi.fn(async (): Promise<unknown[] | null> => null),
+  fetchAmbassadorTierScale: vi.fn(async (): Promise<unknown[] | null> => null),
+  fetchMembershipStatusAsOf: vi.fn(async (): Promise<unknown[]> => []),
+  fetchMemberIdentity: vi.fn(async () => [
+    { member_id: "ana", contact_name: "Ana Silva" },
+    { member_id: "rita", contact_name: "Rita Costa" },
+  ]),
 }));
 vi.mock("../src/lib/pulse-views.js", () => ({
   ...views,
-  PULSE_VIEW: { ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly" },
+  PULSE_VIEW: {
+    ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly",
+    ambassadorReferrals: "v_pulse_ambassador_referrals",
+  },
 }));
 vi.mock("../src/lib/studio-db.js", () => ({ isStudioDbAvailable: () => true }));
+
+const notion = vi.hoisted(() => ({
+  getAllAmbassadorRows: vi.fn(async (): Promise<{ id: string; memberId: string; nome: string }[]> => []),
+  createAmbassadorRow: vi.fn(async () => "page-1"),
+  updateAmbassadorRow: vi.fn(async () => undefined),
+}));
+vi.mock("../src/notion.js", () => notion);
 
 const sendGroupMessageWithSource = vi.fn(async (..._args: unknown[]) => {
   order.push("send");
@@ -42,9 +59,9 @@ vi.mock("../src/lib/telegram.js", () => ({
 }));
 vi.mock("../src/lib/founders.js", () => ({ getTelegramId: () => 111 }));
 
-import { previousMonthStart, run } from "../src/crons/ambassador-tiers.js";
+import { previousMonthStart, referredSummary, run } from "../src/crons/ambassador-tiers.js";
 
-const row = (id: string, month: string, tier: number, active: number) => ({
+const tierRow = (id: string, month: string, tier: number, active: number) => ({
   month_start: month,
   ambassador_member_id: id,
   ambassador_is_member: true,
@@ -54,15 +71,31 @@ const row = (id: string, month: string, tier: number, active: number) => ({
   discount_label: ["—", "10%", "15%", "50%"][tier],
   referred_member_ids: [],
 });
+const ref = (amb: string, referred: string, counts = true) => ({
+  ambassador_member_id: amb,
+  referred_member_id: referred,
+  referred_on: "2026-10-20",
+  is_new: true,
+  first_membership_on: "2026-10-20",
+  active_on_data_as_of: counts,
+  excluded_reason: null,
+});
 const at = (iso: string) => new Date(`${iso}T08:25:00Z`);
-const state = () => JSON.parse([...files.values()][0] ?? "{}") as Record<string, unknown>;
+const liveState = () => JSON.parse(files.get("ambassador-tiers-state.json") ?? "{}") as Record<string, unknown>;
 
 beforeEach(() => {
   files.clear();
   order.length = 0;
   vi.clearAllMocks();
+  views.fetchAmbassadorTierMonthly.mockResolvedValue([]);
+  views.fetchAmbassadorReferrals.mockResolvedValue([]);
+  views.fetchAmbassadorTierToday.mockResolvedValue(null);
+  views.fetchAmbassadorTierScale.mockResolvedValue(null);
+  views.fetchMembershipStatusAsOf.mockResolvedValue([{ member_id: "ana", status: "Active", covers: true }]);
+  notion.getAllAmbassadorRows.mockResolvedValue([]);
   delete process.env.AMBASSADOR_TIERS_DRY_RUN;
   delete process.env.AMBASSADOR_TIERS_FORCE;
+  process.env.NOTION_AMBASSADORS_DB_ID = "db";
 });
 
 describe("ambassador-tiers cron", () => {
@@ -71,15 +104,49 @@ describe("ambassador-tiers cron", () => {
     expect(previousMonthStart("2026-11-01")).toBe("2026-10-01");
   });
 
-  it("waits while data_as_of is before the 1st, silently until the 5th", async () => {
-    views.fetchDataAsOf.mockResolvedValue("2026-10-30");
-    await run(at("2026-11-03"));
-    expect(views.fetchAmbassadorTierMonthly).not.toHaveBeenCalled();
-    expect(sendDM).not.toHaveBeenCalled();
+  it("first import: a silent baseline that still fills Notion", async () => {
+    views.fetchDataAsOf.mockResolvedValue("2026-10-20");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "rita")]);
+    await run(at("2026-10-20"));
     expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
+    expect(notion.createAmbassadorRow).toHaveBeenCalledWith(
+      "Ana Silva",
+      "ana",
+      expect.objectContaining({ pessoasAtivas: 1, descontoEmVigor: null, pessoasReferidas: "Rita Costa — conta" }),
+    );
+    expect(liveState().lastAsOf).toBe("2026-10-20");
+  });
+
+  it("does nothing until a new import lands", async () => {
+    files.set("ambassador-tiers-state.json", JSON.stringify({ lastAsOf: "2026-10-20", snapshot: {} }));
+    views.fetchDataAsOf.mockResolvedValue("2026-10-20");
+    await run(at("2026-10-21"));
+    expect(views.fetchAmbassadorReferrals).not.toHaveBeenCalled();
+  });
+
+  it("someone enters on a new import: one message, state saved before sending, Notion updated", async () => {
+    files.set(
+      "ambassador-tiers-state.json",
+      JSON.stringify({
+        lastAsOf: "2026-10-20",
+        snapshot: { ana: { counting: [], cancelScheduled: [], selfMember: true, selfCancelScheduled: false } },
+      }),
+    );
+    notion.getAllAmbassadorRows.mockResolvedValue([{ id: "page-ana", memberId: "ana", nome: "Ana Silva" }]);
+    views.fetchDataAsOf.mockResolvedValue("2026-10-24");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "rita")]);
+    await run(at("2026-10-24"));
+    const [text, srcViews, asOf] = sendGroupMessageWithSource.mock.calls[0]!;
+    expect(text).toContain("O que mudou\n· Ana Silva: entrou Rita Costa → 1 pessoa.\n\nA fazer");
+    expect(text).toContain("A fazer\n· Avisar Ana Silva: entrou Rita Costa");
+    expect(srcViews).toEqual(["v_pulse_ambassador_referrals"]);
+    expect(asOf).toBe("2026-10-24");
+    expect(order.slice(-2)).toEqual(["save", "send"]);
+    expect(notion.updateAmbassadorRow).toHaveBeenCalledWith("page-ana", "Ana Silva", expect.objectContaining({ pessoasAtivas: 1 }));
   });
 
   it("warns Madalena once from the 5th that the import is late", async () => {
+    files.set("ambassador-tiers-state.json", JSON.stringify({ lastAsOf: "2026-10-30", snapshot: {} }));
     views.fetchDataAsOf.mockResolvedValue("2026-10-30");
     await run(at("2026-11-05"));
     await run(at("2026-11-06"));
@@ -87,61 +154,91 @@ describe("ambassador-tiers cron", () => {
     expect(String(sendDM.mock.calls[0]![1])).toMatch(/não chegou a 1 de novembro \(dados até 30\/10\/2026\)/);
   });
 
-  it("posts the first count once, saving the month before sending", async () => {
+  it("the first import covering the 1st carries the count, once", async () => {
+    files.set(
+      "ambassador-tiers-state.json",
+      JSON.stringify({
+        lastAsOf: "2026-10-30",
+        snapshot: { ana: { counting: ["rita"], cancelScheduled: [], selfMember: true, selfCancelScheduled: false } },
+      }),
+    );
     views.fetchDataAsOf.mockResolvedValue("2026-11-02");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([row("ana", "2026-11-01", 2, 3)]);
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "rita")]);
+    views.fetchAmbassadorTierMonthly.mockResolvedValue([tierRow("ana", "2026-11-01", 1, 1)]);
     await run(at("2026-11-02"));
-    await run(at("2026-11-03"));
+    const [text, srcViews] = sendGroupMessageWithSource.mock.calls[0]!;
+    expect(text).toContain("Contagem de 1 de novembro\nNovos\n· Ana Silva: 10% (1 pessoa)");
+    expect(text).toContain("· Mudar no Kenko, no próximo pagamento: Ana Silva sem desconto → 10%");
+    expect(text).not.toContain("O que mudou");
+    expect(srcViews).toEqual(["v_pulse_ambassador_referrals", "v_pulse_ambassador_tier_monthly"]);
+    expect(liveState().lastPostedMonth).toBe("2026-11-01");
+
+    views.fetchDataAsOf.mockResolvedValue("2026-11-04");
+    await run(at("2026-11-04"));
     expect(sendGroupMessageWithSource).toHaveBeenCalledTimes(1);
-    const [text, srcViews, asOf] = sendGroupMessageWithSource.mock.calls[0]!;
-    expect(text).toContain("Novos\n· Ana Silva: 15% (3 pessoas)");
-    expect(srcViews).toEqual(["v_pulse_ambassador_tier_monthly"]);
-    expect(asOf).toBe("2026-11-02");
-    expect(order).toEqual(["save", "send"]);
-    expect(state().lastPostedMonth).toBe("2026-11-01");
   });
 
-  it("does nothing before the first count exists", async () => {
-    views.fetchDataAsOf.mockResolvedValue("2026-10-15");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([]);
-    await run(at("2026-10-15"));
-    expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
-    expect(files.size).toBe(0);
-  });
-
-  it("no change: silent, but the month counts as done", async () => {
-    views.fetchDataAsOf.mockResolvedValue("2026-12-01");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([row("ana", "2026-11-01", 2, 2), row("ana", "2026-12-01", 2, 3)]);
-    await run(at("2026-12-01"));
-    expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
-    expect(state().lastPostedMonth).toBe("2026-12-01");
-  });
-
-  it("dry run logs instead of posting and saves nothing", async () => {
+  it("dry run: logs, posts and writes nothing live, keeps its own state", async () => {
     process.env.AMBASSADOR_TIERS_DRY_RUN = "true";
-    views.fetchDataAsOf.mockResolvedValue("2026-11-02");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([row("ana", "2026-11-01", 1, 1)]);
-    await run(at("2026-11-02"));
+    views.fetchDataAsOf.mockResolvedValue("2026-10-20");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "rita")]);
+    await run(at("2026-10-20"));
     expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
-    expect(files.size).toBe(0);
+    expect(notion.createAmbassadorRow).not.toHaveBeenCalled();
+    expect(files.has("ambassador-tiers-state.json")).toBe(false);
+    expect(files.has("ambassador-tiers-state.dry-run.json")).toBe(true);
   });
 
-  it("circuit breaker: an empty month after a tiered one posts nothing and warns once", async () => {
-    views.fetchDataAsOf.mockResolvedValue("2026-12-02");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([row("ana", "2026-11-01", 2, 2)]);
-    await run(at("2026-12-02"));
-    await run(at("2026-12-03"));
+  it("circuit breaker: most people leaving at once posts and writes nothing, warns once", async () => {
+    const counting = ["a", "b", "c", "d", "e"];
+    files.set(
+      "ambassador-tiers-state.json",
+      JSON.stringify({ lastAsOf: "2026-10-20", snapshot: { ana: { counting, cancelScheduled: [], selfMember: true, selfCancelScheduled: false } } }),
+    );
+    views.fetchDataAsOf.mockResolvedValue("2026-10-24");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "a")]);
+    await run(at("2026-10-24"));
+    await run(at("2026-10-25"));
     expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
+    expect(notion.updateAmbassadorRow).not.toHaveBeenCalled();
     expect(sendDM).toHaveBeenCalledTimes(1);
-    expect(String(sendDM.mock.calls[0]![1])).toMatch(/não publiquei/);
-    expect(state().lastPostedMonth).toBeNull();
+    expect(String(sendDM.mock.calls[0]![1])).toMatch(/4 das 5 pessoas/);
+    expect(liveState().lastAsOf).toBe("2026-10-20");
   });
 
   it("AMBASSADOR_TIERS_FORCE lets the stopped run through", async () => {
     process.env.AMBASSADOR_TIERS_FORCE = "true";
-    views.fetchDataAsOf.mockResolvedValue("2026-12-02");
-    views.fetchAmbassadorTierMonthly.mockResolvedValue([row("ana", "2026-11-01", 2, 2)]);
-    await run(at("2026-12-02"));
-    expect(String(sendGroupMessageWithSource.mock.calls[0]![0])).toContain("Deixam de ter desconto");
+    files.set(
+      "ambassador-tiers-state.json",
+      JSON.stringify({ lastAsOf: "2026-10-20", snapshot: { ana: { counting: ["a", "b", "c", "d", "e"], cancelScheduled: [], selfMember: true, selfCancelScheduled: false } } }),
+    );
+    views.fetchDataAsOf.mockResolvedValue("2026-10-24");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "a")]);
+    await run(at("2026-10-24"));
+    expect(String(sendGroupMessageWithSource.mock.calls[0]![0])).toContain("saíram");
+  });
+});
+
+describe("referredSummary", () => {
+  it("counting people first, then the rest with why", () => {
+    const statuses = new Map([
+      ["rita", { member_id: "rita", status: "Cancelation scheduled", covers: true }],
+      ["eva", { member_id: "eva", status: "Paused", covers: true }],
+      ["marta", { member_id: "marta", status: "Canceled", covers: false }],
+    ]);
+    const names = new Map([["rita", "Rita Costa"], ["eva", "Eva Matos"], ["marta", "Marta Dias"], ["joana", "Joana Reis"]]);
+    const text = referredSummary(
+      [
+        { ...ref("ana", "joana", false), excluded_reason: "no_purchase" },
+        ref("ana", "marta", false),
+        ref("ana", "eva", false),
+        ref("ana", "rita"),
+      ],
+      statuses,
+      names,
+    );
+    expect(text).toBe(
+      ["Rita Costa — conta, cancelamento agendado", "Eva Matos — em pausa", "Joana Reis — ainda sem compra", "Marta Dias — cancelou"].join("\n"),
+    );
   });
 });

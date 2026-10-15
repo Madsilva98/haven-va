@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isEmptyPlan, planAmbassadorTierChanges, suspiciousReason } from "../src/lib/ambassador-tiers.js";
 import type { AmbassadorTierRow } from "../src/lib/pulse-views.js";
-import { formatAmbassadorTierChanges, monthStartLabel } from "../src/messages/ambassador-tiers.js";
+import { formatAmbassadorMessage, monthStartLabel, monthlyCountLines } from "../src/messages/ambassador-tiers.js";
 
 const LABELS = ["—", "10%", "15%", "50%", "2x por semana oferecida", "Ilimitado oferecido"];
 
@@ -133,12 +133,14 @@ describe("suspiciousReason", () => {
   });
 });
 
-describe("formatAmbassadorTierChanges", () => {
-  it("is null when nothing changed", () => {
-    expect(formatAmbassadorTierChanges({ up: [], down: [], new: [], left: [] }, DEC, NAMES)).toBeNull();
+describe("the count on the 1st in the message", () => {
+  it("is null when nothing changed and there is no news", () => {
+    const plan = { up: [], down: [], new: [], left: [] };
+    expect(monthlyCountLines(plan, DEC, NAMES)).toEqual([]);
+    expect(formatAmbassadorMessage({ asOf: "2026-12-02", news: [], monthly: { plan, monthStart: DEC }, names: NAMES })).toBeNull();
   });
 
-  it("formats every section, names sorted, plain text", () => {
+  it("formats every section, names sorted, with the Kenko actions", () => {
     const plan = planAmbassadorTierChanges(
       [
         row("ana", DEC, 3, 4),
@@ -149,10 +151,11 @@ describe("formatAmbassadorTierChanges", () => {
       ],
       [row("ana", NOV, 2, 2), row("rita", NOV, 3, 4), row("sofia", NOV, 1, 1), row("marta", NOV, 2, 2)],
     );
-    expect(formatAmbassadorTierChanges(plan, DEC, NAMES)).toBe(
+    expect(formatAmbassadorMessage({ asOf: "2026-12-02", news: [], monthly: { plan, monthStart: DEC }, names: NAMES })).toBe(
       [
-        "Embaixadores · contagem de 1 de dezembro",
+        "Embaixadores · dados até 02/12/2026",
         "",
+        "Contagem de 1 de dezembro",
         "Subiram",
         "· Ana Silva: 15% → 50% (4 pessoas)",
         "",
@@ -166,21 +169,29 @@ describe("formatAmbassadorTierChanges", () => {
         "· Marta Dias: 15% → sem desconto (já não é membro)",
         "· Sofia Lopes: 10% → sem desconto (0 pessoas)",
         "",
-        "A Bia muda o desconto no Kenko no próximo pagamento de cada pessoa.",
+        "A fazer",
+        "· Mudar no Kenko, no próximo pagamento: Ana Silva 15% → 50%",
+        "· Mudar no Kenko, no próximo pagamento: Joana Reis sem desconto → 10%",
+        "· Mudar no Kenko, no próximo pagamento: Marta Dias 15% → sem desconto",
+        "· Mudar no Kenko, no próximo pagamento: Rita Costa 50% → 15%",
+        "· Mudar no Kenko, no próximo pagamento: Sofia Lopes 10% → sem desconto",
       ].join("\n"),
     );
   });
 
   it("first month: only Novos", () => {
     const plan = planAmbassadorTierChanges([row("ana", NOV, 3, 5), row("joana", NOV, 1, 1)], []);
-    const text = formatAmbassadorTierChanges(plan, NOV, NAMES)!;
-    expect(text.startsWith("Embaixadores · contagem de 1 de novembro\n\nNovos\n· Ana Silva: 50% (5 pessoas)\n· Joana Reis: 10% (1 pessoa)")).toBe(true);
-    expect(text).not.toMatch(/Subiram|Desceram|Deixam/);
+    expect(monthlyCountLines(plan, NOV, NAMES)).toEqual([
+      "Contagem de 1 de novembro",
+      "Novos",
+      "· Ana Silva: 50% (5 pessoas)",
+      "· Joana Reis: 10% (1 pessoa)",
+    ]);
   });
 
   it("an ambassador without a name in the identity view still shows", () => {
     const plan = planAmbassadorTierChanges([row("abcdef1234567890", NOV, 1, 1)], []);
-    expect(formatAmbassadorTierChanges(plan, NOV, new Map())).toContain("· sem nome (abcdef12): 10% (1 pessoa)");
+    expect(monthlyCountLines(plan, NOV, new Map())).toContain("· sem nome (abcdef12): 10% (1 pessoa)");
   });
 
   it("monthStartLabel", () => {
