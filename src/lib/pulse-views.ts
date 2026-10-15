@@ -57,6 +57,10 @@ export const PULSE_VIEW = {
   // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
   // the one status label each studio contact carries in Google Contacts.
   contactStatus: "v_pulse_contact_status",
+  // The ambassador programme (haven-studio, 2026-10-15): the tier each ambassador holds on the 1st
+  // of each month, and the referrals behind it. Tier mapping and discount labels live in the view.
+  ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly",
+  ambassadorReferrals: "v_pulse_ambassador_referrals",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -481,6 +485,45 @@ export interface ChurnRiskSignalRow {
 }
 export const fetchChurnRiskSignals = (): Promise<ChurnRiskSignalRow[]> =>
   fetchView<ChurnRiskSignalRow>(PULSE_VIEW.churnRiskSignals);
+
+/**
+ * v_pulse_ambassador_tier_monthly: one row per (ambassador, month), the count on the 1st. A month
+ * only exists once data_as_of has reached its 1st. `tier` 0 = no discount (including an ambassador
+ * who is not a member that day); `discount_label` is the label Bia applies — never computed here.
+ */
+export interface AmbassadorTierRow {
+  month_start: string;
+  ambassador_member_id: string;
+  ambassador_is_member: boolean;
+  active_referred: number;
+  tier: number;
+  is_first_five: boolean;
+  discount_label: string;
+  referred_member_ids: string[];
+}
+/** Every month up to and including `month` ("YYYY-MM-01"); all months when omitted. */
+export async function fetchAmbassadorTierMonthly(month?: string): Promise<AmbassadorTierRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.ambassadorTierMonthly, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return month
+    ? query<AmbassadorTierRow>(`select * from ${PULSE_VIEW.ambassadorTierMonthly} where month_start <= $1`, [month])
+    : query<AmbassadorTierRow>(`select * from ${PULSE_VIEW.ambassadorTierMonthly}`);
+}
+
+/** v_pulse_ambassador_referrals: one row per referral, for drill-down. */
+export interface AmbassadorReferralRow {
+  ambassador_member_id: string;
+  referred_member_id: string;
+  referred_on: string | null;
+  is_new: boolean | null;
+  first_membership_on: string | null;
+  active_on_data_as_of: boolean | null;
+  excluded_reason: string | null;
+}
+export const fetchAmbassadorReferrals = (): Promise<AmbassadorReferralRow[]> =>
+  fetchView<AmbassadorReferralRow>(PULSE_VIEW.ambassadorReferrals);
 
 /**
  * The last date the studio data covers — the one "today" for every roster,

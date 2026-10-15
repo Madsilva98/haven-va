@@ -52,6 +52,10 @@ export const PULSE_VIEW = {
     // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
     // the one status label each studio contact carries in Google Contacts.
     contactStatus: "v_pulse_contact_status",
+    // The ambassador programme (haven-studio, 2026-10-15): the tier each ambassador holds on the 1st
+    // of each month, and the referrals behind it. Tier mapping and discount labels live in the view.
+    ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly",
+    ambassadorReferrals: "v_pulse_ambassador_referrals",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -173,6 +177,17 @@ export async function fetchContactSyncRows() {
       where i.contact_phone ~ '[0-9]'`);
 }
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
+/** Every month up to and including `month` ("YYYY-MM-01"); all months when omitted. */
+export async function fetchAmbassadorTierMonthly(month) {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.ambassadorTierMonthly, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return month
+        ? query(`select * from ${PULSE_VIEW.ambassadorTierMonthly} where month_start <= $1`, [month])
+        : query(`select * from ${PULSE_VIEW.ambassadorTierMonthly}`);
+}
+export const fetchAmbassadorReferrals = () => fetchView(PULSE_VIEW.ambassadorReferrals);
 /**
  * The last date the studio data covers — the one "today" for every roster,
  * every signal and every "dados até" line. Null only when the view is
