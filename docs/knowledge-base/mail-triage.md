@@ -3,7 +3,7 @@
 `src/crons/mail-triage.ts`, daily at 07:00 Europe/Lisbon. **One** pass over the Outlook mailboxes that does, per email and in this order:
 
 1. **Record** partners, influencers and suppliers in Notion.
-2. **Forward** to the right address.
+2. **Forward** to the right address. **Off since 2026-10-15** (founder: "pára o reencaminhar de emails de umas caixas para as outras. vamos ter de repensar isto"): all four `OUTLOOK_*_FORWARD_TO` lines are commented out (`#`) in the NAS `data/.env`. With the variable empty, `forwardOnce` skips that forward and nothing else changes; recording and cleaning still run. Faturas no longer reach faturas@ on their own. To turn a forward back on, remove its `#` and run `docker compose up -d --force-recreate`.
 3. **Clean** the shared inboxes.
 
 It replaced two crons on 2026-09-30 (founder's call: "we need to make them both work together, not have it read archived emails and just spend money for no reason"):
