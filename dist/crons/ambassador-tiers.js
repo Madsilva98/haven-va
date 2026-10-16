@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isEmptyPlan, planAmbassadorTierChanges, suspiciousReason } from "../lib/ambassador-tiers.js";
-import { buildSnapshot, effectIfScheduledLeave, effectOnNextCount, isAtRisk, nextCountLabel, planAmbassadorNews, suspiciousImportReason, tierInForce, tierToday, CANCEL_SCHEDULED, } from "../lib/ambassador-watch.js";
+import { buildSnapshot, effectIfScheduledLeave, effectOnNextCount, isAtRisk, kenkoAction, labelsEverHeld, nextCountLabel, planAmbassadorNews, suspiciousImportReason, tierInForce, tierToday, CANCEL_SCHEDULED, } from "../lib/ambassador-watch.js";
 import { getTelegramId } from "../lib/founders.js";
 import { log } from "../lib/log.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
@@ -159,7 +159,7 @@ function monthlyPart(rows, monthStart, asOf, lastPosted) {
     const plan = planAmbassadorTierChanges(thisMonth, lastMonth, earlier);
     return { monthStart, plan, suspicious: suspiciousReason(plan, thisMonth, lastMonth) };
 }
-async function syncNotion(snapshot, referrals, statuses, monthly, today, names, asOf, dryRun) {
+async function syncNotion(snapshot, referrals, statuses, monthly, today, scale, names, asOf, dryRun) {
     if (!process.env.NOTION_AMBASSADORS_DB_ID)
         return;
     const existing = new Map((await notion.getAllAmbassadorRows()).map((r) => [r.memberId, r]));
@@ -179,6 +179,9 @@ async function syncNotion(snapshot, referrals, statuses, monthly, today, names, 
             atualizadoEm: asOf,
             ...(todayRow && "discount_in_kenko" in todayRow && todayRow.discount_in_kenko !== null
                 ? { descontoNoKenko: todayRow.discount_in_kenko ?? null }
+                : {}),
+            ...(todayRow && "discount_in_kenko" in todayRow
+                ? { acaoKenko: kenkoAction(inForce, labelsEverHeld(monthly, id), todayRow.discount_in_kenko ?? null, scale) }
                 : {}),
         };
         const name = names.get(id) ?? `sem nome (${id.slice(0, 8)})`;
@@ -216,8 +219,7 @@ export async function run(now = new Date()) {
             state.lateWarnedMonth = monthStart;
             await notifyMadalena(`⚠️ Embaixadores: a importação do Kenko ainda não chegou a ${monthStartLabel(monthStart)} (dados até ${ddmmyyyy(asOf)}). A contagem dos níveis sai no grupo assim que os dados chegarem a esse dia.`);
         }
-        if (asOf === state.lastAsOf)
-            return;
+        const sameImport = asOf === state.lastAsOf;
         const [referrals, monthly, today, scale, identity] = await Promise.all([
             fetchAmbassadorReferrals(),
             fetchAmbassadorTierMonthly(monthStart),
@@ -229,6 +231,13 @@ export async function run(now = new Date()) {
         const statuses = new Map((await fetchMembershipStatusAsOf(asOf, ids)).map((s) => [s.member_id, s]));
         const names = new Map(identity.filter((i) => i.contact_name).map((i) => [i.member_id, i.contact_name]));
         const snapshot = buildSnapshot(referrals, statuses);
+        // No new import: refresh the Notion list only (the studio view can change without one — e.g. a
+        // discount seen in Kenko), no message, no state change.
+        if (sameImport) {
+            if (state.snapshot !== null)
+                await syncNotion(snapshot, referrals, statuses, monthly, today, scale, names, asOf, dryRun);
+            return;
+        }
         const news = planAmbassadorNews(state.snapshot, snapshot, statuses);
         const month = monthlyPart(monthly, monthStart, asOf, state.lastPostedMonth);
         const counts = {
@@ -263,7 +272,7 @@ export async function run(now = new Date()) {
         });
         const showMonthly = month && !isEmptyPlan(month.plan) ? { plan: month.plan, monthStart: month.monthStart } : null;
         const message = formatAmbassadorMessage({ asOf, news: lines, monthly: showMonthly, names });
-        await syncNotion(snapshot, referrals, statuses, monthly, today, names, asOf, dryRun);
+        await syncNotion(snapshot, referrals, statuses, monthly, today, scale, names, asOf, dryRun);
         if (dryRun) {
             log.info("cron.ambassador_tiers.dry_run", { ...counts, message });
             saveState({ ...state, lastAsOf: asOf, snapshot, lastPostedMonth: month ? month.monthStart : state.lastPostedMonth }, true);

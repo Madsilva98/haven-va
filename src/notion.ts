@@ -2829,6 +2829,7 @@ function ambassadorFieldProps(f: AmbassadorFields): Record<string, unknown> {
     "Pessoas referidas": richText(f.pessoasReferidas),
     "Atualizado em": { date: { start: f.atualizadoEm } },
     ...(f.descontoNoKenko !== undefined ? { "Desconto no Kenko": richText(f.descontoNoKenko ?? "") } : {}),
+    ...(f.acaoKenko !== undefined ? { "Ação no Kenko": { select: { name: f.acaoKenko } } } : {}),
   };
 }
 

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSnapshot,
+  discountRank,
   effectIfScheduledLeave,
+  kenkoAction,
   effectOnNextCount,
   isAtRisk,
   nextCountLabel,
@@ -212,5 +214,31 @@ describe("formatAmbassadorMessage (news between imports)", () => {
 
   it("nothing new: null", () => {
     expect(formatAmbassadorMessage({ asOf: "2026-11-14", names: NAMES, monthly: null, news: [] })).toBeNull();
+  });
+});
+
+describe("kenkoAction", () => {
+  const T = (tier: number, label: string | null) => ({ tier, label });
+  it("no discount in force", () => {
+    expect(kenkoAction(T(0, null), [], null, SCALE)).toBe("Nada a fazer");
+    // Luísa Lourenco, 2026-10-16: 10% in Kenko, never held a tier → not work to do.
+    expect(kenkoAction(T(0, null), [], "10%", SCALE)).toBe("Outra origem");
+    expect(kenkoAction(T(0, null), ["10%"], "10%", SCALE)).toBe("Retirar");
+  });
+  it("a discount in force", () => {
+    expect(kenkoAction(T(2, "15%"), [], null, SCALE)).toBe("Aplicar");
+    expect(kenkoAction(T(2, "15%"), ["15%"], "15%", SCALE)).toBe("Nada a fazer");
+    expect(kenkoAction(T(2, "15%"), ["10%", "15%"], "10%", SCALE)).toBe("Aplicar");
+    expect(kenkoAction(T(2, "15%"), ["50%", "15%"], "50%", SCALE)).toBe("Baixar");
+    expect(kenkoAction(T(1, "10%"), [], "20%", SCALE)).toBe("Desconto maior");
+    expect(kenkoAction(T(2, "15%"), [], "5%", SCALE)).toBe("Aplicar");
+  });
+  it("an offered membership outranks any percentage", () => {
+    expect(discountRank("2x por semana oferecida", SCALE)!).toBeGreaterThan(discountRank("50%", SCALE)!);
+    expect(kenkoAction(T(3, "50%"), ["2x por semana oferecida"], "2x por semana oferecida", SCALE)).toBe("Baixar");
+    expect(kenkoAction(T(4, "2x por semana oferecida"), ["50%"], "50%", SCALE)).toBe("Aplicar");
+  });
+  it("labels compare loosely (spaces, case)", () => {
+    expect(kenkoAction(T(2, "15%"), [], " 15%  ", SCALE)).toBe("Nada a fazer");
   });
 });

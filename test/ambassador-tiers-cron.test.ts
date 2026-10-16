@@ -117,11 +117,31 @@ describe("ambassador-tiers cron", () => {
     expect(liveState().lastAsOf).toBe("2026-10-20");
   });
 
-  it("does nothing until a new import lands", async () => {
-    files.set("ambassador-tiers-state.json", JSON.stringify({ lastAsOf: "2026-10-20", snapshot: {} }));
+  it("no new import: refreshes Notion only — no message, state untouched", async () => {
+    const state = JSON.stringify({ lastAsOf: "2026-10-20", snapshot: {} });
+    files.set("ambassador-tiers-state.json", state);
+    notion.getAllAmbassadorRows.mockResolvedValue([{ id: "page-ana", memberId: "ana", nome: "Ana Silva" }]);
+    views.fetchDataAsOf.mockResolvedValue("2026-10-20");
+    views.fetchAmbassadorReferrals.mockResolvedValue([ref("ana", "rita")]);
+    views.fetchAmbassadorTierToday.mockResolvedValue([
+      { ...tierRow("ana", "2026-10-20", 1, 1), data_as_of: "2026-10-20", discount_in_kenko: "10%" },
+    ]);
+    await run(at("2026-10-21"));
+    expect(sendGroupMessageWithSource).not.toHaveBeenCalled();
+    expect(files.get("ambassador-tiers-state.json")).toBe(state);
+    expect(notion.updateAmbassadorRow).toHaveBeenCalledWith(
+      "page-ana",
+      "Ana Silva",
+      expect.objectContaining({ descontoNoKenko: "10%", acaoKenko: "Outra origem" }),
+    );
+  });
+
+  it("before the first import was ever seen: nothing at all", async () => {
+    files.set("ambassador-tiers-state.json", JSON.stringify({ lastAsOf: "2026-10-20", snapshot: null }));
     views.fetchDataAsOf.mockResolvedValue("2026-10-20");
     await run(at("2026-10-21"));
-    expect(views.fetchAmbassadorReferrals).not.toHaveBeenCalled();
+    expect(notion.updateAmbassadorRow).not.toHaveBeenCalled();
+    expect(notion.createAmbassadorRow).not.toHaveBeenCalled();
   });
 
   it("someone enters on a new import: one message, state saved before sending, Notion updated", async () => {
