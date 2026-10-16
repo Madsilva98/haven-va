@@ -37,15 +37,17 @@ const tasks = [
     cron.schedule("0 7 * * *", () => runMailTriage().catch((e) => log.error("cron.mail_triage", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 1 * *", () => runTidyMailboxesFeedbackReminder().catch((e) => log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("12 8 * * 1", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
+    // Leads a contactar + Clientes em risco: daily since 2026-10-16, like the
+    // intro packs list (founder). The churn digest still posts Mondays only.
+    cron.schedule("10 8 * * *", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("12 8 * * *", () => runLeadsInstagramScan().catch((e) => log.error("cron.leads_instagram_scan", { e: String(e) })), { timezone: TZ }),
     cron.schedule("15 8 * * *", () => 
     // The "Tracking intro packs" list replaces the old digest once its DB is configured.
     (process.env.NOTION_INTRO_TRACKING_DB_ID ? runIntroPackTracking() : runIntroPackExpiring()).catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("20 8 * * *", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
     // Ambassador tiers: daily, but posts once a month — when the data reaches the 1st.
     cron.schedule("25 8 * * *", () => runAmbassadorTiers().catch((e) => log.error("cron.ambassador_tiers", { e: String(e) })), { timezone: TZ }),
-    cron.schedule("45 8 * * 1", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
+    cron.schedule("45 8 * * *", () => runChurnRisk().catch((e) => log.error("cron.churn_risk", { e: String(e) })), { timezone: TZ }),
     // Newsletters → Notion, silent, before haven-comms' 04:00 scrape reads them
     // (2026-10-08). The group message is competitor-movements at 08:30.
     cron.schedule("30 2 * * 1", () => runCompetitorIntel().catch((e) => log.error("cron.competitor_intel", { e: String(e) })), { timezone: TZ }),

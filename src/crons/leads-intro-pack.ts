@@ -60,7 +60,7 @@ export async function run(): Promise<void> {
   // even when set by hand for a purchase Kenko doesn't show (2026-10-05).
   // Follow up stays on the intro packs list to convert, never a lead here
   // (founder, 2026-10-05) — the tracking cron never makes it Cold lead. A
-  // failed read stops the run rather than risk adding them; next Monday retries.
+  // failed read stops the run rather than risk adding them; tomorrow retries.
   let lostOnTracking = new Set<string>();
   if (process.env.NOTION_INTRO_TRACKING_DB_ID) {
     try {
