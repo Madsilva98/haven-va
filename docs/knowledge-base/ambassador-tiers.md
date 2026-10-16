@@ -65,8 +65,21 @@ One row per ambassador (everyone in the referrals view), keyed on `Member ID`, r
 
 - Bot-written: Name, Member ID, Pessoas ativas hoje, Nível se fosse hoje, Desconto em vigor, Desconto se fosse hoje, Em risco, Pessoas referidas (one line each: "conta", "conta, cancelamento agendado", "em pausa", "cancelou", "ainda sem compra", "não conta: antes do lançamento", …), Atualizado em.
 - **Never written by the bot:** Avisada (date, by hand).
-- Desconto no Kenko: by hand, until `v_pulse_ambassador_tier_today.discount_in_kenko` carries it — then the bot writes it.
-- "Por aplicar no Kenko" (formula) = Desconto em vigor ≠ Desconto no Kenko; the view of the same name filters on it.
+- Desconto no Kenko: written by the bot from `v_pulse_ambassador_tier_today.discount_in_kenko` (live since 2026-10-16).
+- **Ação no Kenko** (select, bot-written, `kenkoAction` in `src/lib/ambassador-watch.ts`, 2026-10-16) — what to do in Kenko. The main view groups by it and shows everyone:
+
+  | Value | When |
+  |---|---|
+  | Aplicar | a discount in force, and Kenko has none, a smaller one from elsewhere, or a smaller one from the programme |
+  | Baixar | Kenko still has a larger discount from a tier they held before |
+  | Retirar | no discount in force, Kenko has one from a tier they held before |
+  | Desconto maior | Kenko has a larger discount from elsewhere (no stacking, the larger applies: nothing to do) |
+  | Outra origem | no discount in force, Kenko has one they never held as a tier (Luísa Lourenco's 10%, 2026-10-16) |
+  | Nada a fazer | Kenko matches, or neither has a discount |
+
+  "From the programme" = the Kenko label equals a label this ambassador held on some 1st. A percentage ranks by its number; an offered membership (2x por semana, Ilimitado) ranks above any percentage.
+- "Por aplicar no Kenko" (formula) = Ação is Aplicar / Baixar / Retirar; the view of the same name filters on it. Until 2026-10-16 it was "em vigor ≠ Kenko", which flagged a discount of another origin as work to do.
+- The list is refreshed **every day**, also without a new import (no message, no state change), so a discount changed in Kenko shows the next morning once the import carries it.
 - Notion failures are logged, never block the message.
 
 ## State, alerts, env
