@@ -437,6 +437,9 @@ export interface AmbassadorFields {
   pessoasReferidas: string;
   atualizadoEm: string; // YYYY-MM-DD, the data date
   descontoNoKenko?: string | null; // written only when the view carries it
+  // "Aplicar" | "Baixar" | "Retirar" | "Desconto maior" | "Outra origem" | "Nada a fazer" (2026-10-16);
+  // written only when the view carries discount_in_kenko.
+  acaoKenko?: string;
 }
 
 export interface AmbassadorNotionRow {

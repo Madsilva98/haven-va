@@ -2352,6 +2352,7 @@ function ambassadorFieldProps(f) {
         "Pessoas referidas": richText(f.pessoasReferidas),
         "Atualizado em": { date: { start: f.atualizadoEm } },
         ...(f.descontoNoKenko !== undefined ? { "Desconto no Kenko": richText(f.descontoNoKenko ?? "") } : {}),
+        ...(f.acaoKenko !== undefined ? { "Ação no Kenko": { select: { name: f.acaoKenko } } } : {}),
     };
 }
 async function getAllAmbassadorRows() {

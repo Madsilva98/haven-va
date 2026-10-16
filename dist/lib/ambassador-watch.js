@@ -170,3 +170,41 @@ export function isAtRisk(snapshot, inForce, today, inForceCount) {
         return today.tier < inForce.tier;
     return snapshot.counting.length < inForceCount;
 }
+export const KENKO_ACTIONS = ["Aplicar", "Baixar", "Retirar", "Desconto maior", "Outra origem", "Nada a fazer"];
+function norm(label) {
+    const s = (label ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    return s === "" || s === "—" ? null : s;
+}
+/** Size of a discount: a percentage by its number, an offered membership above any percentage (by tier). */
+export function discountRank(label, scale) {
+    const pct = /(\d+(?:[.,]\d+)?)\s*%/.exec(label);
+    if (pct)
+        return Number(pct[1].replace(",", "."));
+    const n = norm(label);
+    const row = scale?.find((s) => norm(s.discount_label) === n || norm(s.first_five_label) === n);
+    return row ? 100 + row.tier : null;
+}
+export function kenkoAction(inForce, everHeld, kenko, scale) {
+    const k = norm(kenko);
+    const target = inForce.tier >= 1 ? norm(inForce.label) : null;
+    const fromProgramme = k !== null && everHeld.some((l) => norm(l) === k);
+    if (target === null) {
+        if (k === null)
+            return "Nada a fazer";
+        return fromProgramme ? "Retirar" : "Outra origem";
+    }
+    if (k === null)
+        return "Aplicar";
+    if (k === target)
+        return "Nada a fazer";
+    const rk = discountRank(kenko, scale);
+    const rt = discountRank(inForce.label, scale);
+    const kenkoLarger = rk !== null && rt !== null && rk > rt;
+    if (fromProgramme)
+        return kenkoLarger ? "Baixar" : "Aplicar";
+    return kenkoLarger ? "Desconto maior" : "Aplicar";
+}
+/** The labels an ambassador held on any 1st (tier ≥ 1). */
+export function labelsEverHeld(monthly, ambassadorId) {
+    return monthly.filter((r) => r.ambassador_member_id === ambassadorId && r.tier >= 1).map((r) => r.discount_label);
+}

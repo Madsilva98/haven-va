@@ -347,8 +347,9 @@ const referralGuestsProperties = {
 // ── Embaixadores ────────────────────────────────────────────────────────────
 // src/crons/ambassador-tiers.ts, one row per ambassador (Madalena, 2026-10-15).
 // "Avisada" and (until the studio view carries it) "Desconto no Kenko" are filled by hand.
-// "Por aplicar no Kenko" is true when the discount in force differs from Kenko's — the
-// "Por aplicar no Kenko" view filters on it.
+// "Ação no Kenko" (bot-written) says what to do in Kenko; "Por aplicar no Kenko" is true for
+// Aplicar / Baixar / Retirar only (2026-10-16 — it used to be "in force ≠ Kenko", which flagged a
+// discount of another origin, e.g. Luísa Lourenco's 10%, as work to do).
 const ambassadorsProperties = {
   "Member ID": { rich_text: {} },
   "Pessoas ativas hoje": { number: {} },
@@ -360,7 +361,13 @@ const ambassadorsProperties = {
   "Atualizado em": { date: {} },
   Avisada: { date: {} },
   "Desconto no Kenko": { rich_text: {} },
-  "Por aplicar no Kenko": { formula: { expression: 'prop("Desconto em vigor") != prop("Desconto no Kenko")' } },
+  // What to do in Kenko (2026-10-16, src/lib/ambassador-watch.ts kenkoAction) — the main view groups by it.
+  "Ação no Kenko": { select: { options: [
+    { name: "Aplicar" }, { name: "Baixar" }, { name: "Retirar" },
+    { name: "Desconto maior" }, { name: "Outra origem" }, { name: "Nada a fazer" },
+  ] } },
+  // Only what needs doing in Kenko; the "Por aplicar no Kenko" view filters on it.
+  "Por aplicar no Kenko": { formula: { expression: 'or(or(format(prop("Ação no Kenko")) == "Aplicar", format(prop("Ação no Kenko")) == "Baixar"), format(prop("Ação no Kenko")) == "Retirar")' } },
 };
 
 // ── Fontes Concorrência/Inspiração ──────────────────────────────────────────

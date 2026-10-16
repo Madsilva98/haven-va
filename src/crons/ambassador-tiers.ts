@@ -7,6 +7,8 @@ import {
   effectIfScheduledLeave,
   effectOnNextCount,
   isAtRisk,
+  kenkoAction,
+  labelsEverHeld,
   nextCountLabel,
   planAmbassadorNews,
   suspiciousImportReason,
@@ -29,6 +31,7 @@ import {
   PULSE_VIEW,
   type AmbassadorReferralRow,
   type AmbassadorTierRow,
+  type AmbassadorTierScaleRow,
   type AmbassadorTierTodayRow,
   type MembershipStatusRow,
 } from "../lib/pulse-views.js";
@@ -214,6 +217,7 @@ async function syncNotion(
   statuses: Map<string, MembershipStatusRow>,
   monthly: AmbassadorTierRow[],
   today: AmbassadorTierTodayRow[] | null,
+  scale: AmbassadorTierScaleRow[] | null,
   names: Map<string, string>,
   asOf: string,
   dryRun: boolean,
@@ -241,6 +245,9 @@ async function syncNotion(
       atualizadoEm: asOf,
       ...(todayRow && "discount_in_kenko" in todayRow && todayRow.discount_in_kenko !== null
         ? { descontoNoKenko: todayRow.discount_in_kenko ?? null }
+        : {}),
+      ...(todayRow && "discount_in_kenko" in todayRow
+        ? { acaoKenko: kenkoAction(inForce, labelsEverHeld(monthly, id), todayRow.discount_in_kenko ?? null, scale) }
         : {}),
     };
     const name = names.get(id) ?? `sem nome (${id.slice(0, 8)})`;
@@ -279,7 +286,7 @@ export async function run(now: Date = new Date()): Promise<void> {
         `⚠️ Embaixadores: a importação do Kenko ainda não chegou a ${monthStartLabel(monthStart)} (dados até ${ddmmyyyy(asOf)}). A contagem dos níveis sai no grupo assim que os dados chegarem a esse dia.`,
       );
     }
-    if (asOf === state.lastAsOf) return;
+    const sameImport = asOf === state.lastAsOf;
 
     const [referrals, monthly, today, scale, identity] = await Promise.all([
       fetchAmbassadorReferrals(),
@@ -293,6 +300,12 @@ export async function run(now: Date = new Date()): Promise<void> {
     const names = new Map(identity.filter((i) => i.contact_name).map((i) => [i.member_id, i.contact_name as string]));
 
     const snapshot = buildSnapshot(referrals, statuses);
+    // No new import: refresh the Notion list only (the studio view can change without one — e.g. a
+    // discount seen in Kenko), no message, no state change.
+    if (sameImport) {
+      if (state.snapshot !== null) await syncNotion(snapshot, referrals, statuses, monthly, today, scale, names, asOf, dryRun);
+      return;
+    }
     const news = planAmbassadorNews(state.snapshot, snapshot, statuses);
     const month = monthlyPart(monthly, monthStart, asOf, state.lastPostedMonth);
 
@@ -333,7 +346,7 @@ export async function run(now: Date = new Date()): Promise<void> {
     const showMonthly = month && !isEmptyPlan(month.plan) ? { plan: month.plan, monthStart: month.monthStart } : null;
     const message = formatAmbassadorMessage({ asOf, news: lines, monthly: showMonthly, names });
 
-    await syncNotion(snapshot, referrals, statuses, monthly, today, names, asOf, dryRun);
+    await syncNotion(snapshot, referrals, statuses, monthly, today, scale, names, asOf, dryRun);
 
     if (dryRun) {
       log.info("cron.ambassador_tiers.dry_run", { ...counts, message });

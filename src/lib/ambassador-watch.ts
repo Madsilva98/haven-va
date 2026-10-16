@@ -221,3 +221,54 @@ export function isAtRisk(snapshot: AmbassadorSnapshot, inForce: Tier, today: Tie
   if (today) return today.tier < inForce.tier;
   return snapshot.counting.length < inForceCount;
 }
+
+/**
+ * What a founder has to do in Kenko for one ambassador (Madalena, 2026-10-16): one value to group
+ * the "Embaixadores" list by. Compares the discount Kenko really applies (`discount_in_kenko`) with
+ * the one in force (latest 1st) and the labels this ambassador ever held on a 1st — a Kenko
+ * discount equal to one of those came from the programme; any other came from elsewhere.
+ * Discounts don't stack and the larger applies, so a larger Kenko discount needs nothing.
+ */
+export type KenkoAction = "Aplicar" | "Baixar" | "Retirar" | "Desconto maior" | "Outra origem" | "Nada a fazer";
+export const KENKO_ACTIONS: KenkoAction[] = ["Aplicar", "Baixar", "Retirar", "Desconto maior", "Outra origem", "Nada a fazer"];
+
+function norm(label: string | null | undefined): string | null {
+  const s = (label ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return s === "" || s === "—" ? null : s;
+}
+
+/** Size of a discount: a percentage by its number, an offered membership above any percentage (by tier). */
+export function discountRank(label: string, scale: AmbassadorTierScaleRow[] | null): number | null {
+  const pct = /(\d+(?:[.,]\d+)?)\s*%/.exec(label);
+  if (pct) return Number(pct[1]!.replace(",", "."));
+  const n = norm(label);
+  const row = scale?.find((s) => norm(s.discount_label) === n || norm(s.first_five_label) === n);
+  return row ? 100 + row.tier : null;
+}
+
+export function kenkoAction(
+  inForce: Tier,
+  everHeld: string[],
+  kenko: string | null,
+  scale: AmbassadorTierScaleRow[] | null,
+): KenkoAction {
+  const k = norm(kenko);
+  const target = inForce.tier >= 1 ? norm(inForce.label) : null;
+  const fromProgramme = k !== null && everHeld.some((l) => norm(l) === k);
+  if (target === null) {
+    if (k === null) return "Nada a fazer";
+    return fromProgramme ? "Retirar" : "Outra origem";
+  }
+  if (k === null) return "Aplicar";
+  if (k === target) return "Nada a fazer";
+  const rk = discountRank(kenko!, scale);
+  const rt = discountRank(inForce.label!, scale);
+  const kenkoLarger = rk !== null && rt !== null && rk > rt;
+  if (fromProgramme) return kenkoLarger ? "Baixar" : "Aplicar";
+  return kenkoLarger ? "Desconto maior" : "Aplicar";
+}
+
+/** The labels an ambassador held on any 1st (tier ≥ 1). */
+export function labelsEverHeld(monthly: AmbassadorTierRow[], ambassadorId: string): string[] {
+  return monthly.filter((r) => r.ambassador_member_id === ambassadorId && r.tier >= 1).map((r) => r.discount_label);
+}
