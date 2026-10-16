@@ -57,6 +57,14 @@ export const PULSE_VIEW = {
   // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
   // the one status label each studio contact carries in Google Contacts.
   contactStatus: "v_pulse_contact_status",
+  // The ambassador programme (haven-studio, 2026-10-15): the tier each ambassador holds on the 1st
+  // of each month, and the referrals behind it. Tier mapping and discount labels live in the view.
+  ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly",
+  ambassadorReferrals: "v_pulse_ambassador_referrals",
+  // Requested from haven-studio 2026-10-15 (Haven-Comms docs/PROMPT-ambassador-pause-and-discount-haven-studio.md).
+  // Read only when they exist (`viewExists`): until then the bot leaves "se fosse hoje" out.
+  ambassadorTierToday: "v_pulse_ambassador_tier_today",
+  ambassadorTierScale: "v_pulse_ambassador_tier_scale",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -481,6 +489,109 @@ export interface ChurnRiskSignalRow {
 }
 export const fetchChurnRiskSignals = (): Promise<ChurnRiskSignalRow[]> =>
   fetchView<ChurnRiskSignalRow>(PULSE_VIEW.churnRiskSignals);
+
+/**
+ * v_pulse_ambassador_tier_monthly: one row per (ambassador, month), the count on the 1st. A month
+ * only exists once data_as_of has reached its 1st. `tier` 0 = no discount (including an ambassador
+ * who is not a member that day); `discount_label` is the label Bia applies — never computed here.
+ */
+export interface AmbassadorTierRow {
+  month_start: string;
+  ambassador_member_id: string;
+  ambassador_is_member: boolean;
+  active_referred: number;
+  tier: number;
+  is_first_five: boolean;
+  discount_label: string;
+  referred_member_ids: string[];
+}
+/** Every month up to and including `month` ("YYYY-MM-01"); all months when omitted. */
+export async function fetchAmbassadorTierMonthly(month?: string): Promise<AmbassadorTierRow[]> {
+  if (!isStudioDbAvailable()) {
+    log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.ambassadorTierMonthly, reason: "studio_db_not_configured" });
+    return [];
+  }
+  return month
+    ? query<AmbassadorTierRow>(`select * from ${PULSE_VIEW.ambassadorTierMonthly} where month_start <= $1`, [month])
+    : query<AmbassadorTierRow>(`select * from ${PULSE_VIEW.ambassadorTierMonthly}`);
+}
+
+/** v_pulse_ambassador_referrals: one row per referral, for drill-down. */
+export interface AmbassadorReferralRow {
+  ambassador_member_id: string;
+  referred_member_id: string;
+  referred_on: string | null;
+  is_new: boolean | null;
+  first_membership_on: string | null;
+  active_on_data_as_of: boolean | null;
+  excluded_reason: string | null;
+}
+export const fetchAmbassadorReferrals = (): Promise<AmbassadorReferralRow[]> =>
+  fetchView<AmbassadorReferralRow>(PULSE_VIEW.ambassadorReferrals);
+
+/** Does this `va` view exist yet? For views requested from haven-studio that the bot reads once they land. */
+export async function viewExists(view: PulseViewName): Promise<boolean> {
+  if (!isStudioDbAvailable()) return false;
+  const rows = await query<{ ok: boolean }>(`select to_regclass('va.' || $1) is not null as ok`, [view]);
+  return rows[0]?.ok === true;
+}
+
+/**
+ * v_pulse_ambassador_tier_today: the tier each ambassador would have if the count were on
+ * data_as_of. `discount_in_kenko` = the discount really applied on their membership in Kenko, null
+ * when the import doesn't carry it. Null (not []) when the view doesn't exist yet.
+ */
+export interface AmbassadorTierTodayRow {
+  data_as_of: string;
+  ambassador_member_id: string;
+  ambassador_is_member: boolean;
+  active_referred: number;
+  tier: number;
+  is_first_five: boolean;
+  discount_label: string;
+  referred_member_ids: string[];
+  discount_in_kenko?: string | null;
+}
+export async function fetchAmbassadorTierToday(): Promise<AmbassadorTierTodayRow[] | null> {
+  if (!(await viewExists(PULSE_VIEW.ambassadorTierToday))) return null;
+  return query<AmbassadorTierTodayRow>(`select * from ${PULSE_VIEW.ambassadorTierToday}`);
+}
+
+/** v_pulse_ambassador_tier_scale: the tier rule as data, one row per tier. Null when the view doesn't exist yet. */
+export interface AmbassadorTierScaleRow {
+  tier: number;
+  min_referred: number;
+  max_referred: number | null;
+  discount_label: string;
+  first_five_label: string;
+}
+export async function fetchAmbassadorTierScale(): Promise<AmbassadorTierScaleRow[] | null> {
+  if (!(await viewExists(PULSE_VIEW.ambassadorTierScale))) return null;
+  return query<AmbassadorTierScaleRow>(`select * from ${PULSE_VIEW.ambassadorTierScale} order by tier`);
+}
+
+/**
+ * Each member's membership status on `asOf` (v_pulse_membership_state, one row per billing cycle):
+ * the cycle covering `asOf` when there is one (`covers` true: Active / Cancelation scheduled /
+ * Paused / Upcoming), otherwise their latest cycle before it (`covers` false: Canceled / Expired).
+ * Members with no cycle at all are absent.
+ */
+export interface MembershipStatusRow {
+  member_id: string;
+  status: string | null;
+  covers: boolean;
+}
+export async function fetchMembershipStatusAsOf(asOf: string, memberIds: string[]): Promise<MembershipStatusRow[]> {
+  if (memberIds.length === 0) return [];
+  return query<MembershipStatusRow>(
+    `select distinct on (member_id) member_id, status,
+            (cycle_expires_at is null or cycle_expires_at >= $1::date) as covers
+       from ${PULSE_VIEW.membershipState}
+      where member_id = any($2) and cycle_starts_at <= $1::date
+      order by member_id, (cycle_expires_at is null or cycle_expires_at >= $1::date) desc, cycle_starts_at desc`,
+    [asOf, memberIds],
+  );
+}
 
 /**
  * The last date the studio data covers — the one "today" for every roster,

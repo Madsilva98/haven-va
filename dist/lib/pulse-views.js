@@ -52,6 +52,14 @@ export const PULSE_VIEW = {
     // The bot's own analysis view, 2026-10-10: scripts/studio-db-contact-status-2026-10-10.sql —
     // the one status label each studio contact carries in Google Contacts.
     contactStatus: "v_pulse_contact_status",
+    // The ambassador programme (haven-studio, 2026-10-15): the tier each ambassador holds on the 1st
+    // of each month, and the referrals behind it. Tier mapping and discount labels live in the view.
+    ambassadorTierMonthly: "v_pulse_ambassador_tier_monthly",
+    ambassadorReferrals: "v_pulse_ambassador_referrals",
+    // Requested from haven-studio 2026-10-15 (Haven-Comms docs/PROMPT-ambassador-pause-and-discount-haven-studio.md).
+    // Read only when they exist (`viewExists`): until then the bot leaves "se fosse hoje" out.
+    ambassadorTierToday: "v_pulse_ambassador_tier_today",
+    ambassadorTierScale: "v_pulse_ambassador_tier_scale",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -173,6 +181,43 @@ export async function fetchContactSyncRows() {
       where i.contact_phone ~ '[0-9]'`);
 }
 export const fetchChurnRiskSignals = () => fetchView(PULSE_VIEW.churnRiskSignals);
+/** Every month up to and including `month` ("YYYY-MM-01"); all months when omitted. */
+export async function fetchAmbassadorTierMonthly(month) {
+    if (!isStudioDbAvailable()) {
+        log.warn("pulse_views.fetch_skipped", { view: PULSE_VIEW.ambassadorTierMonthly, reason: "studio_db_not_configured" });
+        return [];
+    }
+    return month
+        ? query(`select * from ${PULSE_VIEW.ambassadorTierMonthly} where month_start <= $1`, [month])
+        : query(`select * from ${PULSE_VIEW.ambassadorTierMonthly}`);
+}
+export const fetchAmbassadorReferrals = () => fetchView(PULSE_VIEW.ambassadorReferrals);
+/** Does this `va` view exist yet? For views requested from haven-studio that the bot reads once they land. */
+export async function viewExists(view) {
+    if (!isStudioDbAvailable())
+        return false;
+    const rows = await query(`select to_regclass('va.' || $1) is not null as ok`, [view]);
+    return rows[0]?.ok === true;
+}
+export async function fetchAmbassadorTierToday() {
+    if (!(await viewExists(PULSE_VIEW.ambassadorTierToday)))
+        return null;
+    return query(`select * from ${PULSE_VIEW.ambassadorTierToday}`);
+}
+export async function fetchAmbassadorTierScale() {
+    if (!(await viewExists(PULSE_VIEW.ambassadorTierScale)))
+        return null;
+    return query(`select * from ${PULSE_VIEW.ambassadorTierScale} order by tier`);
+}
+export async function fetchMembershipStatusAsOf(asOf, memberIds) {
+    if (memberIds.length === 0)
+        return [];
+    return query(`select distinct on (member_id) member_id, status,
+            (cycle_expires_at is null or cycle_expires_at >= $1::date) as covers
+       from ${PULSE_VIEW.membershipState}
+      where member_id = any($2) and cycle_starts_at <= $1::date
+      order by member_id, (cycle_expires_at is null or cycle_expires_at >= $1::date) desc, cycle_starts_at desc`, [asOf, memberIds]);
+}
 /**
  * The last date the studio data covers — the one "today" for every roster,
  * every signal and every "dados até" line. Null only when the view is

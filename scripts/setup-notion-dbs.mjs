@@ -28,6 +28,7 @@ const LISTS_DB_ID            = process.env.NOTION_LISTS_DB_ID;
 const LEADS_DB_ID            = process.env.NOTION_LEADS_DB_ID;
 const CHURN_RISK_DB_ID       = process.env.NOTION_CHURN_RISK_DB_ID;
 const INTRO_TRACKING_DB_ID   = process.env.NOTION_INTRO_TRACKING_DB_ID;
+const AMBASSADORS_DB_ID      = process.env.NOTION_AMBASSADORS_DB_ID;
 const COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const COMPETITOR_INTEL_DB_ID   = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
@@ -321,6 +322,25 @@ const introTrackingProperties = {
   "Criado em": { created_time: {} },
 };
 
+// ── Embaixadores ────────────────────────────────────────────────────────────
+// src/crons/ambassador-tiers.ts, one row per ambassador (Madalena, 2026-10-15).
+// "Avisada" and (until the studio view carries it) "Desconto no Kenko" are filled by hand.
+// "Por aplicar no Kenko" is true when the discount in force differs from Kenko's — the
+// "Por aplicar no Kenko" view filters on it.
+const ambassadorsProperties = {
+  "Member ID": { rich_text: {} },
+  "Pessoas ativas hoje": { number: {} },
+  "Nível se fosse hoje": { number: {} },
+  "Desconto em vigor": { rich_text: {} },
+  "Desconto se fosse hoje": { rich_text: {} },
+  "Em risco": { checkbox: {} },
+  "Pessoas referidas": { rich_text: {} },
+  "Atualizado em": { date: {} },
+  Avisada: { date: {} },
+  "Desconto no Kenko": { rich_text: {} },
+  "Por aplicar no Kenko": { formula: { expression: 'prop("Desconto em vigor") != prop("Desconto no Kenko")' } },
+};
+
 // ── Fontes Concorrência/Inspiração ──────────────────────────────────────────
 // Founder-maintained sender list driving the competitor-intel Gmail tidy step.
 const competitorSourcesProperties = {
@@ -346,7 +366,11 @@ const competitorIntelProperties = {
   Link: { url: {} },
 };
 
+// `--only=<label>` touches one DB and skips the rest (e.g. `--only=Embaixadores`).
+const ONLY = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
+
 async function setup(label, dbId, props) {
+  if (ONLY && label !== ONLY) return;
   console.log(`\n→ ${label} (${dbId})`);
   try {
     // As of API version 2025-09-03, schema lives on the database's data source,
@@ -401,6 +425,8 @@ async function main() {
   else console.log("· Clientes em risco DB id not set — skipping");
   if (INTRO_TRACKING_DB_ID)   await setup("Tracking intro packs", INTRO_TRACKING_DB_ID, introTrackingProperties);
   else console.log("· Tracking intro packs DB id not set — skipping");
+  if (AMBASSADORS_DB_ID)      await setup("Embaixadores", AMBASSADORS_DB_ID, ambassadorsProperties);
+  else console.log("· Embaixadores DB id not set — skipping");
   if (COMPETITOR_SOURCES_DB_ID) await setup("Fontes Concorrência/Inspiração", COMPETITOR_SOURCES_DB_ID, competitorSourcesProperties);
   else console.log("· Fontes Concorrência/Inspiração DB id not set — skipping");
   if (COMPETITOR_INTEL_DB_ID)   await setup("Competitor Intel", COMPETITOR_INTEL_DB_ID, competitorIntelProperties);
