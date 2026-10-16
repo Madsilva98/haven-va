@@ -163,6 +163,18 @@ For `reception-hours-sync` (2026-10-01, nightly 23:30): `cron.reception_hours_sy
 
 The compose file uses `env_file: /volume1/docker/haven-va/data/.env`. Compose reads it at container creation, not at runtime. So editing `.env` and running `docker compose restart` does **not** pick up new values — you need `docker compose up -d --force-recreate` (or just rebuild).
 
+### Gotcha: `data/.env` needs sudo to write
+
+The NAS login user can't append to `data/.env` directly (`Permission denied`, confirmed 2026-10-16). Add a variable with a check-then-append that never echoes the file:
+
+```sh
+f=/volume1/docker/haven-va/data/.env
+grep -q '^MY_VAR=' "$f" || printf 'MY_VAR=value\n' | sudo tee -a "$f" >/dev/null
+grep -c '^MY_VAR=' "$f"   # 1 = present
+```
+
+Added this way on 2026-10-16: `NOTION_AMBASSADORS_DB_ID`, `AMBASSADOR_TIERS_DRY_RUN=true` (picked up at the next deploy of PR #65).
+
 ### Telegram webhook teardown (one-time)
 
 If migrating from a webhook-based deploy (Vercel etc.):
