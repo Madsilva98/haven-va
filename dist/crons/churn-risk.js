@@ -1,5 +1,10 @@
 /**
- * Weekly churn-risk scan. Three parts:
+ * Daily churn-risk scan (weekly until 2026-10-16 — founder: a member who
+ * cancelled sat on the list for a week because the cleanup only ran on
+ * Mondays). The Notion list follows the views every day; the group digest
+ * still goes out on Mondays only, so the group doesn't get the same list
+ * every morning — except the circuit-breaker warning, which posts any day.
+ * Three parts:
  *
  * 1. Sweeps away any row the founder has closed out (Status="Resolvido"
  *    or "Arquivado") — she sets that by hand in Notion, this is the "next
@@ -50,6 +55,7 @@
  */
 import { fetchChurnFlags } from "../lib/churn-signals.js";
 import { log } from "../lib/log.js";
+import { nowInLisbon } from "../lib/tz.js";
 import { isStudioDbAvailable } from "../lib/studio-db.js";
 import { isSuspiciousBatch } from "../lib/circuit-breaker.js";
 import { sendGroupMessageWithSource } from "../lib/pulse-source.js";
@@ -62,7 +68,7 @@ export function isSuspiciousChurnSweep(wouldArchive, open) {
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
 }
-export async function run() {
+export async function run(now = nowInLisbon()) {
     if (!process.env.NOTION_CHURN_RISK_DB_ID) {
         log.debug("churn_risk.skipped", { reason: "NOTION_CHURN_RISK_DB_ID not set" });
         return;
@@ -176,6 +182,11 @@ export async function run() {
     }
     catch (err) {
         log.error("churn_risk.fetch_open_failed", { message: errMsg(err) });
+    }
+    // Digest on Mondays only; the brake warning any day (a safety alarm).
+    if (now.getDay() !== 1 && !brake) {
+        log.info("churn_risk.synced", { totalFlagged: flags.length, archivedClosed, archivedResolved, archivedChurned });
+        return;
     }
     const message = formatChurnDigest(emRisco, archivedResolved, brake);
     if (!message) {

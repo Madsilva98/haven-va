@@ -19,7 +19,7 @@ brake = null) {
     if (brake) {
         lines.push("", `⚠️ Esta semana ${brake.wouldArchive} de ${brake.open} clientes da lista deixaram de aparecer como em risco — ` +
             `é mais do que o normal, por isso não arquivei ninguém (as notas ficam intactas). ` +
-            `Pode ser um problema nos dados do estúdio. Se estiverem mesmo resolvidos, marca-os como Resolvido e saem na próxima segunda.`);
+            `Pode ser um problema nos dados do estúdio. Se estiverem mesmo resolvidos, marca-os como Resolvido e saem na próxima atualização (todos os dias de manhã).`);
     }
     if (atRisco.length > 0) {
         lines.push("", "Em risco:");

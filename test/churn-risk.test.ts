@@ -30,6 +30,10 @@ vi.mock("../src/lib/telegram.js", () => ({
 
 import { isSuspiciousChurnSweep, run } from "../src/crons/churn-risk.js";
 
+// The Notion list syncs daily; the digest posts on Mondays only.
+const MONDAY = new Date(2026, 8, 21, 8, 45);
+const TUESDAY = new Date(2026, 8, 22, 8, 45);
+
 // getChurnRowsByStatus is called twice per run — once for the
 // Resolvido/Arquivado sweep, once for the open-row reconciliation — so
 // tests key the mock's response off which statuses it was called with.
@@ -69,7 +73,7 @@ describe("churn-risk", () => {
       [],
     );
 
-    await run();
+    await run(MONDAY);
 
     expect(getChurnRowsByStatus).toHaveBeenCalledWith(["Resolvido", "Arquivado"]);
     expect(archivePage).toHaveBeenCalledWith("r1");
@@ -91,7 +95,7 @@ describe("churn-risk", () => {
       asOf: "2026-09-18",
     });
 
-    await run();
+    await run(MONDAY);
 
     expect(createChurnFlag).toHaveBeenCalledWith(
       "New Risk",
@@ -107,7 +111,7 @@ describe("churn-risk", () => {
   it("does nothing when Studio Supabase isn't configured, without touching closed rows", async () => {
     isStudioDbAvailable.mockReturnValue(false);
 
-    await run();
+    await run(MONDAY);
 
     expect(getChurnRowsByStatus).not.toHaveBeenCalled();
     expect(fetchChurnFlags).not.toHaveBeenCalled();
@@ -132,7 +136,7 @@ describe("churn-risk", () => {
       sinais: ["Sem reservas 14+ dias", "Pagamento falhado"],
     });
 
-    await run();
+    await run(MONDAY);
 
     // Booked again since being flagged — "Sem reservas 14+ dias" is gone,
     // "Pagamento falhado" is the only signal left, not a union of both.
@@ -160,7 +164,7 @@ describe("churn-risk", () => {
       detalhes: "20 dias sem reservar (última reserva: 28/08/2026)", // same type, stale count
     });
 
-    await run();
+    await run(MONDAY);
 
     expect(updateChurnFlag).toHaveBeenCalledWith(
       "row-i",
@@ -191,7 +195,7 @@ describe("churn-risk", () => {
       detalhes: "pagamento falhado a 10/09",
     });
 
-    await run();
+    await run(MONDAY);
 
     expect(updateChurnFlag).not.toHaveBeenCalled();
     const [message] = sendGroupMessage.mock.calls[0]!;
@@ -208,7 +212,7 @@ describe("churn-risk", () => {
     );
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["d@x.com", "f@x.com"]), asOf: "2026-09-18" });
 
-    await run();
+    await run(MONDAY);
 
     expect(archivePage).toHaveBeenCalledWith("row-d");
     expect(archivePage).toHaveBeenCalledWith("row-f");
@@ -224,7 +228,7 @@ describe("churn-risk", () => {
     mockOpenAndClosedRows([], []);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
 
-    await run();
+    await run(MONDAY);
 
     expect(getChurnRowsByStatus).toHaveBeenCalledWith(["Aberto", "Contactado", "A vigiar"]);
   });
@@ -233,7 +237,7 @@ describe("churn-risk", () => {
     mockOpenAndClosedRows([], [{ id: "row-g", nome: "Gabriela", email: "g@x.com", status: "A vigiar" }]);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(["g@x.com"]), asOf: "2026-09-18" });
 
-    await run();
+    await run(MONDAY);
 
     expect(archivePage).toHaveBeenCalledWith("row-g");
   });
@@ -256,7 +260,7 @@ describe("churn-risk", () => {
     // other than Resolvido/Arquivado as open, "A vigiar" included.
     getChurnRowByEmail.mockResolvedValue({ id: "row-h", sinais: ["Sem reservas 14+ dias"] });
 
-    await run();
+    await run(MONDAY);
 
     expect(updateChurnFlag).toHaveBeenCalledWith("row-h", ["Baixa utilização"], "20% de utilização média");
   });
@@ -265,7 +269,7 @@ describe("churn-risk", () => {
     mockOpenAndClosedRows([], [{ id: "row-e", nome: "Andrew", email: "e@x.com", status: "Aberto" }]);
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
 
-    await run();
+    await run(MONDAY);
 
     expect(archivePage).toHaveBeenCalledWith("row-e");
     expect(updateChurnFlag).not.toHaveBeenCalled();
@@ -282,7 +286,7 @@ describe("churn-risk", () => {
     // Views came back empty — e.g. a Kenko import glitch
     fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-18" });
 
-    await run();
+    await run(MONDAY);
 
     expect(archivePage).not.toHaveBeenCalled();
     expect(sendGroupMessage).toHaveBeenCalledTimes(1);
@@ -312,9 +316,49 @@ describe("churn-risk", () => {
       asOf: "2026-09-18",
     });
 
-    await run();
+    await run(MONDAY);
 
     expect(archivePage).toHaveBeenCalledTimes(6);
+  });
+
+  it("on any other day: syncs Notion and archives as usual, but posts no digest", async () => {
+    mockOpenAndClosedRows([], [{ id: "row-gone", nome: "Gone", email: "gone@x.com", status: "Aberto" }]);
+    fetchChurnFlags.mockResolvedValue({
+      flags: [
+        {
+          email: "new@x.com",
+          name: "New Risk",
+          plano: "4x Monthly",
+          telefone: null,
+          signals: [{ type: "Sem reservas 14+ dias", detail: "25 dias sem reservar" }],
+        },
+      ],
+      activeEmails: new Set(["new@x.com"]),
+      asOf: "2026-09-21",
+    });
+
+    await run(TUESDAY);
+
+    expect(createChurnFlag).toHaveBeenCalledTimes(1);
+    expect(archivePage).toHaveBeenCalledWith("row-gone");
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it("on any other day: still posts the circuit-breaker warning", async () => {
+    const open = ["a", "b", "c", "d", "e"].map((k) => ({
+      id: `row-${k}`,
+      nome: k.toUpperCase(),
+      email: `${k}@x.com`,
+      status: "Contactado",
+    }));
+    mockOpenAndClosedRows([], open);
+    fetchChurnFlags.mockResolvedValue({ flags: [], activeEmails: new Set(), asOf: "2026-09-21" });
+
+    await run(TUESDAY);
+
+    expect(archivePage).not.toHaveBeenCalled();
+    expect(sendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(sendGroupMessage.mock.calls[0]![0]).toContain("não arquivei ninguém");
   });
 
   it("circuit breaker thresholds", () => {

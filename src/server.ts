@@ -86,8 +86,10 @@ const tasks = [
       ),
     { timezone: TZ },
   ),
+  // Leads a contactar + Clientes em risco: daily since 2026-10-16, like the
+  // intro packs list (founder). The churn digest still posts Mondays only.
   cron.schedule(
-    "10 8 * * 1",
+    "10 8 * * *",
     () =>
       runLeadsReconcile().catch((e) =>
         log.error("cron.leads_reconcile", { e: String(e) }),
@@ -95,7 +97,7 @@ const tasks = [
     { timezone: TZ },
   ),
   cron.schedule(
-    "12 8 * * 1",
+    "12 8 * * *",
     () =>
       runLeadsInstagramScan().catch((e) =>
         log.error("cron.leads_instagram_scan", { e: String(e) }),
@@ -112,7 +114,7 @@ const tasks = [
     { timezone: TZ },
   ),
   cron.schedule(
-    "20 8 * * 1",
+    "20 8 * * *",
     () =>
       runLeadsIntroPack().catch((e) =>
         log.error("cron.leads_intro_pack", { e: String(e) }),
@@ -129,7 +131,7 @@ const tasks = [
     { timezone: TZ },
   ),
   cron.schedule(
-    "45 8 * * 1",
+    "45 8 * * *",
     () =>
       runChurnRisk().catch((e) =>
         log.error("cron.churn_risk", { e: String(e) }),

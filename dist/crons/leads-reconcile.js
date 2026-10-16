@@ -71,7 +71,7 @@ export function isSuspiciousConversionBatch(wouldArchive, open) {
 function formatConversionBrakeMessage(wouldArchive, open) {
     return (`⚠️ Leads a contactar: ${wouldArchive} de ${open} leads em aberto pareciam ter convertido esta semana — ` +
         `bem mais do que o normal, por isso não arquivei nenhum. ` +
-        `Pode ser um problema nos dados do estúdio; vale a pena ver antes da próxima segunda.`);
+        `Pode ser um problema nos dados do estúdio; vale a pena ver antes da próxima atualização (amanhã de manhã).`);
 }
 function errMsg(err) {
     return err instanceof Error ? err.message : String(err);
