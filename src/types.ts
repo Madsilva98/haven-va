@@ -306,7 +306,8 @@ export interface RecentAction {
 
 // ----- Leads a contactar (email/WhatsApp/Instagram/Intro Pack) -----
 
-export type LeadChannel = "Email" | "WhatsApp" | "Instagram" | "Intro Pack";
+// "Referral" / "Convidado": a "Referidos e convidados" row gone cold (2026-10-16).
+export type LeadChannel = "Email" | "WhatsApp" | "Instagram" | "Intro Pack" | "Referral" | "Convidado";
 
 export type LeadVerification =
   | "Sem correspondência"
@@ -385,6 +386,40 @@ export interface IntroTrackingFields {
   fim: string | null; // empty before the first class; 2-Class with both classes: the 2nd class; otherwise Kenko's expiry (hand extensions included)
   email: string;
   telefone: string | null;
+}
+
+// ----- Referidos e convidados -----
+// Fed by src/crons/referral-guest-leads.ts from va.v_pulse_referral_guest_leads (Madalena,
+// 2026-10-16): people referred with an ambassador's code or brought as a guest, who never paid,
+// pushed to buy an intro pack. "Notas" and "Último contacto" are the founders' and never written.
+
+export type ReferralGuestEstado =
+  | "A contactar"
+  | "Contactado"
+  | "Follow up"
+  | "Perdido"
+  | "Comprou intro pack"
+  | "Convertido"
+  | "Comprou outra coisa"
+  | "Cold lead";
+
+export type ReferralGuestOrigem = "Referral" | "Convidado";
+
+/** Bot-written columns. */
+export interface ReferralGuestFields {
+  origem: ReferralGuestOrigem;
+  trazidaPor: string | null;
+  entrouEm: string; // YYYY-MM-DD
+  aulasFeitas: number;
+  email: string | null;
+  telefone: string | null;
+}
+
+export interface ReferralGuestRow {
+  id: string;
+  memberId: string;
+  nome: string;
+  estado: ReferralGuestEstado | null;
 }
 
 // ----- Embaixadores -----

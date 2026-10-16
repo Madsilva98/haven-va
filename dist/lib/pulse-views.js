@@ -60,6 +60,9 @@ export const PULSE_VIEW = {
     // Read only when they exist (`viewExists`): until then the bot leaves "se fosse hoje" out.
     ambassadorTierToday: "v_pulse_ambassador_tier_today",
     ambassadorTierScale: "v_pulse_ambassador_tier_scale",
+    // Requested from haven-studio 2026-10-16 (Haven-Comms docs/PROMPT-referral-guest-leads-haven-studio.md):
+    // the "Referidos e convidados" rules. Read only once it exists.
+    referralGuestLeads: "v_pulse_referral_guest_leads",
 };
 export function memberIdFromEmail(email) {
     return createHash("md5").update(email.toLowerCase()).digest("hex");
@@ -208,6 +211,11 @@ export async function fetchAmbassadorTierScale() {
     if (!(await viewExists(PULSE_VIEW.ambassadorTierScale)))
         return null;
     return query(`select * from ${PULSE_VIEW.ambassadorTierScale} order by tier`);
+}
+export async function fetchReferralGuestLeads() {
+    if (!(await viewExists(PULSE_VIEW.referralGuestLeads)))
+        return null;
+    return query(`select * from ${PULSE_VIEW.referralGuestLeads}`);
 }
 export async function fetchMembershipStatusAsOf(asOf, memberIds) {
     if (memberIds.length === 0)

@@ -43,6 +43,9 @@ import type {
   ChurnSignalType,
   ChurnStatus,
   AmbassadorFields,
+  ReferralGuestEstado,
+  ReferralGuestFields,
+  ReferralGuestRow,
   AmbassadorNotionRow,
   IntroTrackingEstado,
   IntroTrackingFields,
@@ -78,6 +81,7 @@ const NOTION_LEADS_DB_ID = process.env.NOTION_LEADS_DB_ID;
 const NOTION_CHURN_RISK_DB_ID = process.env.NOTION_CHURN_RISK_DB_ID;
 const NOTION_INTRO_TRACKING_DB_ID = process.env.NOTION_INTRO_TRACKING_DB_ID;
 const NOTION_AMBASSADORS_DB_ID = process.env.NOTION_AMBASSADORS_DB_ID;
+const NOTION_REFERRAL_GUESTS_DB_ID = process.env.NOTION_REFERRAL_GUESTS_DB_ID;
 const NOTION_COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const NOTION_COMPETITOR_INTEL_DB_ID = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
@@ -118,6 +122,7 @@ export async function initialize(): Promise<void> {
     NOTION_CHURN_RISK_DB_ID,
     NOTION_INTRO_TRACKING_DB_ID,
     NOTION_AMBASSADORS_DB_ID,
+    NOTION_REFERRAL_GUESTS_DB_ID,
     NOTION_COMPETITOR_SOURCES_DB_ID,
     NOTION_COMPETITOR_INTEL_DB_ID,
   ]);
@@ -2728,6 +2733,87 @@ async function updateIntroTrackingRow(
   log.info("notion.intro_tracking_updated", { pageId, estado: estado ?? null });
 }
 
+// ----- Referidos e convidados -----
+// One row per person, keyed on "Member ID". The bot writes only its own
+// columns and Estado; "Notas" and "Último contacto" never.
+
+function referralGuestFieldProps(f: ReferralGuestFields): Record<string, unknown> {
+  return {
+    Origem: { select: { name: f.origem } },
+    "Trazida por": richText(f.trazidaPor ?? ""),
+    "Entrou em": { date: { start: f.entrouEm } },
+    "Aulas feitas": { number: f.aulasFeitas },
+    Email: { email: f.email },
+    ...(f.telefone ? { Telefone: { phone_number: f.telefone } } : {}),
+  };
+}
+
+// Every row, any Estado: a closed row is what stops the same person being added again.
+async function getAllReferralGuestRows(): Promise<ReferralGuestRow[]> {
+  if (!NOTION_REFERRAL_GUESTS_DB_ID) return [];
+  const rows: ReferralGuestRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await withRetry("getAllReferralGuestRows", () =>
+      client.dataSources.query({
+        data_source_id: dsId(NOTION_REFERRAL_GUESTS_DB_ID!),
+        start_cursor: cursor,
+      }),
+    );
+    for (const row of res.results) {
+      if (!("properties" in row)) continue;
+      const props = row.properties as Record<string, unknown>;
+      rows.push({
+        id: row.id,
+        memberId: readPlainText(props["Member ID"]).trim(),
+        nome: readPlainText(props["Name"]),
+        estado: readSelectName(props["Estado"]) as ReferralGuestEstado | null,
+      });
+    }
+    cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return rows;
+}
+
+async function createReferralGuestRow(
+  nome: string,
+  memberId: string,
+  fields: ReferralGuestFields,
+  estado: ReferralGuestEstado,
+): Promise<string> {
+  if (!NOTION_REFERRAL_GUESTS_DB_ID) throw new Error("NOTION_REFERRAL_GUESTS_DB_ID not set");
+  const page = await withRetry("createReferralGuestRow", () =>
+    client.pages.create({
+      parent: { type: "data_source_id", data_source_id: dsId(NOTION_REFERRAL_GUESTS_DB_ID!) },
+      properties: {
+        Name: { title: [{ text: { content: nome } }] },
+        "Member ID": richText(memberId),
+        Estado: { select: { name: estado } },
+        ...referralGuestFieldProps(fields),
+      } as Parameters<typeof client.pages.create>[0]["properties"],
+    }),
+  );
+  log.info("notion.referral_guest_created", { pageId: page.id, estado });
+  return page.id;
+}
+
+// Refreshes the bot's columns and, when given, Estado. Never Notas / Último contacto.
+async function updateReferralGuestRow(
+  pageId: string,
+  fields: ReferralGuestFields,
+  estado?: ReferralGuestEstado,
+): Promise<void> {
+  await withRetry("updateReferralGuestRow", () =>
+    client.pages.update({
+      page_id: pageId,
+      properties: {
+        ...referralGuestFieldProps(fields),
+        ...(estado ? { Estado: { select: { name: estado } } } : {}),
+      } as Parameters<typeof client.pages.update>[0]["properties"],
+    }),
+  );
+}
+
 // ----- Embaixadores -----
 // One row per ambassador, keyed on "Member ID". The bot writes only its own
 // columns: "Avisada" never, "Desconto no Kenko" only when the studio view
@@ -3398,6 +3484,9 @@ export {
   getAllAmbassadorRows,
   createAmbassadorRow,
   updateAmbassadorRow,
+  getAllReferralGuestRows,
+  createReferralGuestRow,
+  updateReferralGuestRow,
   // Competitor intel
   getActiveCompetitorSources,
   createCompetitorIntelFinding,
@@ -3487,6 +3576,9 @@ export const notion = {
   getAllAmbassadorRows,
   createAmbassadorRow,
   updateAmbassadorRow,
+  getAllReferralGuestRows,
+  createReferralGuestRow,
+  updateReferralGuestRow,
   // Competitor intel
   getActiveCompetitorSources,
   createCompetitorIntelFinding,

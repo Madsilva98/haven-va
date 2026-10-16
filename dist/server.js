@@ -16,6 +16,7 @@ import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
 import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReceptionHoursSync } from "./crons/reception-hours-sync.js";
+import { run as runReferralGuestLeads } from "./crons/referral-guest-leads.js";
 import { run as runReminders } from "./crons/reminders.js";
 import { run as runTidyMailboxesFeedbackReminder } from "./crons/tidy-mailboxes-feedback-reminder.js";
 import { log } from "./lib/log.js";
@@ -42,6 +43,8 @@ const tasks = [
     cron.schedule("15 8 * * *", () => 
     // The "Tracking intro packs" list replaces the old digest once its DB is configured.
     (process.env.NOTION_INTRO_TRACKING_DB_ID ? runIntroPackTracking() : runIntroPackExpiring()).catch((e) => log.error("cron.intro_pack_expiring", { e: String(e) })), { timezone: TZ }),
+    // "Referidos e convidados": daily; silent unless someone new joined.
+    cron.schedule("18 8 * * *", () => runReferralGuestLeads().catch((e) => log.error("cron.referral_guest_leads", { e: String(e) })), { timezone: TZ }),
     cron.schedule("20 8 * * 1", () => runLeadsIntroPack().catch((e) => log.error("cron.leads_intro_pack", { e: String(e) })), { timezone: TZ }),
     // Ambassador tiers: daily, but posts once a month — when the data reaches the 1st.
     cron.schedule("25 8 * * *", () => runAmbassadorTiers().catch((e) => log.error("cron.ambassador_tiers", { e: String(e) })), { timezone: TZ }),

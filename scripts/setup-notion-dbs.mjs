@@ -29,6 +29,7 @@ const LEADS_DB_ID            = process.env.NOTION_LEADS_DB_ID;
 const CHURN_RISK_DB_ID       = process.env.NOTION_CHURN_RISK_DB_ID;
 const INTRO_TRACKING_DB_ID   = process.env.NOTION_INTRO_TRACKING_DB_ID;
 const AMBASSADORS_DB_ID      = process.env.NOTION_AMBASSADORS_DB_ID;
+const REFERRAL_GUESTS_DB_ID  = process.env.NOTION_REFERRAL_GUESTS_DB_ID;
 const COMPETITOR_SOURCES_DB_ID = process.env.NOTION_COMPETITOR_SOURCES_DB_ID;
 const COMPETITOR_INTEL_DB_ID   = process.env.NOTION_COMPETITOR_INTEL_DB_ID;
 
@@ -258,6 +259,7 @@ const leadsProperties = {
   Telefone: { phone_number: {} },
   Canal: { select: { options: [
     { name: "Email" }, { name: "WhatsApp" }, { name: "Instagram" }, { name: "Intro Pack" },
+    { name: "Referral" }, { name: "Convidado" },
   ] } },
   Motivo: { rich_text: {} },
   Pack: { rich_text: {} },
@@ -319,6 +321,26 @@ const introTrackingProperties = {
   Telefone: { phone_number: {} },
   Notas: { rich_text: {} },
   "Member ID": { rich_text: {} },
+  "Criado em": { created_time: {} },
+};
+
+// ── Referidos e convidados ──────────────────────────────────────────────────
+// src/crons/referral-guest-leads.ts, one row per person (Madalena, 2026-10-16).
+// "Notas" and "Último contacto" are filled by hand, never by the bot.
+const referralGuestsProperties = {
+  "Member ID": { rich_text: {} },
+  Origem: { select: { options: [{ name: "Referral" }, { name: "Convidado" }] } },
+  "Trazida por": { rich_text: {} },
+  "Entrou em": { date: {} },
+  "Aulas feitas": { number: {} },
+  Telefone: { phone_number: {} },
+  Email: { email: {} },
+  Estado: { select: { options: [
+    { name: "A contactar" }, { name: "Contactado" }, { name: "Follow up" }, { name: "Perdido" },
+    { name: "Comprou intro pack" }, { name: "Convertido" }, { name: "Comprou outra coisa" }, { name: "Cold lead" },
+  ] } },
+  Notas: { rich_text: {} },
+  "Último contacto": { date: {} },
   "Criado em": { created_time: {} },
 };
 
@@ -425,6 +447,8 @@ async function main() {
   else console.log("· Clientes em risco DB id not set — skipping");
   if (INTRO_TRACKING_DB_ID)   await setup("Tracking intro packs", INTRO_TRACKING_DB_ID, introTrackingProperties);
   else console.log("· Tracking intro packs DB id not set — skipping");
+  if (REFERRAL_GUESTS_DB_ID)  await setup("Referidos e convidados", REFERRAL_GUESTS_DB_ID, referralGuestsProperties);
+  else console.log("· Referidos e convidados DB id not set — skipping");
   if (AMBASSADORS_DB_ID)      await setup("Embaixadores", AMBASSADORS_DB_ID, ambassadorsProperties);
   else console.log("· Embaixadores DB id not set — skipping");
   if (COMPETITOR_SOURCES_DB_ID) await setup("Fontes Concorrência/Inspiração", COMPETITOR_SOURCES_DB_ID, competitorSourcesProperties);

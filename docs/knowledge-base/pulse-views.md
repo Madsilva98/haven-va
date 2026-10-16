@@ -48,6 +48,7 @@ Gotchas:
 | Ambassador referrals (drill-down) | `v_pulse_ambassador_referrals` | One row per referral; `excluded_reason` NULL = it counts. `active_on_data_as_of` is today's state, not the 1st's. |
 | Ambassador tier if the count were today | `v_pulse_ambassador_tier_today` | **Requested** from haven-studio 2026-10-15 (Haven-Comms `docs/PROMPT-ambassador-pause-and-discount-haven-studio.md`); read only if it exists (`viewExists`). Same columns as `_tier_monthly` at `data_as_of`, plus `discount_in_kenko` (the discount really applied in Kenko, null when the import lacks it). |
 | Ambassador tier scale (count → tier → label) | `v_pulse_ambassador_tier_scale` | **Requested** with the view above. The rule as data; the bot uses it only for "if this person leaves, which tier?". |
+| Referrals and guests who never paid ("Referidos e convidados") | `v_pulse_referral_guest_leads` | **Requested** from haven-studio 2026-10-16 (Haven-Comms `docs/PROMPT-referral-guest-leads-haven-studio.md`); read only if it exists. One row per person, `state` open / bought_intro / converted / bought_other / cold. See `referral-guest-leads.md`. |
 | The ledger of wrong numbers | `v_pulse_known_cases` | Open first. Read it before changing any studio definition. |
 
 Two rules every reader follows:
