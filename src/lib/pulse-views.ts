@@ -65,6 +65,9 @@ export const PULSE_VIEW = {
   // Read only when they exist (`viewExists`): until then the bot leaves "se fosse hoje" out.
   ambassadorTierToday: "v_pulse_ambassador_tier_today",
   ambassadorTierScale: "v_pulse_ambassador_tier_scale",
+  // Requested from haven-studio 2026-10-16 (Haven-Comms docs/PROMPT-referral-guest-leads-haven-studio.md):
+  // the "Referidos e convidados" rules. Read only once it exists.
+  referralGuestLeads: "v_pulse_referral_guest_leads",
 } as const;
 
 export type PulseViewName = (typeof PULSE_VIEW)[keyof typeof PULSE_VIEW];
@@ -568,6 +571,31 @@ export interface AmbassadorTierScaleRow {
 export async function fetchAmbassadorTierScale(): Promise<AmbassadorTierScaleRow[] | null> {
   if (!(await viewExists(PULSE_VIEW.ambassadorTierScale))) return null;
   return query<AmbassadorTierScaleRow>(`select * from ${PULSE_VIEW.ambassadorTierScale} order by tier`);
+}
+
+/**
+ * v_pulse_referral_guest_leads: one row per person referred with an ambassador's code or brought
+ * to a class as a guest, who had never paid before (window from 2026-08-17). `state` is the view's
+ * rule, as of data_as_of. Null when the view doesn't exist yet.
+ */
+export type ReferralGuestState = "open" | "bought_intro" | "converted" | "bought_other" | "cold";
+export interface ReferralGuestLeadRow {
+  member_id: string;
+  origin: "referral" | "guest";
+  brought_by_member_id: string | null;
+  brought_by_name: string | null;
+  entered_on: string;
+  guest_classes: number;
+  classes_done: number;
+  intro_bought_on: string | null;
+  membership_on: string | null;
+  other_purchase_on: string | null;
+  state: ReferralGuestState;
+  data_as_of: string;
+}
+export async function fetchReferralGuestLeads(): Promise<ReferralGuestLeadRow[] | null> {
+  if (!(await viewExists(PULSE_VIEW.referralGuestLeads))) return null;
+  return query<ReferralGuestLeadRow>(`select * from ${PULSE_VIEW.referralGuestLeads}`);
 }
 
 /**
