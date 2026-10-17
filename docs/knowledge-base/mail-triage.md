@@ -13,6 +13,8 @@ It replaced two crons on 2026-09-30 (founder's call: "we need to make them both 
 
 The old docs [tidy-mailboxes.md](tidy-mailboxes.md) and [outlook-partnerships-sync.md](outlook-partnerships-sync.md) still hold the history behind every rule below. The rules were carried over, not reinvented.
 
+> **Clean step stopped 2026-10-17** (founder: "pára o tidy bot"). Off unless `MAIL_TRIAGE_CLEAN=true` in `data/.env`. Without it, geral@/hello@ are still recorded in Notion (same rules), but their Inbox is never listed: nothing is archived, no `TidyBot:` category is set, and no AI call is spent on a clean verdict. The invoice forward also needs the Inbox, so it stays off too (all forwards were already off since 2026-10-15). To resume: set the variable, then `docker compose up -d --force-recreate`.
+
 ## Scope (founder decisions, 2026-09-30)
 
 | Mailboxes | Record in Notion | Forward | Clean (archive) |

@@ -121,6 +121,7 @@ beforeEach(() => {
   process.env.NOTION_PARTNER_DB_ID = "p";
   process.env.NOTION_INFLUENCER_DB_ID = "i";
   process.env.NOTION_SUPPLIER_DB_ID = "s";
+  process.env.MAIL_TRIAGE_CLEAN = "true";
   outlookMock.isAuthenticated.mockReturnValue(true);
   outlookMock.getMyEmail.mockResolvedValue("madalena@thehavenpilates.pt");
   outlookMock.listSentMessages.mockResolvedValue([]);
@@ -220,6 +221,26 @@ describe("mail-triage: record → forward → clean, one pass", () => {
 
     expect(notionMock.createPartner).toHaveBeenCalledTimes(1);
     expect(outlookMock.archiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("clean step off (MAIL_TRIAGE_CLEAN unset): geral@ is still recorded but never archived or tagged", async () => {
+    delete process.env.MAIL_TRIAGE_CLEAN;
+    mailboxes({
+      [GERAL]: [
+        msg({ id: "p", from: { name: "Ana", email: "ana@studio.pt" } }),
+        msg({ id: "o", from: { name: "X", email: "x@example.com" } }),
+      ],
+    });
+    classifyMail.mockImplementation(async (input: { fromEmail: string }) =>
+      input.fromEmail === "ana@studio.pt" ? verdict({ tipo: "parceiro" }) : verdict({ tipo: "outro", needsAction: false }),
+    );
+
+    await run();
+
+    expect(notionMock.createPartner).toHaveBeenCalledTimes(1);
+    expect(outlookMock.listInboxMessages).not.toHaveBeenCalled();
+    expect(outlookMock.archiveMessage).not.toHaveBeenCalled();
+    expect(outlookMock.setMessageCategories).not.toHaveBeenCalled();
   });
 
   it("personal mailboxes are never cleaned", async () => {
