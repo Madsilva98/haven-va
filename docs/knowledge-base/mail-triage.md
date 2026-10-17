@@ -1,6 +1,6 @@
 # Mail-triage cron
 
-`src/crons/mail-triage.ts`, daily at 07:00 Europe/Lisbon. **One** pass over the Outlook mailboxes that does, per email and in this order:
+`src/crons/mail-triage.ts`, run by hand since 2026-10-17 (was daily at 07:00 Europe/Lisbon). **One** pass over the Outlook mailboxes that does, per email and in this order:
 
 1. **Record** partners, influencers and suppliers in Notion.
 2. **Forward** to the right address.
@@ -12,6 +12,20 @@ It replaced two crons on 2026-09-30 (founder's call: "we need to make them both 
 - **`sync-partnerships`** (weekly, Monday): recorded partners/influencers/suppliers in Notion. It never read the Archive folder, so anything `tidy-mailboxes` archived first never reached Notion. That's what happened with the Fit4Life/Stages supplier negotiation (2026-09-29). A partner email in geral@ was also classified by both, so it was paid for twice.
 
 The old docs [tidy-mailboxes.md](tidy-mailboxes.md) and [outlook-partnerships-sync.md](outlook-partnerships-sync.md) still hold the history behind every rule below. The rules were carried over, not reinvented.
+
+> **Not scheduled since 2026-10-17** (founder: "quero que tudo isto pára de correr porque gasta dinheiro da API. quero correr eu pontualmente na sessão"). `src/server.ts` no longer registers it; the code, rules and state file are unchanged, so a hand run picks up where the last one stopped (per-mailbox watermark). See "Running it by hand" below.
+
+## Running it by hand
+
+From a Claude Code session, against the running container (same env, same `DATA_DIR` state):
+
+```bash
+# dry run first: the AI calls still happen (they cost), but nothing is written
+ssh haven-nas "cd /volume1/docker/haven-va/code/haven-va && sudo -n /usr/local/bin/docker compose exec -T -e MAIL_TRIAGE_DRY_RUN=true haven-va node -e \"Promise.all([import('./dist/notion.js'), import('./dist/crons/mail-triage.js')]).then(async ([n, m]) => { await n.initialize(); await m.run(); process.exit(0); })\""
+# real run: the same command without -e MAIL_TRIAGE_DRY_RUN=true
+```
+
+The run ends with one `mail_triage.done` log line with the counts (classified, recorded, forwarded, archived). The first hand run after a long gap reads everything since the last watermark, so it does more AI calls than one daily run used to.
 
 ## Scope (founder decisions, 2026-09-30)
 

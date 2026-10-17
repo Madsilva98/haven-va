@@ -13,7 +13,6 @@ import { run as runIntroPackTracking } from "./crons/intro-pack-tracking.js";
 import { run as runLeadsInstagramScan } from "./crons/leads-instagram-scan.js";
 import { run as runLeadsIntroPack } from "./crons/leads-intro-pack.js";
 import { run as runLeadsReconcile } from "./crons/leads-reconcile.js";
-import { run as runMailTriage } from "./crons/mail-triage.js";
 import { run as runPipelineAlerts } from "./crons/pipeline-alerts.js";
 import { run as runReceptionHoursSync } from "./crons/reception-hours-sync.js";
 import { run as runReferralGuestLeads } from "./crons/referral-guest-leads.js";
@@ -32,10 +31,9 @@ const tasks = [
     cron.schedule("0 8 * * *", () => runFounderMeetingCheck().catch((e) => log.error("cron.founder_meeting_check", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * *", () => runFounderMeetingBalanceCheck().catch((e) => log.error("cron.founder_meeting_balance_check", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 8 * * 1-5", () => runPipelineAlerts().catch((e) => log.error("cron.pipeline", { e: String(e) })), { timezone: TZ }),
-    // One daily email pass: record in Notion → forward → clean geral@/hello@.
-    // Replaced tidy-mailboxes (07:00 daily) + sync-partnerships (08:14 Mon)
-    // on 2026-09-30 — see src/crons/mail-triage.ts.
-    cron.schedule("0 7 * * *", () => runMailTriage().catch((e) => log.error("cron.mail_triage", { e: String(e) })), { timezone: TZ }),
+    // mail-triage (record → forward → clean geral@/hello@, was 07:00 daily) is
+    // NOT scheduled since 2026-10-17 — founder: stop spending API on it, run it
+    // by hand from a session instead. See docs/knowledge-base/mail-triage.md.
     cron.schedule("0 8 * * *", () => runBirthdays().catch((e) => log.error("cron.birthdays", { e: String(e) })), { timezone: TZ }),
     cron.schedule("0 9 1 * *", () => runTidyMailboxesFeedbackReminder().catch((e) => log.error("cron.tidy_mailboxes_feedback_reminder", { e: String(e) })), { timezone: TZ }),
     cron.schedule("10 8 * * 1", () => runLeadsReconcile().catch((e) => log.error("cron.leads_reconcile", { e: String(e) })), { timezone: TZ }),
