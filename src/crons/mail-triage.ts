@@ -39,13 +39,6 @@
  *      arquivado", the per-run archive cap, the 7-day recheck, and a newer
  *      Sent Items reply re-triggers the verdict.
  *
- *      **Stopped 2026-10-17 (founder's call: "pára o tidy bot") —
- *      off unless MAIL_TRIAGE_CLEAN=true.** The clean mailboxes are still
- *      read and recorded (record/forward rules unchanged); their Inbox is just
- *      never listed, so nothing is archived or tagged. Set
- *      MAIL_TRIAGE_CLEAN=true in data/.env (and recreate the container) to
- *      resume.
- *
  * MAIL_TRIAGE_DRY_RUN=true runs everything (including the AI calls) but
  * writes nothing anywhere — no Notion, no forward, no archive, no category,
  * no state file — and logs mail_triage.would_* instead.
@@ -124,10 +117,6 @@ function errMsg(err: unknown): string {
 
 function isDryRun(): boolean {
   return process.env.MAIL_TRIAGE_DRY_RUN === "true";
-}
-
-function isCleanEnabled(): boolean {
-  return process.env.MAIL_TRIAGE_CLEAN === "true";
 }
 
 function list(envValue: string | undefined): string[] {
@@ -518,7 +507,7 @@ export async function run(): Promise<void> {
       continue;
     }
 
-    let clean = isCleanEnabled() && ctx.cleanMailboxes.has(mailbox);
+    let clean = ctx.cleanMailboxes.has(mailbox);
     let inbox: OutlookMessage[] = [];
     const latestReply = new Map<string, OutlookMessage>();
     if (clean) {
